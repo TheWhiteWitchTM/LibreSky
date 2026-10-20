@@ -128,56 +128,66 @@ img { max-width: 100%; }
   z-index: 8;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
-  min-height: 56px;
-  padding: 0 12px 0 8px;
+  min-height: 52px;
+  padding: 0 8px 0 4px;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
-.app-top-main {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-.top-brand {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-}
-.top-brand:hover { background: var(--hover); }
-.top-nav {
+.headline {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex: 1;
 }
-.top-nav::-webkit-scrollbar { display: none; }
+.page-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  color: var(--text);
+}
+.page-icon .ico { width: 26px; height: 26px; }
+.headline h1 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
 
 .shell {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 680px) minmax(var(--rail), 1fr);
+  grid-template-columns: minmax(var(--nav), 1fr) minmax(0, 680px) minmax(var(--rail), 1fr);
   justify-content: stretch;
   align-items: start;
-  min-height: calc(100vh - var(--top-h, 57px));
+  min-height: calc(100vh - var(--top-h, 52px));
 }
 
-.right {
+.left, .right {
   position: sticky;
-  top: var(--top-h, 57px);
-  height: calc(100vh - var(--top-h, 57px));
+  top: var(--top-h, 52px);
+  height: calc(100vh - var(--top-h, 52px));
   overflow: auto;
   min-width: 0;
+}
+.left {
+  justify-self: end;
+  width: var(--nav);
+  padding: 8px 10px 16px;
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+}
+.right {
   justify-self: start;
   width: var(--rail);
   padding: 8px 16px 24px;
@@ -185,6 +195,8 @@ img { max-width: 100%; }
 }
 
 .mark { width: 32px; height: 32px; display: block; }
+.brand { display: flex; align-items: center; gap: 10px; width: max-content; padding: 10px 12px; border-radius: 999px; }
+.brand:hover { background: var(--hover); }
 .brand-name { font-size: 22px; font-weight: 800; letter-spacing: -0.04em; }
 .brand-name span { color: var(--blue); }
 
@@ -192,15 +204,14 @@ img { max-width: 100%; }
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: auto;
+  gap: 16px;
+  width: 100%;
   min-width: 0;
-  margin: 0;
-  padding: 8px 12px;
+  margin: 2px 0;
+  padding: 10px 16px;
   border-radius: 999px;
-  font-size: 15px;
+  font-size: 19px;
   font-weight: 500;
-  white-space: nowrap;
 }
 .nav-pill {
   margin-left: auto;
@@ -211,13 +222,12 @@ img { max-width: 100%; }
   font-size: 12px;
   font-weight: 800;
 }
-.nav-link .ico { width: 22px; height: 22px; }
+.nav-link .ico { width: 26px; height: 26px; }
 .nav-link:hover { background: var(--hover); }
 .nav-link.active {
   font-weight: 800;
   background: color-mix(in srgb, var(--blue) 16%, transparent);
 }
-.top-nav .badge { left: 16px; top: 2px; }
 .badge {
   position: absolute;
   left: 28px;
@@ -252,13 +262,12 @@ img { max-width: 100%; }
 .post-btn:hover { background: var(--blue-press); }
 
 .account {
+  margin-top: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: auto;
-  max-width: 180px;
-  margin: 0;
-  padding: 4px 10px 4px 4px;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -270,35 +279,15 @@ img { max-width: 100%; }
 .account-text span, .handle, .dim, .domain, .time, .replying { color: var(--text-2); }
 .account-text strong { font-size: 15px; }
 
-.center { min-width: 0; min-height: calc(100vh - var(--top-h, 57px)); border-left: 1px solid var(--border); border-right: 1px solid var(--border); grid-column: 2; }
+.center { min-width: 0; min-height: calc(100vh - var(--top-h, 52px)); border-left: 1px solid var(--border); border-right: 1px solid var(--border); grid-column: 2; }
 .sticky-head {
   position: sticky;
-  top: var(--top-h, 57px);
+  top: var(--top-h, 52px);
   z-index: 5;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.head-mark {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-}
-.head-mark:hover { background: var(--hover); }
-.head-mark .mark { width: 28px; height: 28px; }
-.title-row { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 0 12px 0 8px; }
-.title-row h1 {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 20px;
-  letter-spacing: -0.02em;
-}
+.sticky-head:has(#tabs[hidden]) { display: none; }
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .tip, .head-post, .head-help, .head-config {
   display: inline-flex;
@@ -2146,10 +2135,10 @@ html[data-reader="on"] .post .sr-name {
 
 
 @media (max-width: 1100px) {
-  .shell { grid-template-columns: minmax(0, 1fr) minmax(0, 680px) minmax(0, 1fr); }
-  .right, .nav-link .label, .nav-pill, .soon-tip { display: none; }
-  .nav-link { padding: 8px; }
-  .top-nav .badge { left: 18px; top: 0; }
+  .shell { grid-template-columns: 84px minmax(0, 680px); }
+  .left { width: 84px; justify-self: stretch; padding-inline: 6px; align-items: center; }
+  .right, .brand-name, .nav-link .label, .nav-pill, .account-text, .post-btn span, .soon-tip { display: none; }
+  .nav-link.soon:hover .soon-tip { display: block; left: 56px; }
   .icon-btn.soon:hover .soon-tip,
   .icon-btn.soon:focus-visible .soon-tip {
     display: block;
@@ -2158,10 +2147,10 @@ html[data-reader="on"] .post .sr-name {
     top: calc(100% + 6px);
     transform: none;
   }
-}
-@media (max-width: 860px) {
-  .account-text { display: none; }
-  .app-top .account { padding: 4px; max-width: none; }
+  .nav-link, .brand, .account { width: 52px; justify-content: center; padding-inline: 0; }
+  .post-btn { width: 52px; margin-inline: 0; }
+  .post-btn .ico { display: block; }
+  .badge { left: 28px; }
 }
 
 @media (max-width: 640px) {
@@ -2170,9 +2159,7 @@ html[data-reader="on"] .post .sr-name {
 }
 @media (max-width: 720px) {
   .shell { display: block; }
-  .top-nav { display: none; }
-  .top-brand { display: flex; }
-  .head-mark { display: none; }
+  .left { display: none; }
   .center { border: 0; max-width: 640px; margin: 0 auto; min-height: 0; }
   .tabbar {
     position: fixed;

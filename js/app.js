@@ -232,6 +232,17 @@ function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {
   </div>`;
 }
 
+function paintPageIcon(nav) {
+  const slot = $('page-icon');
+  if (!slot) return;
+  const key = MORE_NAV.has(nav) ? 'more' : nav;
+  const source = key === 'settings'
+    ? $('head-config')?.querySelector('.ico')
+    : document.querySelector(`nav.left [data-nav="${CSS.escape(key)}"] .ico`);
+  if (source) slot.replaceChildren(source.cloneNode(true));
+  else slot.replaceChildren();
+}
+
 function measureHead() {
   const top = document.querySelector('.app-top');
   const head = document.querySelector('.sticky-head');
@@ -258,6 +269,7 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
     else config.removeAttribute('aria-current');
   }
   const current = MORE_NAV.has(nav) ? 'more' : nav;
+  paintPageIcon(nav);
   document.querySelectorAll('[data-nav]').forEach((link) => {
     const on = link.dataset.nav === current;
     link.classList.toggle('active', on);
@@ -3396,6 +3408,7 @@ function editFingerprint(dialog) {
 
 function openComposer({ reply = null, quote = null, text = '', edit = null } = {}) {
   if (!signedIn()) return requireSignIn();
+  clearComposeTypos();
   const dialog = $('compose');
   const source = edit?.record ? editDraft(edit) : null;
   const replySource = source?.reply || reply;
@@ -3626,6 +3639,36 @@ function composeTypos(area) {
   return new Set(typoWords(area?.value || '', langs, caret));
 }
 
+let typoTimer = 0;
+let settledTypos = new Set();
+const TYPO_SETTLE_MS = 600;
+
+function sameWords(a, b) {
+  if (a.size !== b.size) return false;
+  for (const word of a) if (!b.has(word)) return false;
+  return true;
+}
+
+function clearComposeTypos() {
+  clearTimeout(typoTimer);
+  typoTimer = 0;
+  settledTypos = new Set();
+  paintComposeWarn(settledTypos);
+}
+
+function scheduleComposeTypos(area, pre) {
+  clearTimeout(typoTimer);
+  typoTimer = setTimeout(() => {
+    typoTimer = 0;
+    if (!$('compose')?.open || !area) return;
+    const next = composeTypos(area);
+    const same = sameWords(next, settledTypos);
+    settledTypos = next;
+    paintComposeWarn(settledTypos);
+    if (!same) paintFieldHighlight(area, pre, { settled: true });
+  }, TYPO_SETTLE_MS);
+}
+
 function paintComposeWarn(typos) {
   const send = $('compose-send');
   if (!send) return;
@@ -3635,12 +3678,12 @@ function paintComposeWarn(typos) {
   else send.removeAttribute('title');
 }
 
-function paintFieldHighlight(area, pre) {
+function paintFieldHighlight(area, pre, options = {}) {
   if (!area || !pre) return;
   const value = area.value || '';
   const start = area.selectionStart ?? 0;
   const end = area.selectionEnd ?? 0;
-  const typos = area.id === 'compose-text' ? composeTypos(area) : null;
+  const typos = area.id === 'compose-text' ? settledTypos : null;
   const opts = { links: false, breaks: false, typos };
   const markSelection = area.id !== 'compose-text' && document.activeElement === area && end > start;
   const body = markSelection
@@ -3648,7 +3691,9 @@ function paintFieldHighlight(area, pre) {
     : richText(value, null, opts);
   pre.innerHTML = `${body}\n`;
   pre.scrollTop = area.scrollTop;
-  if (area.id === 'compose-text') paintComposeWarn(typos);
+  if (area.id !== 'compose-text') return;
+  if (options.settled) paintComposeWarn(typos);
+  else scheduleComposeTypos(area, pre);
 }
 
 function hideFloat(node) {
@@ -6962,6 +7007,7 @@ function bind() {
   });
   $('compose').addEventListener('close', () => {
     stopDictate();
+    clearComposeTypos();
     hideSuggest();
     closePicker();
     const leave = $('compose-leave');
