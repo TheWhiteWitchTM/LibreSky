@@ -1,6 +1,6 @@
 # LibreSky Corporate
 
-![LibreSky Corporate. Highlighted features: self-hosted, your Pi, your services. Coming soon.](assets/banner-corporate.png)
+![LibreSky Corporate, coming soon. Self-hosted, your Pi, and your services.](assets/banner-corporate.png)
 
 **Coming soon.**
 

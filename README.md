@@ -41,6 +41,6 @@ The pages and scripts are about 1.6 MB. A small Raspberry Pi can host them. The 
 
 MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it.
 
-[![LibreSky Corporate. Highlighted features: self-hosted, your Pi, your services. Coming soon.](assets/banner-corporate.png)](CORPORATE.md)
+[![LibreSky Corporate, coming soon. Self-hosted, your Pi, and your services.](assets/banner-corporate.png)](CORPORATE.md)
 
 [LibreSky Corporate](CORPORATE.md) is the custom edition. You host the services. A small Pi can hold the client. That one is coming soon.

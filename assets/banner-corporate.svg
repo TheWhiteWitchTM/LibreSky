@@ -36,9 +36,9 @@
 
   <ellipse cx="520" cy="430" rx="500" ry="86" fill="url(#spot)"/>
 
-  <text x="76" y="156" fill="#f3d78a" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="22" font-weight="700" letter-spacing="6">CORPORATE</text>
-  <text x="74" y="268" fill="#ffffff" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="100" font-weight="700">LibreSky</text>
-  <text x="78" y="322" fill="#e7f2ff" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="30" font-weight="500">Self-hosted services. Small enough for a Pi.</text>
+  <text x="76" y="148" fill="#f3d78a" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="22" font-weight="700" letter-spacing="5.5">COMING SOON</text>
+  <text x="74" y="258" fill="#ffffff" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="92" font-weight="700">Corporate</text>
+  <text x="78" y="312" fill="#e7f2ff" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="28" font-weight="600">LibreSky, on hardware you keep</text>
 
   <g filter="url(#soft)" font-family="Liberation Sans, Noto Sans, sans-serif" font-size="26" font-weight="700">
     <g transform="translate(76,360)">
@@ -58,12 +58,6 @@
       <circle cx="38" cy="38" r="9" fill="none" stroke="#0c335f" stroke-width="2.3"/>
       <path d="M38 26.5v3.2M38 46.3v3.2M26.5 38h3.2M46.3 38h3.2M29.6 29.6l2.2 2.2M44.2 44.2l2.2 2.2M46.4 29.6l-2.2 2.2M31.8 44.2l-2.2 2.2" stroke="#0c335f" stroke-width="1.8" stroke-linecap="round"/>
       <text x="58" y="46" fill="#0c335f">Your services</text>
-    </g>
-    <g transform="translate(786,360)">
-      <rect width="230" height="72" rx="36" fill="#f3d78a" stroke="#fff6d2" stroke-width="3"/>
-      <circle cx="40" cy="36" r="9" fill="none" stroke="#1a3358" stroke-width="2.3"/>
-      <path d="M40 30.5V36l4 2.4" fill="none" stroke="#1a3358" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="58" y="46" fill="#1a3358">Coming soon</text>
     </g>
   </g>
 

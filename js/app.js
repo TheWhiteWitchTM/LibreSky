@@ -172,7 +172,7 @@ function applyA11y(prefs = a11yPrefs()) {
   else delete document.documentElement.dataset.reader;
 }
 
-const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'packs', 'pack', 'downloads']);
+const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'packs', 'pack']);
 
 function syncStrip(scroller) {
   const strip = scroller?.closest?.('.tab-strip');
@@ -236,9 +236,7 @@ function paintPageIcon(nav) {
   const slot = $('page-icon');
   if (!slot) return;
   const key = MORE_NAV.has(nav) ? 'more' : nav;
-  const source = key === 'settings'
-    ? $('head-config')?.querySelector('.ico')
-    : document.querySelector(`nav.left [data-nav="${CSS.escape(key)}"] .ico`);
+  const source = document.querySelector(`[data-nav="${CSS.escape(key)}"] .ico`);
   if (source) slot.replaceChildren(source.cloneNode(true));
   else slot.replaceChildren();
 }
@@ -263,18 +261,13 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
     bar.innerHTML = tabStrip(tabs, { menuAct, menuLabel });
     watchStrips(bar);
   }
-  const config = $('head-config');
-  if (config) {
-    if (nav === 'settings') config.setAttribute('aria-current', 'page');
-    else config.removeAttribute('aria-current');
-  }
   const current = MORE_NAV.has(nav) ? 'more' : nav;
   paintPageIcon(nav);
   document.querySelectorAll('[data-nav]').forEach((link) => {
     const on = link.dataset.nav === current;
     link.classList.toggle('active', on);
     if (on) link.setAttribute('aria-current', 'page');
-    else if (link.id !== 'head-config') link.removeAttribute('aria-current');
+    else link.removeAttribute('aria-current');
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
   measureHead();
@@ -3091,6 +3084,12 @@ async function saveDesktopZip(file, button) {
   }
 }
 
+function showSupport() {
+  generation += 1;
+  setChrome({ title: 'Support', nav: 'support', back: true });
+  $('view').innerHTML = `<div class="support-page"><h2>Support development</h2><p>LibreSky is free. A payment helps the work continue: the browser client, the desktop apps, and what comes next.</p><p><a class="primary support-pay" href="https://www.paypal.com/ncp/payment/4P85EQRES3RGU" target="_blank" rel="noopener noreferrer">PayPal</a></p><p class="dim">PayPal opens in a new tab. LibreSky does not see the payment.</p></div>`;
+}
+
 function showDownloads() {
   generation += 1;
   setChrome({ title: 'Download', nav: 'downloads', back: true });
@@ -3272,6 +3271,7 @@ function goBack() {
 function route() {
   noteNav();
   closeMenu();
+  closeAppMenu();
   hideSuggest();
   closeHover();
   stopSpeech();
@@ -3298,6 +3298,7 @@ function route() {
   if (a === 'packs') return showPacks();
   if (a === 'pack' && b) return showPack(b);
   if (a === 'downloads') return showDownloads();
+  if (a === 'support') return showSupport();
   if (a === 'settings') return showSettings();
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
@@ -4222,6 +4223,34 @@ async function publish(event) {
   }
 }
 
+function closeAppMenu(focus) {
+  const menu = $('app-menu');
+  const button = $('app-menu-btn');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  button?.setAttribute('aria-expanded', 'false');
+  if (focus) button?.focus();
+}
+
+function toggleAppMenu() {
+  const menu = $('app-menu');
+  const button = $('app-menu-btn');
+  if (!menu || !button) return;
+  if (!menu.hidden) {
+    closeAppMenu();
+    return;
+  }
+  closeMenu();
+  const mark = document.getElementById('alpha-mark');
+  if (mark?.classList.contains('is-open')) {
+    mark.classList.remove('is-open');
+    mark.setAttribute('aria-expanded', 'false');
+  }
+  hideTip();
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+}
+
 function closeMenu() {
   const menu = $('menu');
   if (!menu) return;
@@ -4275,7 +4304,6 @@ const MORE_LINKS = [
   { id: 'go-lists', label: 'Lists' },
   { id: 'go-feeds', label: 'Feeds' },
   { id: 'go-packs', label: 'Starter packs' },
-  { id: 'go-downloads', label: 'Download apps' },
   { id: 'go-settings', label: 'Settings' },
   { id: 'go-about', label: 'About' },
   { id: 'go-privacy', label: 'Privacy' },
@@ -6804,6 +6832,12 @@ function dismissComposer(mode) {
 
 function onKey(event) {
   if (event.key === 'Escape') {
+    const appMenu = $('app-menu');
+    if (appMenu && !appMenu.hidden) {
+      event.preventDefault();
+      closeAppMenu(true);
+      return;
+    }
     const menu = $('menu');
     if (menu && !menu.hidden) {
       event.preventDefault();
@@ -6899,6 +6933,7 @@ function bind() {
   window.addEventListener('scroll', (event) => {
     closeHover();
     if (event.target?.id !== 'menu') closeMenu();
+    closeAppMenu();
     placeFresh();
   }, true);
   document.addEventListener('visibilitychange', () => {
@@ -6906,12 +6941,18 @@ function bind() {
   });
   window.addEventListener('resize', () => {
     closeMenu();
+    closeAppMenu();
     placeFresh();
     measureHead();
     document.querySelectorAll('.tab-scroller').forEach((scroller) => syncStrip(scroller));
   });
   $('menu').addEventListener('click', onMenu);
+  $('app-menu-btn')?.addEventListener('click', () => toggleAppMenu());
+  $('app-menu')?.addEventListener('click', (event) => {
+    if (event.target.closest('a, button')) closeAppMenu();
+  });
   document.addEventListener('click', (event) => {
+    if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
     if (!event.target.closest('#hovercard') && !actorFromLink(event.target)) closeHover();
@@ -7620,6 +7661,7 @@ function bindAlphaDoor() {
   mark.addEventListener('click', () => {
     const open = mark.classList.toggle('is-open');
     mark.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) closeAppMenu();
     play();
   });
   document.addEventListener('pointerdown', () => {
