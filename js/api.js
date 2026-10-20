@@ -286,6 +286,17 @@ export function getSuggestions(signal) {
   return xrpc('app.bsky.actor.getSuggestions', { params: { limit: 5 }, signal, auth: 'required' });
 }
 
+export async function getTrends(limit = 25, signal) {
+  const run = (auth) => xrpc('app.bsky.unspecced.getTrends', { params: { limit }, signal, auth });
+  try {
+    return await run();
+  } catch (error) {
+    if (error?.name === 'AbortError' || signal?.aborted) throw error;
+    if (!getOauth() && !getPassword()) throw error;
+    return run('public');
+  }
+}
+
 export function getNotifications(cursor, signal, reasons) {
   return xrpc('app.bsky.notification.listNotifications', {
     params: { limit: 30, cursor, reasons },

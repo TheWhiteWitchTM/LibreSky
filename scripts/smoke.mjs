@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatHeaderHtml, convoHtml, feedHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts } from '../js/render.js';
+import { chatHeaderHtml, convoHtml, feedHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, ownUnread, parseCallMessage, richText, xStatusParts } from '../js/util.js';
 
@@ -98,6 +98,51 @@ assert.match(rendered, /class="action repost"/);
 assert.match(rendered, /data-act="share"/);
 assert.match(rendered, /class="action-group like/);
 assert.match(rendered, /class="name"/);
+const savedPost = postHtml({
+  post: {
+    uri: 'at://did:x/app.bsky.feed.post/1',
+    cid: 'cid',
+    author: { did: 'did:x', handle: 'me.bsky.social' },
+    record: { text: 'saved', createdAt: '2026-10-20T00:00:00.000Z' },
+  },
+}, { bookmarkRemove: true });
+assert.match(savedPost, /data-act="remove-bookmark"/);
+assert.match(savedPost, /class="danger mini"/);
+const goneChat = convoHtml({
+  id: 'c1',
+  members: [
+    { did: 'did:gone', displayName: 'Deleted account' },
+    { did: 'did:me', handle: 'me.bsky.social', displayName: 'Me' },
+  ],
+}, 'did:me');
+assert.match(goneChat, /data-act="leave-convo"/);
+assert.match(goneChat, /class="danger mini"/);
+const madeTrend = trendsHtml([{
+  displayName: 'Steam <Next>',
+  description: 'Players share demos.',
+  link: '/profile/did:plc:abc/feed/d3c1bec66421',
+  postCount: 190109,
+  status: 'hot',
+  category: 'entertainment',
+  actors: [{ displayName: 'Ada', handle: 'ada.bsky.social', avatar: 'https://cdn.example/a.jpg' }],
+}]);
+assert.match(madeTrend, /Steam &lt;Next&gt;/);
+assert.match(madeTrend, /Entertainment · Hot/);
+assert.match(madeTrend, /190K posts/);
+assert.match(madeTrend, /#\/feed\/at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp\.bsky\.feed\.generator%2Fd3c1bec66421/);
+assert.match(madeTrend, /class="trend-desc"/);
+assert.doesNotMatch(madeTrend, /<script/i);
+const compactTrend = trendsHtml([{
+  displayName: 'Cats',
+  description: 'Should stay off the rail.',
+  link: 'nope',
+  postCount: 12,
+  category: 'culture',
+}], { compact: true });
+assert.match(compactTrend, /#\/search\/Cats/);
+assert.match(compactTrend, /Culture · Trending/);
+assert.doesNotMatch(compactTrend, /trend-desc/);
+assert.doesNotMatch(compactTrend, /Should stay/);
 assert.doesNotMatch(rendered, /<script/i);
 const handle = payload.feed[0].post.author.handle;
 assert.match(rendered, new RegExp(handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -155,6 +200,18 @@ assert.match(index, /rel="canonical"/);
 assert.match(index, /G-13S6Z9KCX9/);
 assert.match(index, /assets\/banner.png/);
 assert.match(index, /id="manage-form"/);
+assert.match(index, /class="tip"/);
+assert.match(index, /Buy me a coffee/);
+assert.match(index, /https:\/\/www\.paypal\.com\/ncp\/payment\/4P85EQRES3RGU/);
+const trendPayload = await fetch('https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrends?limit=8').then((res) => {
+  if (!res.ok) throw new Error(`Trends returned ${res.status}`);
+  return res.json();
+});
+assert.ok(trendPayload.trends?.length, 'Trends returned nothing');
+const liveTrends = trendsHtml(trendPayload.trends);
+assert.match(liveTrends, /class="trend"/);
+assert.match(liveTrends, /#\/feed\//);
+assert.doesNotMatch(liveTrends, /<script/i);
 const robots = await readFile(path.join(root, 'robots.txt'), 'utf8');
 const sitemap = await readFile(path.join(root, 'sitemap.xml'), 'utf8');
 assert.match(robots, /Sitemap: https:\/\/thewhitewitchtm\.github\.io\/LibreSky\/sitemap\.xml/);
@@ -166,6 +223,8 @@ assert.match(appSource, /data-act="chat-read"/);
 assert.match(appSource, /data-act="chat-cleanup"/);
 assert.match(appSource, /'list-delete'/);
 assert.match(appSource, /'feed-remove'/);
+assert.match(appSource, /id: 'delete', label: 'Delete', danger: true/);
+assert.match(appSource, /id: 'unbookmark', label: 'Remove bookmark', danger: true/);
 assert.match(appSource, /bookmarks-cleanup/);
 assert.equal(accountGone({ did: 'did:x', handle: 'handle.invalid' }), true);
 assert.equal(accountGone({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }), false);

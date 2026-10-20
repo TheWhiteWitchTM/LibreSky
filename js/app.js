@@ -17,6 +17,7 @@ import {
   resetPosts,
   skeletons,
   threadList,
+  trendsHtml,
 } from './render.js';
 import {
   currentDid,
@@ -43,6 +44,16 @@ let generation = 0;
 let pager = null;
 let selected = -1;
 let searchSort = 'latest';
+let exploreTab = 'foryou';
+const trendCache = { at: 0, list: null, pending: null };
+const EXPLORE_TABS = [
+  { id: 'foryou', label: 'For you', match: () => true },
+  { id: 'news', label: 'News', match: (trend) => trend.category === 'news' || trend.category === 'politics' },
+  { id: 'sports', label: 'Sports', match: (trend) => trend.category === 'sports' },
+  { id: 'entertainment', label: 'Entertainment', match: (trend) => trend.category === 'entertainment' },
+  { id: 'culture', label: 'Culture', match: (trend) => trend.category === 'culture' },
+  { id: 'tech', label: 'Tech', match: (trend) => trend.category === 'science-tech' || trend.category === 'tech' },
+];
 let reportTarget = null;
 let chatTimer = 0;
 let suggestTimer = 0;
@@ -245,20 +256,62 @@ async function refreshBadge() {
   }
 }
 
+function loadTrends() {
+  if (Array.isArray(trendCache.list) && Date.now() - trendCache.at < 60_000) return Promise.resolve(trendCache.list);
+  if (!trendCache.pending) {
+    trendCache.pending = api.getTrends(25).then((data) => {
+      const list = data.trends || [];
+      trendCache.at = Date.now();
+      trendCache.list = list;
+      trendCache.pending = null;
+      return list;
+    }).catch((error) => {
+      trendCache.pending = null;
+      throw error;
+    });
+  }
+  return trendCache.pending;
+}
+
+function exploreTabsHtml(trends) {
+  const visible = EXPLORE_TABS.filter((tab) => tab.id === 'foryou' || (trends || []).some(tab.match));
+  if (!visible.some((tab) => tab.id === exploreTab)) exploreTab = 'foryou';
+  return `<div class="explore-tabs" role="tablist">${visible.map((tab) => `<button type="button" role="tab" data-explore="${tab.id}" aria-selected="${exploreTab === tab.id ? 'true' : 'false'}">${escapeHtml(tab.label)}</button>`).join('')}</div>`;
+}
+
+function visibleTrends(trends) {
+  const tab = EXPLORE_TABS.find((item) => item.id === exploreTab) || EXPLORE_TABS[0];
+  return (trends || []).filter(tab.match);
+}
+
+function trendBlock(trends, limit) {
+  const rows = trendsHtml((trends || []).slice(0, limit));
+  return rows ? `<div class="trends">${rows}</div>` : '';
+}
+
 async function loadRail() {
   const card = $('rail-card');
+  let trends = '';
+  try {
+    const list = await loadTrends();
+    const rows = trendsHtml(list.slice(0, 5), { compact: true });
+    if (rows) trends = `<section class="panel"><h2>What's happening</h2><div class="trends">${rows}</div><a class="panel-more" href="#/search">Show more</a></section>`;
+  } catch {
+    trends = '';
+  }
   if (!signedIn()) {
-    card.innerHTML = `<section class="panel"><h2>LibreSky</h2><p>A Bluesky client. Sign in with your Bluesky account.</p><button type="button" class="primary" data-act="signin">Sign in</button></section>`;
+    card.innerHTML = `${trends}<section class="panel"><h2>LibreSky</h2><p>A Bluesky client. Sign in with your Bluesky account.</p><button type="button" class="primary" data-act="signin">Sign in</button></section>`;
     return;
   }
   try {
     const data = await api.getSuggestions();
     const people = data.actors || [];
-    card.innerHTML = people.length
+    const follows = people.length
       ? `<section class="panel"><h2>Suggested follows</h2>${people.map((actor) => actorHtml(actor, { follow: true, self: myDid() })).join('')}</section>`
       : '';
+    card.innerHTML = trends + follows;
   } catch {
-    card.innerHTML = '';
+    card.innerHTML = trends;
   }
 }
 
@@ -307,13 +360,39 @@ function homePrompt() {
   return `<button type="button" class="prompt" data-act="compose"><span class="avatar" data-initial="${initial}">${src}</span><span>What's up?</span></button>`;
 }
 
-async function showSearch(query) {
+function sortHtml() {
+  return `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
+}
+
+async function showSearch(query, options = {}) {
+  const focus = options.focus !== false;
   const token = ++generation;
   setChrome({ title: 'Search', nav: 'search' });
-  const sort = `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label>${sort}</form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts, people, and starter packs.')}</div>`;
-  $('search-q')?.focus();
-  if (!query) return;
+  const known = Array.isArray(trendCache.list) ? trendCache.list : null;
+  const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
+  const placeholder = query
+    ? skeletons(4)
+    : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  if (focus && query) $('search-q')?.focus();
+  if (!query) return paintExplore(token);
+  return paintSearchResults(token, query);
+}
+
+async function paintExplore(token) {
+  try {
+    const trends = await loadTrends();
+    if (token !== generation) return;
+    const controls = $('search-controls');
+    if (controls) controls.innerHTML = exploreTabsHtml(trends);
+    const rows = trendBlock(visibleTrends(trends));
+    $('search-results').innerHTML = rows || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.');
+  } catch (error) {
+    if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Trends are unavailable', error.message || 'Could not load what is happening.');
+  }
+}
+
+async function paintSearchResults(token, query) {
   try {
     const [postData, actorData, packData] = await Promise.all([
       api.searchPosts(query, null, null, searchSort),
@@ -325,8 +404,28 @@ async function showSearch(query) {
     const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
     resetPosts();
     const postsHtml = feedHtml((postData.posts || []).map((post) => ({ post })));
-    $('search-results').innerHTML = `${people ? `<div class="people">${people}</div>` : ''}${packs ? `<div class="packs">${packs}</div>` : ''}${postsHtml || emptyHtml('No posts', 'Nothing matched that search.')}`;
     remember();
+    const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
+    const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
+    let missed = '';
+    if (!people && !packs && !postsHtml) {
+      let trends = [];
+      try { trends = await loadTrends(); } catch { trends = []; }
+      if (token !== generation) return;
+      const rows = trendBlock(trends, 8);
+      missed = emptyHtml('No results', `Nothing matched "${query}".`) + (rows ? `<h2 class="section-label">What's happening</h2>${rows}` : '');
+    }
+    $('search-results').innerHTML = `${peopleBlock}${packsBlock}${postsHtml}${missed}`;
+    const more = async (cursor) => {
+      const page = await api.searchPosts(query, cursor, null, searchSort);
+      if (token !== generation) return;
+      resetPosts();
+      const html = feedHtml((page.posts || []).map((post) => ({ post })));
+      remember();
+      if (html) $('search-results')?.insertAdjacentHTML('beforeend', html);
+      pagerFor(page.cursor, more);
+    };
+    if (postsHtml) pagerFor(postData.cursor, more);
   } catch (error) {
     if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Search failed', error.message);
   }
@@ -462,7 +561,7 @@ async function showMessages(convoId) {
         if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
       });
       const rows = (data.convos || []).map((convo) => convoHtml(convo, mine)).join('');
-      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="text-btn" data-act="chat-cleanup">Remove deleted accounts</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
+      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       refreshBadge();
       return;
     }
@@ -510,7 +609,7 @@ function bookmarkParts(marks) {
 }
 
 function goneBookmarkHtml(gone) {
-  return gone.map((subject) => `<div class="note"><span class="note-icon"></span><span class="note-body"><span>This saved post is unavailable.</span><button type="button" class="text-btn" data-act="remove-bookmark" data-uri="${escapeHtml(subject.uri)}">Remove bookmark</button></span></div>`).join('');
+  return gone.map((subject) => `<div class="note"><span class="note-icon"></span><span class="note-body"><span>This saved post is unavailable.</span><button type="button" class="danger" data-act="remove-bookmark" data-uri="${escapeHtml(subject.uri)}">Remove bookmark</button></span></div>`).join('');
 }
 
 async function showBookmarks() {
@@ -525,7 +624,7 @@ async function showBookmarks() {
     const data = await api.getBookmarks();
     if (token !== generation) return;
     const { saved, gone } = bookmarkParts(data.bookmarks);
-    const tools = `<div class="toolbar"><button type="button" class="text-btn" data-act="bookmarks-cleanup">Remove unavailable</button></div>`;
+    const tools = `<div class="toolbar"><button type="button" class="danger" data-act="bookmarks-cleanup">Remove unavailable</button></div>`;
     if (!saved.length && !gone.length) {
       $('view').innerHTML = tools + emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.');
     } else {
@@ -597,7 +696,7 @@ function feedActions(item, view) {
   const own = view?.creator?.did && view.creator.did === myDid();
   const buttons = [
     miniButton('feed-pin', item.pinned ? 'Unpin' : 'Pin', { uri: item.value, pinned: item.pinned ? '1' : '0', type: item.type || 'feed' }),
-    miniButton('feed-remove', 'Remove', { uri: item.value }),
+    miniButton('feed-remove', 'Remove', { uri: item.value }, true),
   ];
   if (own) {
     buttons.push(miniButton('feed-edit', 'Edit', { uri: item.value, name: view.displayName || '', description: view.description || '' }));
@@ -667,7 +766,7 @@ async function showCustomFeed(uri) {
       if (!saved) buttons.push(miniButton('feed-save', 'Save', { uri }));
       else {
         buttons.push(miniButton('feed-pin', saved.pinned ? 'Unpin' : 'Pin', { uri, pinned: saved.pinned ? '1' : '0', type: 'feed' }));
-        buttons.push(miniButton('feed-remove', 'Remove', { uri }));
+        buttons.push(miniButton('feed-remove', 'Remove', { uri }, true));
       }
       if (own) {
         buttons.push(miniButton('feed-edit', 'Edit', { uri, name: view.displayName || '', description: view.description || '' }));
@@ -766,7 +865,7 @@ async function showList(uri) {
     const memberRow = (item) => actorHtml(item.subject, {
       follow: signedIn(),
       self: myDid(),
-      extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }) : '',
+      extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }, true) : '',
     });
     const members = (info?.items || []).map(memberRow).join('');
     const morePeople = info?.cursor
@@ -928,7 +1027,7 @@ function showSettings() {
     <h2>Muted words</h2>
     <p class="dim">Posts containing these words are collapsed in your feeds on this browser.</p>
     <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
-    <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}">${escapeHtml(word)} ×</button>`).join('')}</div>
+    <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}" aria-label="Remove ${escapeHtml(word)}"><span>${escapeHtml(word)}</span><span class="chip-x" aria-hidden="true">×</span></button>`).join('')}</div>
     <h2>Keyboard</h2>
     <ul class="keys">
       <li><kbd>n</kbd> New post</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
@@ -1468,7 +1567,7 @@ function closeMenu() {
 function openMenu(anchor, items) {
   const menu = $('menu');
   menu._post = null;
-  menu.innerHTML = items.map((item) => `<button type="button" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
+  menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
   const rect = anchor.getBoundingClientRect();
   const width = 250;
@@ -1874,7 +1973,7 @@ async function handleChromeAct(act, event) {
       const rows = (page.items || []).map((item) => actorHtml(item.subject, {
         follow: signedIn(),
         self: myDid(),
-        extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }) : '',
+        extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }, true) : '',
       })).join('');
       let box = $('view').querySelector('.directory');
       if (!box && rows) {
@@ -2066,10 +2165,10 @@ function moreMenu(anchor, found) {
     { id: 'quote', label: 'Quote' },
   ];
   items.push({ id: 'send-chat', label: 'Send in chat' });
-  if (found.article.dataset.bookmarked === '1') items.push({ id: 'unbookmark', label: 'Remove bookmark' });
+  if (found.article.dataset.bookmarked === '1') items.push({ id: 'unbookmark', label: 'Remove bookmark', danger: true });
   if (own) {
     items.push({ id: pinnedUri === found.post.uri ? 'unpin' : 'pin', label: pinnedUri === found.post.uri ? 'Unpin from profile' : 'Pin to profile' });
-    items.push({ id: 'delete', label: 'Delete' });
+    items.push({ id: 'delete', label: 'Delete', danger: true });
   } else {
     items.push({ id: author.viewer?.muted ? 'unmute' : 'mute', label: author.viewer?.muted ? 'Unmute account' : 'Mute account' });
     if (!author.viewer?.blocking) items.push({ id: 'block', label: 'Block account' });
@@ -2795,7 +2894,14 @@ function bind() {
     const sort = event.target.dataset?.sort;
     if (sort === 'latest' || sort === 'top') {
       searchSort = sort;
-      showSearch($('search-q')?.value.trim() || parseHash()[1] || '');
+      showSearch($('search-q')?.value.trim() || parseHash()[1] || '', { focus: false });
+    }
+    const explore = event.target.closest('[data-explore]')?.dataset.explore;
+    if (explore && EXPLORE_TABS.some((tab) => tab.id === explore)) {
+      exploreTab = explore;
+      const draft = $('search-q')?.value || '';
+      showSearch('', { focus: false });
+      if (draft && $('search-q')) $('search-q').value = draft;
     }
   });
   $('lightbox-close').addEventListener('click', () => $('lightbox').close());

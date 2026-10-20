@@ -183,7 +183,7 @@ export function postHtml(item, options = {}) {
           <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
-          ${options.bookmarkRemove ? `<button type="button" class="text-btn mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
+          ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
           <button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button>
         </div>
         ${parentHandle ? `<a class="replying" href="${profileHash(parentHandle)}">Replying to @${escapeHtml(parentHandle)}</a>` : ''}
@@ -214,6 +214,49 @@ export function skeletons(count = 6) {
 
 export function emptyHtml(title, body, extra = '') {
   return `<div class="empty"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p>${extra}</div>`;
+}
+
+const TREND_CATEGORY = {
+  news: 'News',
+  politics: 'Politics',
+  sports: 'Sports',
+  entertainment: 'Entertainment',
+  culture: 'Culture',
+  'science-tech': 'Science & tech',
+  tech: 'Tech',
+};
+
+function trendHref(trend) {
+  const link = String(trend?.link || '');
+  const match = link.match(/\/profile\/([^/]+)\/feed\/([^/?#]+)/);
+  const name = String(trend?.displayName || '').trim();
+  if (match) {
+    let did = match[1];
+    try { did = decodeURIComponent(did); } catch { /* keep the raw segment */ }
+    if (did.startsWith('did:')) {
+      return `#/feed/${encodeURIComponent(`at://${did}/app.bsky.feed.generator/${match[2]}`)}`;
+    }
+  }
+  return `#/search/${encodeURIComponent(name || 'Bluesky')}`;
+}
+
+export function trendHtml(trend, options = {}) {
+  const name = String(trend?.displayName || '').trim() || 'Trend';
+  const category = TREND_CATEGORY[trend?.category] || 'Trending';
+  const heat = trend?.status === 'hot' ? 'Hot' : 'Trending';
+  const count = compact(trend?.postCount);
+  const faces = (trend?.actors || []).slice(0, 3);
+  const stack = faces.length
+    ? `<span class="avatar-stack">${faces.map((actor) => avatar(actor?.avatar, actor?.displayName || actor?.handle, 'sm')).join('')}</span>`
+    : '';
+  const blurb = !options.compact && trend?.description
+    ? `<span class="trend-desc">${escapeHtml(trend.description)}</span>`
+    : '';
+  return `<a class="trend" href="${attr(trendHref(trend))}"><span class="trend-kicker">${escapeHtml(category)} · ${heat}</span><strong>${escapeHtml(name)}</strong>${blurb}<span class="trend-meta">${stack}${count ? `<span>${count} posts</span>` : ''}</span></a>`;
+}
+
+export function trendsHtml(trends, options) {
+  return (trends || []).map((trend) => trendHtml(trend, options)).join('');
 }
 
 export function profileHtml(profile) {
@@ -357,7 +400,7 @@ export function convoHtml(convo, me) {
   const unread = convoUnread(convo, me);
   const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const remove = gone
-    ? `<button type="button" class="text-btn mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
+    ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
   return `<div class="person convo${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
 }
