@@ -349,6 +349,13 @@ export function trendsHtml(trends, options) {
   return (trends || []).map((trend) => trendHtml(trend, options)).join('');
 }
 
+function joinedLine(iso) {
+  const date = new Date(iso || '');
+  if (Number.isNaN(date.getTime())) return '';
+  const label = date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return `<p class="joined">Joined ${escapeHtml(label)}</p>`;
+}
+
 export function profileHtml(profile) {
   const banner = safeUrl(profile.banner || '');
   const name = profile.displayName || profile.handle;
@@ -361,6 +368,7 @@ export function profileHtml(profile) {
     <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
     <div class="handle">@${escapeHtml(profile.handle)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
+    ${joinedLine(profile.createdAt)}
     <p class="counts"><a href="#/profile/${encodeURIComponent(profile.handle)}/following"><strong>${fullCount(profile.followsCount)}</strong> following</a><a href="#/profile/${encodeURIComponent(profile.handle)}/followers"><strong>${fullCount(profile.followersCount)}</strong> followers</a><span><strong>${fullCount(profile.postsCount)}</strong> posts</span></p>
   </header>`;
 }

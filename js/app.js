@@ -7,7 +7,6 @@ import {
   collectionCardHtml,
   callConvoHtml,
   callStartHtml,
-  callToolsHtml,
   chatHeaderHtml,
   hoverCardHtml,
   convoHtml,
@@ -108,6 +107,16 @@ let hoverSeq = 0;
 let hoverActor = '';
 let hoverWait = '';
 const hoverProfiles = new Map();
+let homeLanes = [];
+let homeLanesDid = '';
+let lanesAt = 0;
+let laneDraft = null;
+let shownProfile = null;
+const LANE_CAP = 20;
+const CHEVRON_LEFT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
+const CHEVRON_RIGHT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M9.5 5.5 16 12l-6.5 6.5"/></svg>';
+const CHEVRON_UP = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M6 14.5 12 8l6 6.5"/></svg>';
+const CHEVRON_DOWN = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M6 9.5 12 16l6-6.5"/></svg>';
 
 function $(id) { return document.getElementById(id); }
 
@@ -142,31 +151,100 @@ function applyTheme(theme, options = {}) {
 
 const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack', 'downloads']);
 
-function setChrome({ title, back = false, tabs = [], nav = '', tools = '' }) {
+function syncStrip(scroller) {
+  const strip = scroller?.closest?.('.tab-strip');
+  if (!strip || !scroller) return;
+  const max = scroller.scrollWidth - scroller.clientWidth;
+  const left = scroller.scrollLeft > 6;
+  const right = max - scroller.scrollLeft > 6;
+  const prev = strip.querySelector('.tab-arrow.prev');
+  const next = strip.querySelector('.tab-arrow.next');
+  if (prev) prev.hidden = !left;
+  if (next) next.hidden = !right;
+  strip.classList.toggle('has-prev', left);
+  strip.classList.toggle('has-next', right);
+}
+
+const stripObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver((entries) => entries.forEach((entry) => syncStrip(entry.target)))
+  : null;
+
+function forgetStrips(root) {
+  if (!stripObserver || !root) return;
+  root.querySelectorAll('.tab-scroller').forEach((node) => stripObserver.unobserve(node));
+}
+
+function alignStrip(scroller) {
+  const selected = scroller.querySelector('[aria-selected="true"]');
+  if (!selected) return;
+  const left = selected.offsetLeft;
+  const right = left + selected.offsetWidth;
+  const viewRight = scroller.scrollLeft + scroller.clientWidth;
+  if (left < scroller.scrollLeft + 40) scroller.scrollLeft = Math.max(0, left - 44);
+  else if (right > viewRight - 48) scroller.scrollLeft = right - scroller.clientWidth + 56;
+}
+
+function watchStrips(root) {
+  if (!root) return;
+  root.querySelectorAll('.tab-scroller').forEach((scroller) => {
+    if (scroller.dataset.watched) return;
+    scroller.dataset.watched = '1';
+    scroller.addEventListener('scroll', () => syncStrip(scroller), { passive: true });
+    stripObserver?.observe(scroller);
+    alignStrip(scroller);
+    requestAnimationFrame(() => syncStrip(scroller));
+  });
+}
+
+function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {}) {
+  const links = tabs.map((tab) => `<a role="tab" href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}">${escapeHtml(tab.label)}</a>`).join('');
+  const menu = menuAct
+    ? `<button type="button" class="tab-menu" data-act="${escapeHtml(menuAct)}" aria-label="${escapeHtml(menuLabel)}">${icon('more')}</button>`
+    : '';
+  return `<div class="tab-strip${sticky ? ' profile-tabs' : ''}${menuAct ? ' has-menu' : ''}">
+    <button type="button" class="tab-arrow prev" data-act="tab-scroll" data-dir="-1" aria-label="Scroll tabs left" hidden>${CHEVRON_LEFT}</button>
+    <div class="tab-scroller" role="tablist">${links}</div>
+    <button type="button" class="tab-arrow next" data-act="tab-scroll" data-dir="1" aria-label="Scroll tabs right" hidden>${CHEVRON_RIGHT}</button>
+    ${menu}
+  </div>`;
+}
+
+function measureHead() {
+  const head = document.querySelector('.sticky-head');
+  if (!head) return;
+  document.documentElement.style.setProperty('--head-h', `${Math.ceil(head.getBoundingClientRect().height)}px`);
+}
+
+function setChrome({ title, back = false, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
   $('title').textContent = title;
   $('back').hidden = !back;
-  const toolBox = $('title-tools');
-  if (toolBox) {
-    toolBox.innerHTML = tools || '';
-    delete toolBox.dataset.peer;
-  }
   const bar = $('tabs');
+  forgetStrips(bar);
   if (!tabs.length) {
     bar.hidden = true;
     bar.innerHTML = '';
   } else {
     bar.hidden = false;
-    bar.innerHTML = tabs.map((tab) => `<a href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}">${escapeHtml(tab.label)}</a>`).join('');
+    bar.innerHTML = tabStrip(tabs, { menuAct, menuLabel });
+    watchStrips(bar);
+  }
+  const config = $('head-config');
+  if (config) {
+    if (nav === 'settings') config.setAttribute('aria-current', 'page');
+    else config.removeAttribute('aria-current');
   }
   const current = MORE_NAV.has(nav) ? 'more' : nav;
   document.querySelectorAll('[data-nav]').forEach((link) => {
     link.classList.toggle('active', link.dataset.nav === current);
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
+  measureHead();
+  requestAnimationFrame(measureHead);
 }
 
 function showSkeletons() {
   resetPosts();
+  forgetStrips($('view'));
   $('view').innerHTML = skeletons();
 }
 
@@ -264,6 +342,11 @@ function updateAccount() {
 
 async function loadMe() {
   const did = myDid();
+  if (did !== homeLanesDid) {
+    homeLanes = [];
+    homeLanesDid = '';
+    lanesAt = 0;
+  }
   if (!did) {
     me.profile = null;
     updateAccount();
@@ -691,47 +774,143 @@ async function pollHome(token) {
   }
 }
 
-function gearButton(act, label, feed) {
-  const attr = feed ? ` data-feed="${escapeHtml(feed)}"` : '';
-  return `<button type="button" class="icon-btn" data-act="${act}"${attr} aria-label="${escapeHtml(label)}">${icon('gear')}</button>`;
+function homeActive() {
+  const [a, b, c] = parseHash();
+  if (!a) return { kind: 'following' };
+  if (a === 'discover') return { kind: 'discover' };
+  if (a === 'lane' && (b === 'list' || b === 'feed') && c) return { kind: 'lane', type: b, value: c };
+  return null;
 }
 
-async function showHome(mode) {
-  const token = ++generation;
-  const following = mode !== 'discover';
+function laneHref(item) {
+  return `#/lane/${item.type}/${encodeURIComponent(item.value)}`;
+}
+
+function homeTabs(active) {
+  const tabs = [
+    { href: '#/', label: 'Following', on: active.kind === 'following' },
+    { href: '#/discover', label: 'Discover', on: active.kind === 'discover' },
+  ];
+  homeLanes.forEach((item) => {
+    tabs.push({
+      href: laneHref(item),
+      label: item.label,
+      on: active.kind === 'lane' && active.value === item.value,
+    });
+  });
+  return tabs;
+}
+
+function homeTitle(active) {
+  if (active.kind === 'discover') return 'Discover';
+  if (active.kind === 'lane') {
+    return homeLanes.find((item) => item.value === active.value)?.label || (active.type === 'list' ? 'List' : 'Feed');
+  }
+  return 'Home';
+}
+
+function paintHomeChrome(active) {
   setChrome({
-    title: following ? 'Home' : 'Discover',
+    title: homeTitle(active),
     nav: 'home',
-    tools: following ? gearButton('home-settings', 'Home settings') : '',
-    tabs: [
-      { href: '#/', label: 'Following', on: following },
-      { href: '#/discover', label: 'Discover', on: !following },
-    ],
+    tabs: homeTabs(active),
+    menuAct: 'tab-menu',
+    menuLabel: 'Home menu',
+  });
+}
+
+async function loadHomeLanes() {
+  const prefs = await api.getPreferences();
+  const pinned = api.savedFeedItems(prefs.preferences).filter((item) => item.pinned && (item.type === 'list' || item.type === 'feed'));
+  const labels = new Map();
+  const listUris = pinned.filter((item) => item.type === 'list').map((item) => item.value);
+  const feedUris = pinned.filter((item) => item.type === 'feed').map((item) => item.value);
+  const [lists, feeds] = await Promise.all([
+    Promise.all(listUris.map((uri) => api.getList(uri, null, null, 1).then((found) => found.list).catch(() => null))),
+    feedUris.length ? loadGenerators(feedUris) : [],
+  ]);
+  lists.filter(Boolean).forEach((list) => labels.set(list.uri, list.name || 'List'));
+  feeds.forEach((feed) => labels.set(feed.uri, feed.displayName || 'Feed'));
+  return pinned.map((item) => ({
+    type: item.type,
+    value: item.value,
+    label: labels.get(item.value) || (item.type === 'list' ? 'List' : 'Feed'),
+  }));
+}
+
+async function ensureHomeLanes(token) {
+  try {
+    if (!signedIn()) {
+      const changed = homeLanes.length > 0;
+      homeLanes = [];
+      homeLanesDid = '';
+      lanesAt = 0;
+      return changed;
+    }
+    if (homeLanesDid === myDid() && Date.now() - lanesAt < 20000) return false;
+    const next = await loadHomeLanes();
+    if (token !== generation) return false;
+    const changed = next.length !== homeLanes.length || next.some((item, index) => item.value !== homeLanes[index]?.value || item.label !== homeLanes[index]?.label);
+    homeLanes = next;
+    homeLanesDid = myDid();
+    lanesAt = Date.now();
+    return changed;
+  } catch {
+    return false;
+  }
+}
+
+async function showHome(active) {
+  const token = ++generation;
+  const following = active.kind === 'following';
+  const discover = active.kind === 'discover';
+  const lane = active.kind === 'lane' ? active : null;
+  paintHomeChrome(active);
+  const laneJob = ensureHomeLanes(token).then((changed) => {
+    if (!changed || token !== generation) return;
+    const now = homeActive();
+    if (now) paintHomeChrome(now);
   });
   if (following && !signedIn()) {
     $('view').innerHTML = emptyHtml('Your home feed is on Bluesky', 'Sign in and LibreSky shows the people you follow.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button><a class="text-link" href="#/discover">See Discover</a>');
     return;
   }
+  if (lane && !signedIn()) {
+    $('view').innerHTML = emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
+    return;
+  }
   showSkeletons();
   try {
-    const data = following ? await api.getTimeline(null) : await api.getFeed(api.WHATS_HOT);
+    let data;
+    if (following) data = await api.getTimeline(null);
+    else if (discover) data = await api.getFeed(api.WHATS_HOT);
+    else if (lane.type === 'list') data = await api.getListFeed(lane.value);
+    else data = await api.getFeed(lane.value);
     if (token !== generation) return;
     const banner = following ? homePrompt() : '';
     const raw = data.feed || [];
-    const items = following ? visibleHome(raw) : filterDiscover(raw);
+    const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
     const posted = feedHtml(items);
-    const empty = emptyHtml('No posts yet', following ? 'Follow a few people, or change Home settings with the gear.' : 'Nothing in your content languages yet. Settings can show every language.');
+    const empty = following
+      ? emptyHtml('No posts yet', 'Follow a few people, or add a list with the … on the tabs.')
+      : discover
+        ? emptyHtml('No posts yet', 'Nothing in your content languages yet. Config can show every language.')
+        : emptyHtml('Nothing here', raw.length && lane.type === 'feed' ? 'Posts are hidden by this feed’s settings. The … menu can show more.' : 'There are no posts to show.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
     remember();
     document.documentElement.dataset.ready = '1';
     if (following) armHomeWatch(token, raw);
     const more = async (cursor) => {
-      const page = following ? await api.getTimeline(cursor) : await api.getFeed(api.WHATS_HOT, cursor);
+      let page;
+      if (following) page = await api.getTimeline(cursor);
+      else if (discover) page = await api.getFeed(api.WHATS_HOT, cursor);
+      else if (lane.type === 'list') page = await api.getListFeed(lane.value, cursor);
+      else page = await api.getFeed(lane.value, cursor);
       if (token !== generation) return;
       const nextRaw = page.feed || [];
-      const nextItems = following ? visibleHome(nextRaw) : filterDiscover(nextRaw);
+      const nextItems = following ? visibleHome(nextRaw) : discover ? filterDiscover(nextRaw) : lane.type === 'feed' ? visibleFeed(nextRaw, lane.value) : nextRaw;
       if (following) noteHome(nextRaw);
       if (!(nextItems || []).length && !page.cursor && !$('view')?.querySelector('.post')) {
         $('view').innerHTML = empty;
@@ -743,6 +922,7 @@ async function showHome(mode) {
       pagerFor(page.cursor, more);
     };
     pagerFor(data.cursor, more);
+    await laneJob;
   } catch (error) {
     if (token !== generation) return;
     $('view').innerHTML = emptyHtml('Could not load the feed', error.message, '<button type="button" class="primary" data-act="retry">Try again</button>');
@@ -776,13 +956,13 @@ async function showSearch(query, options = {}) {
   const focus = options.focus !== false;
   const token = ++generation;
   searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
-  setChrome({ title: 'Search', nav: 'search', tools: gearButton('search-settings', 'Search settings') });
+  setChrome({ title: 'Search', nav: 'search' });
   const known = Array.isArray(trendCache.list) ? trendCache.list : null;
   const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><button type="button" class="icon-btn search-gear" data-act="search-settings" aria-label="Search settings">${icon('gear')}</button></div><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label></div><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -817,7 +997,7 @@ async function paintSearchResults(token, query) {
     resetPosts();
     const matchedPosts = visibleSearchPosts(postData.posts);
     const postsHtml = feedHtml(matchedPosts.map((post) => ({ post })));
-    const hiddenNote = !postsHtml && (postData.posts || []).length ? '<p class="dim search-note">Posts are hidden by search settings. The gear can show more.</p>' : '';
+    const hiddenNote = !postsHtml && (postData.posts || []).length ? '<p class="dim search-note">Posts are hidden by search settings. Config can show more.</p>' : '';
     remember();
     const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
     const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
@@ -1152,6 +1332,7 @@ async function loadGenerators(uris) {
 }
 
 async function changeFeeds(edit) {
+  lanesAt = 0;
   const data = await api.getPreferences();
   const current = api.savedFeedItems(data.preferences);
   const items = edit(current.map((item) => ({ ...item })));
@@ -1207,7 +1388,7 @@ async function showFeeds() {
       return manageRow(imageAvatar(feed?.avatar, 'F'), `#/feed/${encodeURIComponent(item.value)}`, title, detail, feedActions(item, feed));
     }).join('');
     $('view').innerHTML = `<div class="directory">${hot}${rows}</div>`;
-    if (!rows) $('view').insertAdjacentHTML('beforeend', emptyHtml('No saved feeds', 'Open a feed and save it. Pinned feeds stay at the top of this list.'));
+    if (!rows) $('view').insertAdjacentHTML('beforeend', emptyHtml('No saved feeds', 'Open a feed and save it. Pin a list or a feed to show it on Home.'));
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = `<div class="directory">${hot}</div>` + emptyHtml('Could not load feeds', error.message);
   }
@@ -1221,7 +1402,7 @@ function visibleFeed(items, feedId) {
 
 async function showCustomFeed(uri) {
   const token = ++generation;
-  setChrome({ title: 'Feed', nav: 'feeds', back: true, tools: gearButton('feed-settings', 'Feed settings', uri) });
+  setChrome({ title: 'Feed', nav: 'feeds', back: true });
   showSkeletons();
   try {
     const jobs = [api.getFeedGenerator(uri).catch(() => null), api.getFeed(uri)];
@@ -1234,7 +1415,7 @@ async function showCustomFeed(uri) {
     if (signedIn()) {
       const saved = api.savedFeedItems(prefs?.preferences).find((item) => item.value === uri);
       const own = view?.creator?.did && view.creator.did === myDid();
-      const buttons = [];
+      const buttons = [miniButton('feed-settings', 'Settings', { feed: uri })];
       if (!saved) buttons.push(miniButton('feed-save', 'Save', { uri }));
       else {
         buttons.push(miniButton('feed-pin', saved.pinned ? 'Unpin' : 'Pin', { uri, pinned: saved.pinned ? '1' : '0', type: 'feed' }));
@@ -1370,24 +1551,25 @@ const PROFILE_FILTERS = {
   likes: ['likes', 'Likes'],
 };
 
+function profileTabs(actor, current) {
+  return Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
+    href: id === 'posts' ? `#/profile/${encodeURIComponent(actor)}` : `#/profile/${encodeURIComponent(actor)}/${id}`,
+    label,
+    on: id === current,
+  }));
+}
+
 async function showProfile(actor, tab) {
   const token = ++generation;
   const current = PROFILE_FILTERS[tab] ? tab : 'posts';
-  setChrome({
-    title: 'Profile',
-    nav: 'profile',
-    back: true,
-    tabs: Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
-      href: id === 'posts' ? `#/profile/${encodeURIComponent(actor)}` : `#/profile/${encodeURIComponent(actor)}/${id}`,
-      label,
-      on: id === current,
-    })),
-  });
+  shownProfile = null;
+  setChrome({ title: 'Profile', nav: 'profile', back: true });
   showSkeletons();
   try {
     const profile = await api.getProfile(actor);
     if (token !== generation) return;
     $('title').textContent = profile.displayName || profile.handle;
+    document.title = `${$('title').textContent} — LibreSky`;
     const action = profileAction(profile);
     let feed;
     if (current === 'likes') feed = await api.getActorLikes(profile.handle);
@@ -1400,7 +1582,11 @@ async function showProfile(actor, tab) {
     const postsHtml = feedHtml(split.feed);
     const blank = pinHtml || postsHtml ? postsHtml : emptyHtml('No posts', 'Nothing in this tab yet.');
     const mine = signedIn() && profile.did === myDid();
-    $('view').innerHTML = profileHtml(profile) + profileShelfHtml(mine) + pinHtml + blank;
+    shownProfile = profile;
+    const strip = tabStrip(profileTabs(actor, current), { menuAct: 'profile-menu', menuLabel: 'Profile menu', sticky: true });
+    forgetStrips($('view'));
+    $('view').innerHTML = profileHtml(profile) + strip + profileShelfHtml(mine) + pinHtml + blank;
+    watchStrips($('view'));
     $('profile-action').innerHTML = action;
     remember();
     document.documentElement.dataset.ready = '1';
@@ -1519,19 +1705,222 @@ async function loadProfileShelf(profile, token) {
 }
 
 function profileAction(profile) {
-  if (!signedIn()) return '<button type="button" class="primary small" data-act="signin">Sign in</button>';
-  if (profile.did === myDid()) return '<button type="button" class="primary small" data-act="edit-profile">Edit profile</button>';
+  const more = `<button type="button" class="profile-more" data-act="profile-menu" aria-label="Profile menu">${icon('more')}</button>`;
+  if (!signedIn()) return `<span class="profile-actions"><button type="button" class="primary small" data-act="signin">Sign in</button>${more}</span>`;
+  if (profile.did === myDid()) return `<span class="profile-actions"><button type="button" class="outline" data-act="edit-profile">Edit profile</button>${more}</span>`;
   const following = profile.viewer?.following || '';
   const blocking = profile.viewer?.blocking || '';
   const follow = blocking
-    ? ''
+    ? `<button type="button" class="danger" data-act="block-profile" data-did="${escapeHtml(profile.did)}" data-blocking="${escapeHtml(blocking)}">Blocked</button>`
     : `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
-  const block = `<button type="button" class="${blocking ? 'danger' : 'text-btn'}" data-act="block-profile" data-did="${escapeHtml(profile.did)}" data-blocking="${escapeHtml(blocking)}">${blocking ? 'Blocked' : 'Block'}</button>`;
-  const report = `<button type="button" class="text-btn" data-act="report-profile" data-did="${escapeHtml(profile.did)}">Report</button>`;
-  const message = blocking
-    ? ''
-    : `<button type="button" class="text-btn" data-act="message-profile" data-did="${escapeHtml(profile.did)}">Message</button>${callToolsHtml(profile.did)}`;
-  return `<span class="profile-actions">${follow}${message}${block}${report}</span>`;
+  return `<span class="profile-actions">${follow}${more}</span>`;
+}
+
+function homeListOk(list) {
+  const purpose = String(list?.purpose || '');
+  if (!list?.uri) return false;
+  if (purpose.includes('modlist') || purpose.includes('referencelist')) return false;
+  return true;
+}
+
+async function collectLaneChoices() {
+  const did = myDid();
+  const [prefs, listsPage] = await Promise.all([
+    api.getPreferences(),
+    api.getLists(did).catch(() => ({ lists: [] })),
+  ]);
+  const saved = api.savedFeedItems(prefs.preferences).filter((item) => item.type === 'list' || item.type === 'feed');
+  const mine = new Map((listsPage.lists || []).filter(homeListOk).map((list) => [list.uri, list]));
+  const savedLists = saved.filter((item) => item.type === 'list' && !mine.has(item.value)).map((item) => item.value);
+  const extra = await Promise.all(savedLists.slice(0, 30).map((uri) => api.getList(uri, null, null, 1).then((found) => found.list).catch(() => null)));
+  const listByUri = new Map(mine);
+  extra.filter(Boolean).forEach((list) => listByUri.set(list.uri, list));
+  const feedUris = [...new Set(saved.filter((item) => item.type === 'feed').map((item) => item.value))];
+  const feeds = feedUris.length ? await loadGenerators(feedUris) : [];
+  const feedByUri = new Map(feeds.map((feed) => [feed.uri, feed]));
+  const labelOf = (type, value) => (type === 'list' ? (listByUri.get(value)?.name || 'List') : (feedByUri.get(value)?.displayName || 'Feed'));
+  const showing = [];
+  const seen = new Set();
+  saved.filter((item) => item.pinned).forEach((item) => {
+    if (seen.has(item.value)) return;
+    seen.add(item.value);
+    showing.push({ type: item.type, value: item.value, label: labelOf(item.type, item.value) });
+  });
+  const available = [];
+  mine.forEach((list) => {
+    if (seen.has(list.uri)) return;
+    seen.add(list.uri);
+    available.push({ type: 'list', value: list.uri, label: list.name || 'List', kind: 'Your list' });
+  });
+  saved.forEach((item) => {
+    if (seen.has(item.value)) return;
+    seen.add(item.value);
+    available.push({
+      type: item.type,
+      value: item.value,
+      label: labelOf(item.type, item.value),
+      kind: item.type === 'list' ? 'Saved list' : 'Saved feed',
+    });
+  });
+  return { showing, available };
+}
+
+function paintLaneEditor() {
+  const body = $('lanes-body');
+  if (!body || !laneDraft) return;
+  const showing = laneDraft.showing;
+  const rows = showing.map((item, index) => {
+    const up = index === 0 ? ' disabled' : '';
+    const down = index === showing.length - 1 ? ' disabled' : '';
+    return `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${item.type === 'list' ? 'List' : 'Feed'}</span></span><span class="lane-moves"><button type="button" class="lane-move" data-act="lane-up" data-index="${index}"${up} aria-label="Move up">${CHEVRON_UP}</button><button type="button" class="lane-move" data-act="lane-down" data-index="${index}"${down} aria-label="Move down">${CHEVRON_DOWN}</button><button type="button" class="text-btn" data-act="lane-remove" data-index="${index}">Remove</button></span></div>`;
+  }).join('');
+  const available = laneDraft.available.map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${escapeHtml(item.kind)}</span></span><button type="button" class="text-btn" data-act="lane-add" data-type="${escapeHtml(item.type)}" data-value="${escapeHtml(item.value)}" data-label="${escapeHtml(item.label)}">Add</button></div>`).join('');
+  body.innerHTML = `<h3>Always on Home</h3>
+    <div class="lane-row"><span><strong>Following</strong><span class="handle">People you follow</span></span><span class="lane-lock">Kept</span></div>
+    <div class="lane-row"><span><strong>Discover</strong><span class="handle">What is happening</span></span><span class="lane-lock">Kept</span></div>
+    <h3>On Home</h3>
+    ${rows || '<p class="dim">Nothing extra yet. Add a list or a saved feed below.</p>'}
+    <h3>Add</h3>
+    ${available || '<p class="dim">No other lists or saved feeds. Create a list or save a feed, then add it here.</p>'}
+    <button type="button" class="primary lanes-save" data-act="lane-save">Save</button>`;
+}
+
+async function openLaneEditor() {
+  if (!signedIn()) return requireSignIn();
+  const dialog = $('lanes');
+  const body = $('lanes-body');
+  if (!dialog || !body) return;
+  laneDraft = null;
+  body.innerHTML = '<p class="dim">Loading your lists and feeds…</p>';
+  if (!dialog.open) dialog.showModal();
+  try {
+    laneDraft = await collectLaneChoices();
+    if (!$('lanes')?.open) return;
+    paintLaneEditor();
+  } catch (error) {
+    body.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load tabs.')}</p>`;
+  }
+}
+
+function editLaneDraft(act, button) {
+  if (!laneDraft) return;
+  if (act === 'lane-add') {
+    const value = button?.dataset.value || '';
+    if (!value || laneDraft.showing.some((item) => item.value === value)) return;
+    if (laneDraft.showing.length >= LANE_CAP) {
+      toast(`Home can show ${LANE_CAP} lists and feeds besides Following and Discover.`);
+      return;
+    }
+    const type = button.dataset.type === 'list' ? 'list' : 'feed';
+    laneDraft.showing.push({ type, value, label: button.dataset.label || (type === 'list' ? 'List' : 'Feed') });
+    laneDraft.available = laneDraft.available.filter((item) => item.value !== value);
+    paintLaneEditor();
+    return;
+  }
+  const index = Number(button?.dataset.index);
+  if (!Number.isInteger(index) || !laneDraft.showing[index]) return;
+  if (act === 'lane-remove') {
+    const [item] = laneDraft.showing.splice(index, 1);
+    if (item) laneDraft.available.push({ ...item, kind: item.type === 'list' ? 'List' : 'Saved feed' });
+  } else {
+    const dir = act === 'lane-up' ? -1 : 1;
+    const next = index + dir;
+    if (next < 0 || next >= laneDraft.showing.length) return;
+    const [item] = laneDraft.showing.splice(index, 1);
+    laneDraft.showing.splice(next, 0, item);
+  }
+  paintLaneEditor();
+}
+
+async function saveLaneDraft() {
+  if (!laneDraft || !signedIn()) return;
+  const showing = laneDraft.showing.map((item) => ({ ...item }));
+  const button = $('lanes-body')?.querySelector('[data-act="lane-save"]');
+  if (button) button.disabled = true;
+  try {
+    await changeFeeds((items) => {
+      const wanted = new Set(showing.map((item) => item.value));
+      const pinned = showing.map((item) => {
+        const existing = items.find((row) => row.value === item.value);
+        return {
+          id: existing?.id,
+          type: item.type === 'list' ? 'list' : 'feed',
+          value: item.value,
+          pinned: true,
+        };
+      });
+      const rest = items.filter((row) => !wanted.has(row.value)).map((row) => ({ ...row, pinned: false }));
+      return [...pinned, ...rest];
+    });
+    homeLanes = showing;
+    homeLanesDid = myDid();
+    lanesAt = Date.now();
+    $('lanes')?.close();
+    toast('Home tabs saved');
+    const active = homeActive();
+    if (active?.kind === 'lane' && !homeLanes.some((item) => item.value === active.value)) location.hash = '#/';
+    else if (active) paintHomeChrome(active);
+  } catch (error) {
+    toast(error.message || 'Could not save home tabs');
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+function openHomeTabMenu(anchor) {
+  const active = homeActive();
+  const items = [{ id: 'edit-tabs', label: 'Edit tabs' }];
+  if (!active || active.kind === 'following') items.push({ id: 'home-settings', label: 'Home settings' });
+  else if (active.kind === 'lane' && active.type === 'feed') items.push({ id: 'feed-settings', label: 'Feed settings' });
+  else if (active.kind === 'lane' && active.type === 'list') items.push({ id: 'open-list', label: 'Open list' });
+  openMenu(anchor, items);
+}
+
+function profileLink(profile) {
+  const id = profile?.handle || profile?.did || '';
+  const link = new URL(location.href);
+  link.hash = `#/profile/${encodeURIComponent(id)}`;
+  return link.href;
+}
+
+function openProfileMenu(anchor) {
+  const profile = shownProfile;
+  if (!profile) return;
+  const mine = signedIn() && profile.did === myDid();
+  const blocking = profile.viewer?.blocking || '';
+  const items = [];
+  if (mine) items.push({ id: 'edit-profile', label: 'Edit profile' });
+  if (!mine && signedIn() && !blocking) {
+    items.push({ id: 'message-profile', label: 'Message' });
+    items.push({ id: 'profile-voice', label: 'Voice call' });
+    items.push({ id: 'profile-video', label: 'Video call' });
+    items.push({ id: 'profile-mute', label: profile.viewer?.muted ? 'Unmute' : 'Mute' });
+  }
+  if (!mine && signedIn()) {
+    items.push({ id: 'profile-block', label: blocking ? 'Unblock' : 'Block', danger: !blocking });
+    items.push({ id: 'profile-report', label: 'Report' });
+  }
+  items.push({ id: 'profile-copy', label: 'Copy link' });
+  items.push({ id: 'profile-share', label: 'Share' });
+  openMenu(anchor, items);
+}
+
+async function shareProfile(profile) {
+  const url = profileLink(profile);
+  const title = profile?.displayName || profile?.handle || 'Profile';
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, url });
+      return;
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied');
+  } catch {
+    toast(url);
+  }
 }
 
 async function showPeople(actor, kind) {
@@ -1550,7 +1939,7 @@ async function showPeople(actor, kind) {
 
 async function showThread(actor, rkey) {
   const token = ++generation;
-  setChrome({ title: 'Post', nav: 'home', back: true, tools: gearButton('thread-settings', 'Thread settings') });
+  setChrome({ title: 'Post', nav: 'home', back: true });
   showSkeletons();
   try {
     const did = actor.startsWith('did:') ? actor : await api.resolveHandle(actor);
@@ -1570,7 +1959,8 @@ async function showThread(actor, rkey) {
     const replyBox = signedIn()
       ? `<button type="button" class="prompt" data-act="thread-reply" data-uri="${escapeHtml(thread.post.uri)}"><span>Write a reply</span></button>`
       : '';
-    $('view').innerHTML = above + postHtml({ post: thread.post, reply: thread.parent ? { parent: thread.parent.post ? { author: thread.parent.post.author } : null } : null }) + replyBox + replies;
+    const order = '<div class="toolbar"><button type="button" class="text-btn" data-act="thread-settings">Thread order</button></div>';
+    $('view').innerHTML = order + above + postHtml({ post: thread.post, reply: thread.parent ? { parent: thread.parent.post ? { author: thread.parent.post.author } : null } : null }) + replyBox + replies;
     remember();
     document.documentElement.dataset.ready = '1';
   } catch (error) {
@@ -1730,7 +2120,7 @@ function threadSettingsHtml({ heading = true } = {}) {
 function searchSettingsHtml({ heading = true } = {}) {
   const prefs = searchPrefs();
   const head = heading ? '<h2>Search</h2>' : '';
-  return `${head}<p class="dim">The gear on Search stores these on your account with AT Protocol, in app.libresky.settings. Bluesky has no shared search-settings record.</p>
+  return `${head}<p class="dim">Search stores these on your account with AT Protocol, in app.libresky.settings. Bluesky has no shared search-settings record. Config opens this page.</p>
     <div class="segmented"><button type="button" data-sort="latest" aria-pressed="${prefs.sort !== 'top'}">Latest</button><button type="button" data-sort="top" aria-pressed="${prefs.sort === 'top'}">Top</button></div>
     ${switchRow('search.following', 'People you follow', prefs.following)}
     ${switchRow('search.hideReplies', 'Hide replies', prefs.hideReplies)}
@@ -2392,8 +2782,9 @@ function route() {
   pager?.disconnect();
   selected = -1;
   const [a, b, c, d] = parseHash();
-  if (!a) return showHome('following');
-  if (a === 'discover') return showHome('discover');
+  if (!a) return showHome({ kind: 'following' });
+  if (a === 'discover') return showHome({ kind: 'discover' });
+  if (a === 'lane' && (b === 'list' || b === 'feed') && c) return showHome({ kind: 'lane', type: b, value: c });
   if (a === 'search') return showSearch(b || '');
   if (a === 'notifications') return showNotifications(b || '');
   if ((a === 'likes' || a === 'reposts') && b) return showEngagement(a, b);
@@ -2412,7 +2803,7 @@ function route() {
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
   if (a === 'profile' && b) return showProfile(b, c || 'posts');
-  return showHome('following');
+  return showHome({ kind: 'following' });
 }
 
 function postFrom(node) {
@@ -3702,6 +4093,11 @@ function openAbout() {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+function openHelp() {
+  const dialog = $('help');
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
 function openLegal(which) {
   const privacy = $('legal-privacy');
   const terms = $('legal-terms');
@@ -4102,6 +4498,53 @@ async function cleanupBookmarks(button) {
 
 async function handleChromeAct(act, event) {
   const button = event.target.closest('[data-act]');
+  if (act === 'help') {
+    event.preventDefault();
+    openHelp();
+    return true;
+  }
+  if (act === 'help-about') {
+    event.preventDefault();
+    $('help')?.close();
+    openAbout();
+    return true;
+  }
+  if (act === 'help-privacy' || act === 'help-terms') {
+    event.preventDefault();
+    $('help')?.close();
+    openLegal(act === 'help-privacy' ? 'privacy' : 'terms');
+    return true;
+  }
+  if (act === 'tab-scroll') {
+    event.preventDefault();
+    const scroller = button?.closest('.tab-strip')?.querySelector('.tab-scroller');
+    if (scroller) {
+      const dir = Number(button.dataset.dir) || 1;
+      const amount = Math.max(140, Math.round(scroller.clientWidth * 0.65));
+      scroller.scrollBy({ left: dir * amount, behavior: 'smooth' });
+    }
+    return true;
+  }
+  if (act === 'tab-menu') {
+    event.preventDefault();
+    openHomeTabMenu(button);
+    return true;
+  }
+  if (act === 'profile-menu') {
+    event.preventDefault();
+    openProfileMenu(button);
+    return true;
+  }
+  if (act === 'lane-up' || act === 'lane-down' || act === 'lane-remove' || act === 'lane-add') {
+    event.preventDefault();
+    editLaneDraft(act, button);
+    return true;
+  }
+  if (act === 'lane-save') {
+    event.preventDefault();
+    await saveLaneDraft();
+    return true;
+  }
   if (act === 'nav-more') {
     event.preventDefault();
     openMoreMenu(button);
@@ -4207,7 +4650,7 @@ async function handleChromeAct(act, event) {
       toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
       return true;
     }
-    const peer = button?.dataset.peer || $('title-tools')?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
+    const peer = button?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
     const media = act === 'call-video' ? 'video' : 'audio';
     try {
       const [page, id] = parseHash();
@@ -4830,6 +5273,79 @@ async function onMenu(event) {
   if (id === 'go-about') return openAbout();
   if (id === 'go-privacy') return openLegal('privacy');
   if (id === 'go-terms') return openLegal('terms');
+  if (id === 'edit-tabs') return openLaneEditor();
+  if (id === 'home-settings') return openTune('home');
+  if (id === 'feed-settings') return openTune('feed', homeActive()?.value || '');
+  if (id === 'open-list') {
+    const uri = homeActive()?.value || '';
+    if (uri) location.hash = `#/list/${encodeURIComponent(uri)}`;
+    return;
+  }
+  if (id === 'edit-profile') return openProfileEditor();
+  if (id === 'message-profile') {
+    if (!signedIn()) return requireSignIn();
+    try {
+      const convo = await convoIdFor(shownProfile?.did || '');
+      location.hash = `#/messages/${encodeURIComponent(convo)}`;
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'profile-voice' || id === 'profile-video') {
+    if (!signedIn()) return requireSignIn();
+    if (!canCall()) {
+      toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      return;
+    }
+    const peer = shownProfile?.did || '';
+    try {
+      const convoId = await convoIdFor(peer);
+      if (!convoId || !peer) throw new Error('Could not open that conversation.');
+      await startCall({ convoId, peerDid: peer, media: id === 'profile-video' ? 'video' : 'audio' });
+    } catch (error) {
+      toast(error?.message || 'The call could not start.');
+    }
+    return;
+  }
+  if (id === 'profile-mute') {
+    const profile = shownProfile;
+    if (!profile?.did || !signedIn()) return requireSignIn();
+    try {
+      if (profile.viewer?.muted) await api.unmuteActor(profile.did);
+      else await api.muteActor(profile.did);
+      toast(profile.viewer?.muted ? 'Unmuted' : `Muted @${profile.handle || 'account'}`);
+      route();
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'profile-block') {
+    const profile = shownProfile;
+    if (!profile?.did || !signedIn()) return requireSignIn();
+    const existing = profile.viewer?.blocking || '';
+    try {
+      if (existing) {
+        await api.deleteRecord(existing);
+        toast('Unblocked');
+      } else {
+        const handle = profile.handle ? `@${profile.handle}` : 'this account';
+        if (!window.confirm(`Block ${handle}? You will not see each other’s posts.`)) return;
+        await api.block(profile.did);
+        toast('Blocked');
+      }
+      route();
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'profile-report') return openReport({ did: shownProfile?.did });
+  if (id === 'profile-copy' || id === 'profile-share') {
+    const profile = shownProfile;
+    if (!profile) return;
+    if (id === 'profile-share') return shareProfile(profile);
+    try {
+      await navigator.clipboard.writeText(profileLink(profile));
+      toast('Link copied');
+    } catch (error) { toast(error.message); }
+    return;
+  }
   if (id === 'go-ai') return void (location.hash = '#/ai');
   if (id === 'add-account') return addAccount();
   if (id.startsWith('switch-account:')) return switchAccount(id.slice('switch-account:'.length));
@@ -5398,10 +5914,14 @@ function bind() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && homeWatch.timer) pollHome(homeWatch.token);
   });
-  window.addEventListener('resize', placeFresh);
+  window.addEventListener('resize', () => {
+    placeFresh();
+    measureHead();
+    document.querySelectorAll('.tab-scroller').forEach((scroller) => syncStrip(scroller));
+  });
   $('menu').addEventListener('click', onMenu);
   document.addEventListener('click', (event) => {
-    if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
+    if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
     if (!event.target.closest('#hovercard') && !actorFromLink(event.target)) closeHover();
   });
@@ -5415,6 +5935,12 @@ function bind() {
     else openMenu($('account-btn'), accountMenuItems());
   });
   $('about-close')?.addEventListener('click', () => $('about')?.close());
+  $('help-close')?.addEventListener('click', () => $('help')?.close());
+  $('lanes-close')?.addEventListener('click', () => $('lanes')?.close());
+  $('help')?.addEventListener('click', (event) => {
+    if (event.target.closest('a[href^="#"]')) $('help')?.close();
+  });
+  $('lanes')?.querySelector('form')?.addEventListener('submit', (event) => event.preventDefault());
   $('legal-close')?.addEventListener('click', () => $('legal')?.close());
   $('call-hangup')?.addEventListener('click', () => hangUp(true));
   $('login-form').addEventListener('submit', (event) => {
