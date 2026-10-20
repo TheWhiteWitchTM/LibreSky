@@ -57,7 +57,8 @@ let exploreTab = 'foryou';
 const trendCache = { at: 0, list: null, pending: null };
 const EXPLORE_TABS = [
   { id: 'foryou', label: 'For you', match: () => true },
-  { id: 'news', label: 'News', match: (trend) => trend.category === 'news' || trend.category === 'politics' },
+  { id: 'news', label: 'News', match: (trend) => trend.category === 'news' },
+  { id: 'politics', label: 'Politics', match: (trend) => trend.category === 'politics' },
   { id: 'sports', label: 'Sports', match: (trend) => trend.category === 'sports' },
   { id: 'entertainment', label: 'Entertainment', match: (trend) => trend.category === 'entertainment' },
   { id: 'culture', label: 'Culture', match: (trend) => trend.category === 'culture' },
@@ -322,7 +323,13 @@ function loadTrends() {
   if (Array.isArray(trendCache.list) && Date.now() - trendCache.at < 60_000) return Promise.resolve(trendCache.list);
   if (!trendCache.pending) {
     trendCache.pending = api.getTrends(25).then((data) => {
-      const list = data.trends || [];
+      const seen = new Set();
+      const list = (data.trends || []).filter((trend) => {
+        const key = trend?.link || trend?.displayName || '';
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       trendCache.at = Date.now();
       trendCache.list = list;
       trendCache.pending = null;
@@ -341,14 +348,24 @@ function exploreTabsHtml(trends) {
   return `<div class="explore-tabs" role="tablist">${visible.map((tab) => `<button type="button" role="tab" data-explore="${tab.id}" aria-selected="${exploreTab === tab.id ? 'true' : 'false'}">${escapeHtml(tab.label)}</button>`).join('')}</div>`;
 }
 
-function visibleTrends(trends) {
-  const tab = EXPLORE_TABS.find((item) => item.id === exploreTab) || EXPLORE_TABS[0];
-  return (trends || []).filter(tab.match);
+function preferLive(trends) {
+  const list = trends || [];
+  const live = list.filter((trend) => trend?.status !== 'stale');
+  const chosen = live.length ? live : list;
+  const heat = { hot: 0, cooling: 1 };
+  return [...chosen].sort((a, b) => (heat[a.status] ?? 2) - (heat[b.status] ?? 2));
 }
 
-function trendBlock(trends, limit) {
+function visibleTrends(trends) {
+  const tab = EXPLORE_TABS.find((item) => item.id === exploreTab) || EXPLORE_TABS[0];
+  return preferLive((trends || []).filter(tab.match));
+}
+
+function trendBlock(trends, limit, title) {
   const rows = trendsHtml((trends || []).slice(0, limit));
-  return rows ? `<div class="trends">${rows}</div>` : '';
+  if (!rows) return '';
+  const heading = title ? `<h2 class="section-label">${escapeHtml(title)}</h2>` : '';
+  return `${heading}<div class="trends">${rows}</div>`;
 }
 
 async function loadRail() {
@@ -356,7 +373,7 @@ async function loadRail() {
   let trends = '';
   try {
     const list = await loadTrends();
-    const rows = trendsHtml(list.slice(0, 5), { compact: true });
+    const rows = trendsHtml(preferLive(list).slice(0, 5), { compact: true });
     if (rows) trends = `<section class="panel"><h2>What's happening</h2><div class="trends">${rows}</div><a class="panel-more" href="#/search">Show more</a></section>`;
   } catch {
     trends = '';
@@ -434,7 +451,7 @@ async function showSearch(query, options = {}) {
   const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
   const placeholder = query
     ? skeletons(4)
-    : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
+    : (known ? (trendBlock(visibleTrends(known), undefined, 'Trending') || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
   $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><a class="text-btn pack-entry" href="#/packs">Starter packs</a><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
@@ -447,7 +464,7 @@ async function paintExplore(token) {
     if (token !== generation) return;
     const controls = $('search-controls');
     if (controls) controls.innerHTML = exploreTabsHtml(trends);
-    const rows = trendBlock(visibleTrends(trends));
+    const rows = trendBlock(visibleTrends(trends), undefined, 'Trending');
     $('search-results').innerHTML = rows || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.');
   } catch (error) {
     if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Trends are unavailable', error.message || 'Could not load what is happening.');
@@ -474,7 +491,7 @@ async function paintSearchResults(token, query) {
       let trends = [];
       try { trends = await loadTrends(); } catch { trends = []; }
       if (token !== generation) return;
-      const rows = trendBlock(trends, 8);
+      const rows = trendBlock(preferLive(trends), 8);
       missed = emptyHtml('No results', `Nothing matched "${query}".`) + (rows ? `<h2 class="section-label">What's happening</h2>${rows}` : '');
     }
     $('search-results').innerHTML = `${peopleBlock}${packsBlock}${postsHtml}${missed}`;
@@ -1379,15 +1396,19 @@ async function askOnPage(text) {
   }
 }
 
+function callStartHtml() {
+  return `<form id="call-start" class="add-row call-start"><input id="call-handle" placeholder="Call any handle" autocomplete="off" spellcheck="false" autocapitalize="off"><button class="primary small" type="submit" data-media="audio">Voice</button><button class="primary small" type="submit" data-media="video">Video</button></form>`;
+}
+
 async function showCalls() {
   const token = ++generation;
   setChrome({ title: 'Calls', nav: 'calls' });
   const ready = canCall();
   const note = ready
-    ? 'Voice and video connect two LibreSky windows. Chat messages only carry the setup, and they show up as headers in the conversation.'
+    ? 'Voice and video connect two LibreSky windows. Enter a handle to call someone new, or pick someone you already chat with.'
     : 'This page is not a secure context, or this browser has no WebRTC, so a call cannot start here. Open LibreSky over https, or on http://127.0.0.1.';
   if (!signedIn()) {
-    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls', 'Sign in to call someone you chat with.', '<button type="button" class="primary" data-act="signin">Sign in</button>')}`;
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls', 'Sign in to start a voice or video call.', '<button type="button" class="primary" data-act="signin">Sign in</button>')}`;
     return;
   }
   showSkeletons();
@@ -1395,9 +1416,37 @@ async function showCalls() {
     const data = await api.listConvos();
     if (token !== generation) return;
     const rows = (data.convos || []).map((convo) => callConvoHtml(convo, myDid())).join('');
-    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${rows || emptyHtml('No one to call', 'Start a chat, then come back here to call them.')}`;
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
   } catch (error) {
-    if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
+    if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
+  }
+}
+
+async function startCallToHandle(media) {
+  if (!signedIn()) return requireSignIn();
+  if (!canCall()) {
+    toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+    return;
+  }
+  const input = $('call-handle');
+  const handle = input?.value.trim().replace(/^@/, '');
+  if (!handle) {
+    toast('Enter a handle to call.');
+    input?.focus();
+    return;
+  }
+  const buttons = [...(input?.form?.querySelectorAll('button') || [])];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const did = await api.resolveHandle(handle);
+    if (!did) throw new Error('Could not find that account.');
+    if (did === myDid()) throw new Error('You cannot call yourself.');
+    const convoId = await convoIdFor(did);
+    await startCall({ convoId, peerDid: did, media });
+  } catch (error) {
+    toast(error?.message || 'The call could not start.');
+  } finally {
+    buttons.forEach((button) => { if (button.isConnected) button.disabled = false; });
   }
 }
 
@@ -2422,34 +2471,77 @@ function refreshHere() {
   if (['feeds', 'feed', 'lists', 'list', 'bookmarks', 'notifications', 'messages'].includes(page)) return route();
 }
 
+async function followedSubjects() {
+  const subjects = new Map();
+  const extras = [];
+  let cursor = '';
+  for (let page = 0; page < 100; page += 1) {
+    const data = await api.listRecords('app.bsky.graph.follow', cursor || undefined);
+    (data.records || []).forEach((record) => {
+      const subject = record?.value?.subject;
+      if (!subject) return;
+      if (subjects.has(subject)) {
+        if (record.uri) extras.push(record.uri);
+      } else {
+        subjects.set(subject, record.uri || '');
+      }
+    });
+    if (!data.cursor || data.cursor === cursor) break;
+    cursor = data.cursor;
+  }
+  return { known: new Set(subjects.keys()), extras };
+}
+
 async function followAllBack(button) {
   if (!signedIn()) return requireSignIn();
-  if (!window.confirm('Follow everyone who follows you and you do not follow back? This stops after 80 accounts. Run it again to continue.')) return;
+  if (!window.confirm('Follow everyone who follows you and you do not follow back? Each person is followed once, and extra follow records for the same person are removed. This stops after 80 new follows. Run it again to continue.')) return;
   if (button) {
     button.disabled = true;
-    button.textContent = 'Following…';
+    button.textContent = 'Checking…';
   }
   let followed = 0;
+  let removed = 0;
   let cursor;
   let capped = false;
   let limited = false;
+  let lastPage = '';
   try {
+    const found = await followedSubjects().catch(() => ({ known: new Set(), extras: [] }));
+    const already = found.known;
+    for (const uri of found.extras.slice(0, 200)) {
+      try {
+        await api.deleteRecord(uri);
+        removed += 1;
+      } catch {
+        /* that extra follow stays until the next run */
+      }
+    }
+    if (button?.isConnected) button.textContent = 'Following…';
     for (let page = 0; page < 30 && followed < 80 && !limited; page += 1) {
       const data = await api.getFollowers(myDid(), cursor);
+      const ids = (data.followers || []).map((actor) => actor?.did || '').filter(Boolean);
+      const pageKey = ids.join(',');
+      if (pageKey && pageKey === lastPage) break;
+      lastPage = pageKey;
       const due = [];
       (data.followers || []).forEach((actor) => {
         if (followed + due.length >= 80) return;
-        if (!actor?.did || actor.did === myDid()) return;
-        if (actor.viewer?.following || actor.viewer?.blocking || actor.viewer?.blockedBy) return;
+        if (!actor?.did || actor.did === myDid() || already.has(actor.did)) return;
+        if (actor.viewer?.following || actor.viewer?.blocking || actor.viewer?.blockedBy) {
+          already.add(actor.did);
+          return;
+        }
+        already.add(actor.did);
         due.push(actor.did);
       });
-      for (let i = 0; i < due.length; i += 4) {
+      for (let i = 0; i < due.length && !limited; i += 4) {
         const slice = due.slice(i, i + 4);
         const results = await Promise.all(slice.map(async (did) => {
           try {
             await api.follow(did);
             return 'ok';
           } catch (error) {
+            already.delete(did);
             return error?.status === 429 ? 'limit' : 'skip';
           }
         }));
@@ -2457,14 +2549,14 @@ async function followAllBack(button) {
           if (result === 'ok') followed += 1;
           if (result === 'limit') limited = true;
         });
-        if (limited) break;
       }
       if (followed >= 80 && data.cursor) capped = true;
-      if (!data.cursor || capped) break;
+      if (!data.cursor || capped || data.cursor === cursor) break;
       cursor = data.cursor;
     }
     const tail = capped ? ' Run it again to continue.' : (limited ? ' Bluesky asked for a pause. Run it again in a little while.' : '');
-    toast(followed ? `Followed ${followed} ${followed === 1 ? 'person' : 'people'} back.${tail}` : 'You already follow them back.');
+    const cleaned = removed ? ` Removed ${removed} extra ${removed === 1 ? 'follow' : 'follows'}.` : '';
+    toast(followed ? `Followed ${followed} ${followed === 1 ? 'person' : 'people'} back.${tail}${cleaned}` : `You already follow them back.${cleaned}`);
     await refreshHere();
   } catch (error) {
     toast(error.message);
@@ -3818,6 +3910,11 @@ function bind() {
         const rows = packList(data.starterPacks);
         box.innerHTML = rows ? `<div class="packs">${rows}</div>` : emptyHtml('No starter packs', 'Nothing matched that search.');
       }).catch((error) => { box.innerHTML = emptyHtml('Search failed', error.message); });
+    }
+    if (event.target.id === 'call-start') {
+      event.preventDefault();
+      const media = event.submitter?.dataset?.media === 'video' ? 'video' : 'audio';
+      startCallToHandle(media);
     }
     if (event.target.id === 'list-add') {
       event.preventDefault();

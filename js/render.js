@@ -47,9 +47,18 @@ function counts(post) {
   };
 }
 
+function domainVerified(actor) {
+  const handle = String(actor?.handle || '').trim().toLowerCase();
+  if (!handle || handle.endsWith('.bsky.social') || handle.endsWith('.invalid') || handle === 'handle.invalid') return false;
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(handle);
+}
+
 function verifiedMark(actor) {
-  if (actor?.verification?.verifiedStatus !== 'valid') return '';
-  return '<svg class="verified" viewBox="0 0 16 16" role="img" aria-label="Verified"><title>Verified</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>';
+  const verification = actor?.verification || {};
+  const official = verification.verifiedStatus === 'valid' || verification.trustedVerifierStatus === 'valid';
+  if (!official && !domainVerified(actor)) return '';
+  const label = official ? 'Verified' : 'Verified domain';
+  return `<svg class="verified" viewBox="0 0 16 16" role="img" aria-label="${label}"><title>${label}</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
 }
 
 function action(name, label, on, count, listAct) {
@@ -257,10 +266,15 @@ function trendHref(trend) {
   return `#/search/${encodeURIComponent(name || 'Bluesky')}`;
 }
 
+function trendKicker(trend) {
+  const category = TREND_CATEGORY[trend?.category] || 'Trending';
+  if (trend?.status === 'hot') return `${category} · Hot`;
+  if (trend?.status === 'cooling' || trend?.status === 'stale') return category;
+  return `${category} · Trending`;
+}
+
 export function trendHtml(trend, options = {}) {
   const name = String(trend?.displayName || '').trim() || 'Trend';
-  const category = TREND_CATEGORY[trend?.category] || 'Trending';
-  const heat = trend?.status === 'hot' ? 'Hot' : 'Trending';
   const count = compact(trend?.postCount);
   const faces = (trend?.actors || []).slice(0, 3);
   const stack = faces.length
@@ -269,11 +283,12 @@ export function trendHtml(trend, options = {}) {
   const blurb = !options.compact && trend?.description
     ? `<span class="trend-desc">${escapeHtml(trend.description)}</span>`
     : '';
-  return `<a class="trend" href="${attr(trendHref(trend))}"><span class="trend-kicker">${escapeHtml(category)} · ${heat}</span><strong>${escapeHtml(name)}</strong>${blurb}<span class="trend-meta">${stack}${count ? `<span>${count} posts</span>` : ''}</span></a>`;
+  const rank = options.rank ? `<span class="trend-rank">${options.rank}.</span>` : '';
+  return `<a class="trend" href="${attr(trendHref(trend))}"><span class="trend-kicker">${escapeHtml(trendKicker(trend))}</span><strong>${rank ? `${rank} ` : ''}${escapeHtml(name)}</strong>${blurb}<span class="trend-meta">${stack}${count ? `<span>${count} posts</span>` : ''}</span></a>`;
 }
 
 export function trendsHtml(trends, options) {
-  return (trends || []).map((trend) => trendHtml(trend, options)).join('');
+  return (trends || []).map((trend, index) => trendHtml(trend, { ...options, rank: index + 1 })).join('');
 }
 
 export function profileHtml(profile) {

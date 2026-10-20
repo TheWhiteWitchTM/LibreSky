@@ -183,11 +183,21 @@ const madeTrend = trendsHtml([{
   actors: [{ displayName: 'Ada', handle: 'ada.bsky.social', avatar: 'https://cdn.example/a.jpg' }],
 }]);
 assert.match(madeTrend, /Steam &lt;Next&gt;/);
+assert.match(madeTrend, /class="trend-rank">1\.</);
 assert.match(madeTrend, /Entertainment · Hot/);
 assert.match(madeTrend, /190K posts/);
 assert.match(madeTrend, /#\/feed\/at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp\.bsky\.feed\.generator%2Fd3c1bec66421/);
 assert.match(madeTrend, /class="trend-desc"/);
 assert.doesNotMatch(madeTrend, /<script/i);
+const coolingTrend = trendsHtml([{
+  displayName: 'Alberta',
+  link: '/profile/did:plc:abc/feed/cool1',
+  postCount: 40,
+  status: 'cooling',
+  category: 'politics',
+}]);
+assert.match(coolingTrend, /trend-kicker">Politics</);
+assert.doesNotMatch(coolingTrend, /Politics · Trending/);
 const compactTrend = trendsHtml([{
   displayName: 'Cats',
   description: 'Should stay off the rail.',
@@ -283,6 +293,22 @@ assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
 const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
 assert.match(appSource, /<textarea id="chat-text"/);
 assert.match(appSource, /data-act="follow-back"/);
+assert.match(appSource, /id="call-start"/);
+assert.match(appSource, /listRecords\('app\.bsky\.graph\.follow'/);
+const domainProfile = profileHtml({ handle: 'app.sociallydead.me', displayName: 'sociallydead.me', did: 'did:plc:test' });
+assert.match(domainProfile, /aria-label="Verified domain"/);
+const plainProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' });
+assert.doesNotMatch(plainProfile, /verified/);
+const badgeProfile = profileHtml({
+  handle: 'ada.bsky.social',
+  displayName: 'Ada',
+  did: 'did:plc:ada',
+  verification: { verifiedStatus: 'valid' },
+});
+assert.match(badgeProfile, /aria-label="Verified"/);
+assert.doesNotMatch(badgeProfile, /Verified domain/);
+const invalidProfile = profileHtml({ handle: 'handle.invalid', displayName: 'Gone', did: 'did:plc:gone' });
+assert.doesNotMatch(invalidProfile, /verified/);
 assert.match(appSource, /data-act="chat-read"/);
 assert.match(appSource, /data-act="chat-cleanup"/);
 assert.match(appSource, /'list-delete'/);

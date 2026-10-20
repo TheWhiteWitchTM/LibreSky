@@ -310,15 +310,13 @@ export function getSuggestions(signal) {
   return xrpc('app.bsky.actor.getSuggestions', { params: { limit: 5 }, signal, auth: 'required' });
 }
 
-export async function getTrends(limit = 25, signal) {
-  const run = (auth) => xrpc('app.bsky.unspecced.getTrends', { params: { limit }, signal, auth });
-  try {
-    return await run();
-  } catch (error) {
-    if (error?.name === 'AbortError' || signal?.aborted) throw error;
-    if (!getOauth() && !getPassword()) throw error;
-    return run('public');
-  }
+export function getTrends(limit = 25, signal) {
+  return xrpc('app.bsky.unspecced.getTrends', {
+    params: { limit },
+    signal,
+    auth: 'public',
+    headers: { 'Accept-Language': 'en' },
+  });
 }
 
 export function getNotifications(cursor, signal, reasons) {
@@ -593,6 +591,13 @@ export function follow(did) {
       subject: did,
       createdAt: new Date().toISOString(),
     }),
+    auth: 'required',
+  });
+}
+
+export function listRecords(collection, cursor, limit = 100) {
+  return xrpc('com.atproto.repo.listRecords', {
+    params: { repo: currentDid(), collection, limit, cursor },
     auth: 'required',
   });
 }

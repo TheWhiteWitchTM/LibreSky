@@ -251,6 +251,7 @@ img { max-width: 100%; }
 .trend:hover { background: var(--hover); }
 .trend-kicker { color: var(--text-2); font-size: 13px; font-weight: 600; }
 .trend strong { font-size: 15px; letter-spacing: -0.01em; }
+.trend-rank { color: var(--text-2); font-weight: 800; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .trend-desc {
   color: var(--text-2);
   display: -webkit-box;
@@ -470,6 +471,8 @@ a.facet:hover { text-decoration: underline; }
 .list-head h2 { margin: 12px 0 4px; font-size: 22px; }
 .list-head .bio { margin: 0 0 8px; white-space: pre-wrap; }
 .add-row { display: flex; gap: 8px; align-items: center; padding: 0 16px 12px; }
+.call-start { flex-wrap: wrap; padding-top: 12px; }
+.call-start input { min-width: 12rem; }
 .add-row input {
   flex: 1;
   border: 1px solid var(--border);
