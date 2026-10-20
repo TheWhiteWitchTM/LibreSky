@@ -20,4 +20,6 @@ A setup guide will land here when the edition is ready to run. The public client
 
 ## Already in the sky
 
+[![LibreSky. Edit, AI, voice, video, and chat.](assets/banner.png)](README.md)
+
 [LibreSky](README.md) is the client you can use now. Home, Discover, search, chat, calls, and `@ai` are live there. Corporate is the one coming next.

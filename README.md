@@ -1,6 +1,6 @@
 # LibreSky
 
-![LibreSky, a Bluesky client](assets/banner.png)
+![LibreSky. Edit, AI, voice, video, and chat.](assets/banner.png)
 
 The sky, in a browser tab.
 
@@ -40,3 +40,7 @@ The pages and scripts are about 1.6 MB. A small Raspberry Pi can host them. The 
 ## Yours to read
 
 MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it.
+
+[![LibreSky Corporate, coming soon. Self-hosted services, small enough for a Pi.](assets/banner-corporate.png)](CORPORATE.md)
+
+[LibreSky Corporate](CORPORATE.md) is the custom edition. You host the services. A small Pi can hold the client. That one is coming soon.
