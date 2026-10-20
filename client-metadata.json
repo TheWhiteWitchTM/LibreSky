@@ -2,13 +2,12 @@
   "client_id": "https://thewhitewitchtm.github.io/LibreSky/client-metadata.json",
   "client_name": "LibreSky",
   "client_uri": "https://thewhitewitchtm.github.io/LibreSky/",
-  "logo_uri": "https://thewhitewitchtm.github.io/LibreSky/assets/icon.svg",
+  "logo_uri": "https://thewhitewitchtm.github.io/LibreSky/assets/icon.png",
   "redirect_uris": [
     "https://thewhitewitchtm.github.io/LibreSky/",
-    "http://127.0.0.1:4173/",
-    "http://localhost:4173/"
+    "https://thewhitewitchtm.github.io/LibreSky/index.html"
   ],
-  "scope": "atproto transition:generic",
+  "scope": "atproto transition:generic transition:chat.bsky",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",

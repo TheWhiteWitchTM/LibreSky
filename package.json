@@ -1,29 +1,15 @@
 {
-  "name": "libreoffice",
-  "productName": "LibreOffice",
-  "version": "0.1.0",
-  "description": "Alpha. A dark Bluesky client for LibreSky.",
-  "author": {
-    "name": "Mira (The White Witch™)",
-    "email": "thewhitewitchtm@google.com",
-    "url": "https://x.com/TheWhiteWitchTM"
-  },
+  "name": "libresky",
   "private": true,
+  "description": "LibreSky, a Bluesky client for the browser.",
   "type": "module",
-  "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "web": "bash bin/libresky",
-    "smoke": "node scripts/smoke.mjs",
-    "smoke:window": "node scripts/window-smoke.mjs",
-    "desktop": "bash scripts/install-desktop.sh",
-    "icon": "node scripts/write-icon.mjs"
+    "build:auth": "esbuild src/oauth-entry.js --bundle --format=esm --platform=browser --target=es2022 --outfile=js/vendor/auth.js --legal-comments=none",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
-    "electron": "^33.4.11"
-  },
-  "engines": {
-    "node": ">=20"
+    "@atproto/oauth-client-browser": "0.5.4",
+    "esbuild": "^0.25.10"
   },
   "license": "MIT"
 }

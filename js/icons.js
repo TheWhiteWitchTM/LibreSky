@@ -1,0 +1,23 @@
+const PATHS = {
+  home: '<path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/>',
+  search: '<path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/>',
+  bell: '<path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/>',
+  chat: '<path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/>',
+  feeds: '<path fill="currentColor" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v3A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5v-3zm0 8A1.5 1.5 0 0 1 5.5 12h13a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-3z"/>',
+  lists: '<path fill="currentColor" d="M8 6h12v2H8V6zM8 11h12v2H8v-2zm0 5h8v2H8v-2zM4.5 6.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm0 5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm0 5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/>',
+  bookmark: '<path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/>',
+  user: '<path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/>',
+  settings: '<path fill="currentColor" d="M4 7.2h6.1a2.4 2.4 0 0 0 4.6 0H20v2h-5.3a2.4 2.4 0 0 0-4.6 0H4v-2zm0 7.6h2.2a2.4 2.4 0 0 0 4.6 0H20v2H10.8a2.4 2.4 0 0 0-4.6 0H4v-2z"/>',
+  reply: '<path fill="none" stroke="currentColor" stroke-width="1.8" d="M7 16.8 4.8 19v-2.6A6.6 6.6 0 1 1 8 17.2"/>',
+  repost: '<path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M7 7h8.2L13 4.8M17 17H8.8L11 19.2M7.2 7V16M16.8 17V8"/>',
+  heart: '<path class="heart" fill="none" stroke="currentColor" stroke-width="1.8" d="M12 19s-6.2-3.7-6.2-8.1A3.4 3.4 0 0 1 12 8.6a3.4 3.4 0 0 1 6.2 2.3C18.2 15.3 12 19 12 19z"/>',
+  image: '<path fill="currentColor" d="M5 5.5h14A1.5 1.5 0 0 1 20.5 7v10a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17V7A1.5 1.5 0 0 1 5 5.5zm1.2 9.2 2.3-2.8 1.8 2.1 2.6-3.4 4.4 5.6H6.2zM8.2 10.2a1.3 1.3 0 1 0-1.3-1.3 1.3 1.3 0 0 0 1.3 1.3z"/>',
+  more: '<circle cx="6" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/>',
+  back: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/>',
+  close: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/>',
+  plus: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/>',
+};
+
+export function icon(name) {
+  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name] || ''}</svg>`;
+}

@@ -1,468 +1,489 @@
-// LibreSky AT Protocol API Client
-import { state, setSession, clearSession } from './state.js';
+import { currentDid, getOauth, getPassword, setPassword } from './session.js';
+import { splitAtUri } from './util.js';
 
-const PUBLIC_XRPC = 'https://public.api.bsky.app/xrpc';
-const WHATS_HOT_FEED = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
+const PUBLIC = 'https://public.api.bsky.app';
+const PUBLIC_ALT = 'https://api.bsky.app';
+export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
+const CHAT_PROXY = 'did:web:api.bsky.chat#bsky_chat';
 
-export function getXrpcBase() {
-  if (state.session && state.session.accessJwt) {
-    return (state.pdsUrl || 'https://bsky.social').replace(/\/$/, '') + '/xrpc';
-  }
-  return PUBLIC_XRPC;
+let refreshLock = null;
+
+function query(params) {
+  const search = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value == null || value === '') return;
+    if (Array.isArray(value)) value.forEach((item) => search.append(key, String(item)));
+    else search.set(key, String(value));
+  });
+  const text = search.toString();
+  return text ? `?${text}` : '';
 }
 
-export async function request(endpoint, options = {}) {
-  const base = options.publicOnly ? PUBLIC_XRPC : getXrpcBase();
-  const url = new URL(base + '/' + endpoint);
-
-  if (options.params) {
-    Object.entries(options.params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
-    });
+async function read(res) {
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { data = { message: text.slice(0, 240) }; }
   }
-
-  const headers = { ...(options.headers || {}) };
-  if (!options.publicOnly && state.session?.accessJwt) {
-    headers['Authorization'] = `Bearer ${state.session.accessJwt}`;
+  if (!res.ok) {
+    const error = new Error(data?.message || data?.error || `Bluesky request failed (${res.status})`);
+    error.status = res.status;
+    error.data = data;
+    throw error;
   }
+  return data ?? {};
+}
 
-  let body = options.body;
-  if (body && typeof body === 'object' && !(body instanceof Blob) && !(body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(body);
-  }
-
-  try {
-    let res = await fetch(url.toString(), {
-      method: options.method || 'GET',
-      headers,
-      body,
-    });
-
-    // Check for expired token
-    if (res.status === 401 && state.session?.refreshJwt && !options._retried) {
-      const refreshed = await refreshSession();
-      if (refreshed) {
-        return request(endpoint, { ...options, _retried: true });
+async function refreshPassword() {
+  const session = getPassword();
+  if (!session?.refreshJwt) return false;
+  if (!refreshLock) {
+    refreshLock = (async () => {
+      const res = await fetch(`${session.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.refreshSession`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.refreshJwt}` },
+      });
+      if (!res.ok) {
+        setPassword(null);
+        return false;
       }
-    }
-
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      const msg = errJson.message || `Request failed with status ${res.status}`;
-      const err = new Error(msg);
-      err.status = res.status;
-      err.data = errJson;
-      throw err;
-    }
-
-    return await res.json();
-  } catch (err) {
-    // If authenticated request failed and can fallback to public
-    if (!options.publicOnly && options.allowPublicFallback && !state.session?.accessJwt) {
-      return request(endpoint, { ...options, publicOnly: true });
-    }
-    throw err;
+      const data = await read(res);
+      setPassword({
+        ...session,
+        accessJwt: data.accessJwt,
+        refreshJwt: data.refreshJwt,
+        handle: data.handle || session.handle,
+        did: data.did || session.did,
+      });
+      return true;
+    })().finally(() => { refreshLock = null; });
   }
+  return refreshLock;
 }
 
-// ----------------- Authentication -----------------
+export async function xrpc(ns, options = {}) {
+  const method = options.method || (options.body !== undefined || options.blob ? 'POST' : 'GET');
+  const path = `/xrpc/${ns}${query(options.params)}`;
+  const headers = new Headers(options.headers || {});
+  const oauth = options.auth === 'public' ? null : getOauth();
+  const password = options.auth === 'public' ? null : getPassword();
+  if (options.auth === 'required' && !oauth && !password) throw new Error('Sign in with Bluesky to do that.');
 
-export async function createSession(identifier, password, pdsUrl = 'https://bsky.social') {
-  const url = pdsUrl.replace(/\/$/, '') + '/xrpc/com.atproto.server.createSession';
-  const res = await fetch(url, {
+  if (oauth) {
+    if (options.blob) headers.set('Content-Type', options.blob.type || 'application/octet-stream');
+    else if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+    const res = await oauth.fetchHandler(path, {
+      method,
+      headers,
+      body: options.blob || (options.body !== undefined ? JSON.stringify(options.body) : undefined),
+      signal: options.signal,
+    });
+    return read(res);
+  }
+
+  const base = password ? password.pds.replace(/\/$/, '') : PUBLIC;
+  if (password) headers.set('Authorization', `Bearer ${password.accessJwt}`);
+  if (options.body !== undefined && !options.blob) headers.set('Content-Type', 'application/json');
+  if (options.blob) headers.set('Content-Type', options.blob.type || 'application/octet-stream');
+  const init = {
+    method,
+    headers,
+    body: options.blob || (options.body !== undefined ? JSON.stringify(options.body) : undefined),
+    signal: options.signal,
+  };
+  let res;
+  try {
+    res = await fetch(base + path, init);
+  } catch (error) {
+    if (password || error?.name === 'AbortError') throw error;
+    res = await fetch(PUBLIC_ALT + path, init);
+  }
+  if (!password && (res.status === 403 || res.status === 429)) {
+    const alt = await fetch(PUBLIC_ALT + path, init);
+    if (alt.ok) res = alt;
+  }
+  if (res.status === 401 && password && !options.retried) {
+    const refreshed = await refreshPassword();
+    if (refreshed) return xrpc(ns, { ...options, retried: true });
+  }
+  return read(res);
+}
+
+async function didDocument(did) {
+  if (did.startsWith('did:web:')) {
+    const host = did.slice('did:web:'.length).split(':').map(decodeURIComponent).join('/');
+    const res = await fetch(`https://${host}/.well-known/did.json`);
+    if (!res.ok) throw new Error('Could not read that account’s DID document.');
+    return res.json();
+  }
+  const res = await fetch(`https://plc.directory/${encodeURIComponent(did)}`);
+  if (!res.ok) throw new Error('Could not find that Bluesky account.');
+  return res.json();
+}
+
+export async function resolvePds(identifier) {
+  const handle = identifier.trim().replace(/^@/, '');
+  let did = handle;
+  if (!did.startsWith('did:')) {
+    const resolved = await xrpc('com.atproto.identity.resolveHandle', {
+      params: { handle },
+      auth: 'public',
+    });
+    did = resolved.did;
+  }
+  const doc = await didDocument(did);
+  if (!handle.startsWith('did:')) {
+    const claimed = (doc.alsoKnownAs || []).some((name) => String(name).toLowerCase() === `at://${handle.toLowerCase()}`);
+    if (!claimed) throw new Error('That handle does not match the account record.');
+  }
+  const service = (doc.service || []).find((item) => item.type === 'AtprotoPersonalDataServer' || item.id === '#atproto_pds');
+  if (!service?.serviceEndpoint) throw new Error('Could not find this account’s server.');
+  return { did, pds: service.serviceEndpoint, handle };
+}
+
+export async function loginWithPassword(identifier, password) {
+  const id = identifier.trim().replace(/^@/, '');
+  const found = await resolvePds(id);
+  const res = await fetch(`${found.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.createSession`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier: identifier.trim(), password }),
+    body: JSON.stringify({ identifier: id, password }),
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Login failed. Please verify your handle and App Password.');
-  }
-
-  const sessionData = await res.json();
-  state.pdsUrl = pdsUrl;
-
-  // Fetch full profile to get display name and avatar
+  const data = await read(res);
+  const session = {
+    accessJwt: data.accessJwt,
+    refreshJwt: data.refreshJwt,
+    did: data.did,
+    handle: data.handle,
+    pds: found.pds,
+    displayName: data.handle,
+    avatar: '',
+  };
+  setPassword(session);
   try {
-    const profile = await fetch(pdsUrl.replace(/\/$/, '') + `/xrpc/app.bsky.actor.getProfile?actor=${sessionData.did}`, {
-      headers: { Authorization: `Bearer ${sessionData.accessJwt}` },
-    }).then((r) => r.json());
-    sessionData.avatar = profile.avatar;
-    sessionData.displayName = profile.displayName || sessionData.handle;
-  } catch (e) {
-    console.warn('Failed to fetch full profile after login', e);
+    const profile = await getProfile(data.did);
+    session.displayName = profile.displayName || data.handle;
+    session.avatar = profile.avatar || '';
+    setPassword(session);
+  } catch {
+    /* the session is still valid */
   }
-
-  setSession(sessionData);
-  return sessionData;
+  return session;
 }
 
-export async function refreshSession() {
-  if (!state.session?.refreshJwt) return false;
-  try {
-    const pds = state.pdsUrl || 'https://bsky.social';
-    const res = await fetch(pds.replace(/\/$/, '') + '/xrpc/com.atproto.server.refreshSession', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${state.session.refreshJwt}` },
-    });
-    if (!res.ok) {
-      clearSession();
-      return false;
-    }
-    const data = await res.json();
-    setSession({
-      ...state.session,
-      accessJwt: data.accessJwt,
-      refreshJwt: data.refreshJwt,
-      handle: data.handle || state.session.handle,
-    });
-    return true;
-  } catch (err) {
-    clearSession();
-    return false;
-  }
+export async function logoutPassword() {
+  const session = getPassword();
+  setPassword(null);
+  if (!session?.accessJwt) return;
+  await fetch(`${session.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.deleteSession`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.accessJwt}` },
+  }).catch(() => {});
 }
 
-export function logout() {
-  clearSession();
+export function getTimeline(cursor, signal) {
+  return xrpc('app.bsky.feed.getTimeline', { params: { limit: 30, cursor }, signal, auth: 'required' });
 }
 
-// ----------------- Feeds & Posts -----------------
-
-export async function getTimeline(cursor = null, limit = 30) {
-  if (state.session?.accessJwt) {
-    return request('app.bsky.feed.getTimeline', {
-      params: { cursor, limit },
-    });
-  }
-  // Public fallback to What's Hot Discover feed
-  return getDiscoverFeed(cursor, limit);
+export function getFeed(feed, cursor, signal) {
+  return xrpc('app.bsky.feed.getFeed', { params: { feed, limit: 30, cursor }, signal });
 }
 
-export async function getDiscoverFeed(cursor = null, limit = 30) {
-  return request('app.bsky.feed.getFeed', {
-    params: { feed: WHATS_HOT_FEED, cursor, limit },
-    allowPublicFallback: true,
+export function getFeedGenerator(feed) {
+  return xrpc('app.bsky.feed.getFeedGenerator', { params: { feed } });
+}
+
+export function getFeedGenerators(feeds) {
+  return xrpc('app.bsky.feed.getFeedGenerators', { params: { feeds } });
+}
+
+export function getPostThread(uri, signal) {
+  return xrpc('app.bsky.feed.getPostThread', { params: { uri, depth: 6, parentHeight: 20 }, signal });
+}
+
+export function getPosts(uris) {
+  return xrpc('app.bsky.feed.getPosts', { params: { uris } });
+}
+
+export function getProfile(actor, signal) {
+  return xrpc('app.bsky.actor.getProfile', { params: { actor }, signal });
+}
+
+export function getAuthorFeed(actor, filter, cursor, signal) {
+  return xrpc('app.bsky.feed.getAuthorFeed', { params: { actor, filter, limit: 30, cursor }, signal });
+}
+
+export function getActorLikes(actor, cursor, signal) {
+  return xrpc('app.bsky.feed.getActorLikes', { params: { actor, limit: 30, cursor }, signal });
+}
+
+export function searchPosts(q, cursor, signal) {
+  return xrpc('app.bsky.feed.searchPosts', { params: { q, limit: 25, sort: 'latest', cursor }, signal });
+}
+
+export function searchActors(q, signal) {
+  return xrpc('app.bsky.actor.searchActors', { params: { q, limit: 20 }, signal });
+}
+
+export function getSuggestions(signal) {
+  return xrpc('app.bsky.actor.getSuggestions', { params: { limit: 5 }, signal, auth: 'required' });
+}
+
+export function getNotifications(cursor, signal) {
+  return xrpc('app.bsky.notification.listNotifications', { params: { limit: 30, cursor }, signal, auth: 'required' });
+}
+
+export function getUnreadCount() {
+  return xrpc('app.bsky.notification.getUnreadCount', { auth: 'required' });
+}
+
+export function updateSeen() {
+  return xrpc('app.bsky.notification.updateSeen', {
+    body: { seenAt: new Date().toISOString() },
+    auth: 'required',
   });
 }
 
-export async function getPostThread(uri, depth = 8) {
-  return request('app.bsky.feed.getPostThread', {
-    params: { uri, depth },
-    allowPublicFallback: true,
+export function getPreferences() {
+  return xrpc('app.bsky.actor.getPreferences', { auth: 'required' });
+}
+
+export function getFollowers(actor, cursor, signal) {
+  return xrpc('app.bsky.graph.getFollowers', { params: { actor, limit: 30, cursor }, signal });
+}
+
+export function getFollows(actor, cursor, signal) {
+  return xrpc('app.bsky.graph.getFollows', { params: { actor, limit: 30, cursor }, signal });
+}
+
+export function getLists(actor) {
+  return xrpc('app.bsky.graph.getLists', { params: { actor, limit: 50 } });
+}
+
+export function getListFeed(list, cursor, signal) {
+  return xrpc('app.bsky.feed.getListFeed', { params: { list, limit: 30, cursor }, signal });
+}
+
+export function getBookmarks(cursor, signal) {
+  return xrpc('app.bsky.bookmark.getBookmarks', { params: { limit: 30, cursor }, signal, auth: 'required' });
+}
+
+function recordBody(collection, record) {
+  return {
+    repo: currentDid(),
+    collection,
+    record,
+  };
+}
+
+export function like(uri, cid) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.feed.like', {
+      $type: 'app.bsky.feed.like',
+      subject: { uri, cid },
+      createdAt: new Date().toISOString(),
+    }),
+    auth: 'required',
   });
 }
 
-export async function getProfile(actor) {
-  return request('app.bsky.actor.getProfile', {
-    params: { actor },
-    allowPublicFallback: true,
+export function repost(uri, cid) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.feed.repost', {
+      $type: 'app.bsky.feed.repost',
+      subject: { uri, cid },
+      createdAt: new Date().toISOString(),
+    }),
+    auth: 'required',
   });
 }
 
-export async function getAuthorFeed(actor, filter = 'posts_and_author_threads', cursor = null, limit = 30) {
-  return request('app.bsky.feed.getAuthorFeed', {
-    params: { actor, filter, cursor, limit },
-    allowPublicFallback: true,
+export function follow(did) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.graph.follow', {
+      $type: 'app.bsky.graph.follow',
+      subject: did,
+      createdAt: new Date().toISOString(),
+    }),
+    auth: 'required',
   });
 }
 
-export async function searchPosts(q, sort = 'latest', cursor = null, limit = 25) {
-  return request('app.bsky.feed.searchPosts', {
-    params: { q, sort, cursor, limit },
-    allowPublicFallback: true,
+export function bookmark(uri, cid) {
+  return xrpc('app.bsky.bookmark.createBookmark', { body: { uri, cid }, auth: 'required' });
+}
+
+export function removeBookmark(uri) {
+  return xrpc('app.bsky.bookmark.deleteBookmark', { body: { uri }, auth: 'required' });
+}
+
+export function deleteRecord(uri) {
+  const parts = splitAtUri(uri);
+  if (!parts) throw new Error('Could not read that record.');
+  return xrpc('com.atproto.repo.deleteRecord', {
+    body: { repo: parts.repo, collection: parts.collection, rkey: parts.rkey },
+    auth: 'required',
   });
 }
 
-export async function searchActors(q, limit = 20) {
-  return request('app.bsky.actor.searchActors', {
-    params: { q, limit },
-    allowPublicFallback: true,
-  });
+export function muteActor(did) {
+  return xrpc('app.bsky.graph.muteActor', { body: { actor: did }, auth: 'required' });
+}
+
+export function unmuteActor(did) {
+  return xrpc('app.bsky.graph.unmuteActor', { body: { actor: did }, auth: 'required' });
+}
+
+export async function uploadBlob(file) {
+  const uploaded = await xrpc('com.atproto.repo.uploadBlob', { blob: file, auth: 'required' });
+  return uploaded.blob;
 }
 
 export async function resolveHandle(handle) {
-  const res = await request('com.atproto.identity.resolveHandle', {
-    params: { handle },
-    publicOnly: true,
-  });
-  return res.did;
+  const data = await xrpc('com.atproto.identity.resolveHandle', { params: { handle }, auth: 'public' });
+  return data.did;
 }
 
-// ----------------- Notifications -----------------
-
-export async function getNotifications(cursor = null, limit = 30) {
-  if (!state.session?.accessJwt) return { notifications: [] };
-  return request('app.bsky.notification.listNotifications', {
-    params: { cursor, limit },
-  });
-}
-
-export async function getUnreadNotificationCount() {
-  if (!state.session?.accessJwt) return 0;
-  try {
-    const res = await request('app.bsky.notification.getUnreadCount');
-    return res.count || 0;
-  } catch (e) {
-    return 0;
-  }
-}
-
-// ----------------- Chat / Direct Messages -----------------
-
-export async function listConvos(limit = 20) {
-  if (!state.session?.accessJwt) return { convos: [] };
-  // Chat XRPC typically uses bsky.chat or main PDS
-  const base = 'https://api.bsky.chat/xrpc';
-  try {
-    const res = await fetch(`${base}/chat.bsky.convo.listConvos?limit=${limit}`, {
-      headers: { Authorization: `Bearer ${state.session.accessJwt}` },
-    });
-    if (!res.ok) return { convos: [] };
-    return await res.json();
-  } catch (e) {
-    return { convos: [] };
-  }
-}
-
-// ----------------- Interactions -----------------
-
-export async function likePost(uri, cid) {
-  if (!state.session) throw new Error('Please log in to like posts');
-  const now = new Date().toISOString();
-  return request('com.atproto.repo.createRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.feed.like',
-      record: {
-        $type: 'app.bsky.feed.like',
-        subject: { uri, cid },
-        createdAt: now,
-      },
-    },
-  });
-}
-
-export async function deleteLike(likeUri) {
-  if (!state.session) return;
-  const rkey = likeUri.split('/').pop();
-  return request('com.atproto.repo.deleteRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.feed.like',
-      rkey,
-    },
-  });
-}
-
-export async function repost(uri, cid) {
-  if (!state.session) throw new Error('Please log in to repost');
-  const now = new Date().toISOString();
-  return request('com.atproto.repo.createRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.feed.repost',
-      record: {
-        $type: 'app.bsky.feed.repost',
-        subject: { uri, cid },
-        createdAt: now,
-      },
-    },
-  });
-}
-
-export async function deleteRepost(repostUri) {
-  if (!state.session) return;
-  const rkey = repostUri.split('/').pop();
-  return request('com.atproto.repo.deleteRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.feed.repost',
-      rkey,
-    },
-  });
-}
-
-export async function followUser(subjectDid) {
-  if (!state.session) throw new Error('Please log in to follow users');
-  const now = new Date().toISOString();
-  return request('com.atproto.repo.createRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.graph.follow',
-      record: {
-        $type: 'app.bsky.graph.follow',
-        subject: subjectDid,
-        createdAt: now,
-      },
-    },
-  });
-}
-
-export async function unfollowUser(followUri) {
-  if (!state.session) return;
-  const rkey = followUri.split('/').pop();
-  return request('com.atproto.repo.deleteRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.graph.follow',
-      rkey,
-    },
-  });
-}
-
-// ----------------- Media Upload & Post Creation -----------------
-
-export async function uploadBlob(file) {
-  if (!state.session) throw new Error('Must be logged in to upload media');
-  const pds = (state.pdsUrl || 'https://bsky.social').replace(/\/$/, '');
-  const res = await fetch(`${pds}/xrpc/com.atproto.repo.uploadBlob`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${state.session.accessJwt}`,
-      'Content-Type': file.type || 'image/jpeg',
-    },
-    body: file,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || 'Media upload failed');
-  }
-
-  return await res.json();
-}
-
-/**
- * Parses UTF-8 byte slices for links, mentions, and tags as required by ATProto.
- */
-export function extractFacets(text) {
-  const encoder = new TextEncoder();
+export async function facetsFor(text) {
+  const source = String(text ?? '');
+  const bytes = new TextEncoder();
   const facets = [];
-
-  // Match URLs
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  let match;
-  while ((match = urlRegex.exec(text)) !== null) {
-    const uri = match[1];
-    const byteStart = encoder.encode(text.slice(0, match.index)).length;
-    const byteEnd = byteStart + encoder.encode(uri).length;
-    facets.push({
-      index: { byteStart, byteEnd },
-      features: [{ $type: 'app.bsky.richtext.facet#link', uri }],
-    });
+  const patterns = [
+    { re: /https?:\/\/[^\s]+/g, type: 'link' },
+    { re: /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, type: 'mention' },
+    { re: /(^|\s)#([a-zA-Z0-9_]+)/g, type: 'tag' },
+  ];
+  for (const pattern of patterns) {
+    pattern.re.lastIndex = 0;
+    let match = pattern.re.exec(source);
+    while (match) {
+      if (pattern.type === 'link') {
+        const value = match[0];
+        const start = bytes.encode(source.slice(0, match.index)).length;
+        facets.push({
+          index: { byteStart: start, byteEnd: start + bytes.encode(value).length },
+          features: [{ $type: 'app.bsky.richtext.facet#link', uri: value }],
+        });
+      } else if (pattern.type === 'mention') {
+        const handle = match[2];
+        const offset = match[1].length;
+        const start = bytes.encode(source.slice(0, match.index + offset)).length;
+        facets.push({
+          index: { byteStart: start, byteEnd: start + bytes.encode(`@${handle}`).length },
+          features: [{ $type: 'app.bsky.richtext.facet#mention', did: handle }],
+        });
+      } else {
+        const tag = match[2];
+        const offset = match[1].length;
+        const start = bytes.encode(source.slice(0, match.index + offset)).length;
+        facets.push({
+          index: { byteStart: start, byteEnd: start + bytes.encode(`#${tag}`).length },
+          features: [{ $type: 'app.bsky.richtext.facet#tag', tag }],
+        });
+      }
+      match = pattern.re.exec(source);
+    }
   }
-
-  // Match mentions: @handle.domain
-  const mentionRegex = /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
-  while ((match = mentionRegex.exec(text)) !== null) {
-    const fullMatch = match[0];
-    const handle = match[2];
-    const offset = match[1].length;
-    const byteStart = encoder.encode(text.slice(0, match.index + offset)).length;
-    const byteEnd = byteStart + encoder.encode('@' + handle).length;
-    facets.push({
-      index: { byteStart, byteEnd },
-      features: [{ $type: 'app.bsky.richtext.facet#mention', did: handle }], // Note: Resolution handles did or client view
-    });
-  }
-
-  // Match hashtags: #tag
-  const tagRegex = /(^|\s)#([a-zA-Z0-9_]+)/g;
-  while ((match = tagRegex.exec(text)) !== null) {
-    const tag = match[2];
-    const offset = match[1].length;
-    const byteStart = encoder.encode(text.slice(0, match.index + offset)).length;
-    const byteEnd = byteStart + encoder.encode('#' + tag).length;
-    facets.push({
-      index: { byteStart, byteEnd },
-      features: [{ $type: 'app.bsky.richtext.facet#tag', tag }],
-    });
-  }
-
-  return facets;
-}
-
-export async function createPost({ text, replyTo = null, quotePost = null, images = [] }) {
-  if (!state.session) throw new Error('Please log in to publish posts');
-
-  const now = new Date().toISOString();
-  const facets = extractFacets(text);
   for (const facet of facets) {
-    for (const feature of facet.features || []) {
+    for (const feature of facet.features) {
       if (feature.$type === 'app.bsky.richtext.facet#mention' && feature.did && !String(feature.did).startsWith('did:')) {
-        try {
-          feature.did = await resolveHandle(feature.did);
-        } catch {
-          feature.did = '';
-        }
+        try { feature.did = await resolveHandle(feature.did); } catch { feature.did = ''; }
       }
     }
-    facet.features = (facet.features || []).filter((feature) => feature.$type !== 'app.bsky.richtext.facet#mention' || feature.did);
+    facet.features = facet.features.filter((feature) => feature.$type !== 'app.bsky.richtext.facet#mention' || feature.did);
   }
-  const usableFacets = facets.filter((facet) => facet.features?.length);
+  return facets.filter((facet) => facet.features.length);
+}
 
+export async function linkCard(url) {
+  try {
+    const res = await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(url)}`);
+    if (!res.ok) return null;
+    const meta = await res.json();
+    if (!meta?.title && !meta?.description) return null;
+    const external = {
+      uri: meta.url || url,
+      title: String(meta.title || url).slice(0, 300),
+      description: String(meta.description || '').slice(0, 1000),
+    };
+    if (meta.image) {
+      try {
+        const image = await fetch(meta.image);
+        if (image.ok) {
+          const blob = await image.blob();
+          if (blob.size > 0 && blob.size < 1000000) {
+            const type = blob.type || 'image/jpeg';
+            external.thumb = await uploadBlob(new File([blob], 'thumb', { type }));
+          }
+        }
+      } catch {
+        /* the card still works without a thumbnail */
+      }
+    }
+    return { $type: 'app.bsky.embed.external', external };
+  } catch {
+    return null;
+  }
+}
+
+export async function createPost({ text, images = [], reply = null, quote = null, link = null }) {
   const record = {
     $type: 'app.bsky.feed.post',
     text,
-    createdAt: now,
+    createdAt: new Date().toISOString(),
   };
-
-  if (usableFacets.length > 0) {
-    record.facets = usableFacets;
-  }
-
-  if (replyTo) {
+  const facets = await facetsFor(text);
+  if (facets.length) record.facets = facets;
+  const lang = (navigator.language || '').slice(0, 2).toLowerCase();
+  if (/^[a-z]{2}$/.test(lang)) record.langs = [lang];
+  if (reply) {
     record.reply = {
-      root: { uri: replyTo.root?.uri || replyTo.uri, cid: replyTo.root?.cid || replyTo.cid },
-      parent: { uri: replyTo.uri, cid: replyTo.cid },
+      root: reply.root,
+      parent: reply.parent,
     };
   }
-
-  // Embeds: images and quotes
-  if (images && images.length > 0 && quotePost) {
+  const imageEmbed = images.length
+    ? {
+      $type: 'app.bsky.embed.images',
+      images: images.map((image) => ({ alt: image.alt || '', image: image.blob })),
+    }
+    : null;
+  if (imageEmbed && quote) {
     record.embed = {
       $type: 'app.bsky.embed.recordWithMedia',
-      record: {
-        record: { uri: quotePost.uri, cid: quotePost.cid },
-      },
-      media: {
-        $type: 'app.bsky.embed.images',
-        images: images.map((img) => ({
-          image: img.blob,
-          alt: img.alt || '',
-        })),
-      },
+      record: { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } },
+      media: imageEmbed,
     };
-  } else if (images && images.length > 0) {
-    record.embed = {
-      $type: 'app.bsky.embed.images',
-      images: images.map((img) => ({
-        image: img.blob,
-        alt: img.alt || '',
-      })),
-    };
-  } else if (quotePost) {
-    record.embed = {
-      $type: 'app.bsky.embed.record',
-      record: { uri: quotePost.uri, cid: quotePost.cid },
-    };
-  }
-
-  return request('com.atproto.repo.createRecord', {
-    method: 'POST',
-    body: {
-      repo: state.session.did,
-      collection: 'app.bsky.feed.post',
-      record,
-    },
+  } else if (imageEmbed) record.embed = imageEmbed;
+  else if (quote) {
+    record.embed = { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } };
+  } else if (link) record.embed = link;
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.feed.post', record),
+    auth: 'required',
   });
+}
+
+function chat(ns, options = {}) {
+  return xrpc(ns, {
+    ...options,
+    auth: 'required',
+    headers: { ...(options.headers || {}), 'atproto-proxy': CHAT_PROXY },
+  });
+}
+
+export function listConvos(signal) {
+  return chat('chat.bsky.convo.listConvos', { params: { limit: 30 }, signal });
+}
+
+export function getConvo(convoId, signal) {
+  return chat('chat.bsky.convo.getMessages', { params: { convoId, limit: 50 }, signal });
+}
+
+export function sendMessage(convoId, text) {
+  return chat('chat.bsky.convo.sendMessage', { body: { convoId, message: { text } } });
+}
+
+export function convoForMember(did) {
+  return chat('chat.bsky.convo.getConvoForMembers', { params: { members: [did] } });
 }

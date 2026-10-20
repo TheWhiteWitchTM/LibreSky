@@ -1,0 +1,13 @@
+{
+  "name": "LibreSky",
+  "short_name": "LibreSky",
+  "description": "A Bluesky client for the browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0085ff",
+  "icons": [
+    { "src": "./assets/icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" }
+  ]
+}

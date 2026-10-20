@@ -1,0 +1,81 @@
+const PASSWORD_KEY = 'libresky.passwordSession';
+const MUTED_KEY = 'libresky.mutedWords';
+const DRAFT_KEY = 'libresky.draft';
+
+let password = null;
+let oauth = null;
+
+function readJson(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function loadPassword() {
+  const saved = readJson(PASSWORD_KEY);
+  if (saved?.accessJwt && saved?.did) {
+    password = saved;
+    return password;
+  }
+  const legacy = readJson('libresky:session');
+  if (legacy?.accessJwt && legacy?.did) {
+    password = {
+      accessJwt: legacy.accessJwt,
+      refreshJwt: legacy.refreshJwt || '',
+      did: legacy.did,
+      handle: legacy.handle || '',
+      pds: localStorage.getItem('libresky:pds') || 'https://bsky.social',
+      displayName: legacy.displayName || legacy.handle || '',
+      avatar: legacy.avatar || '',
+    };
+    localStorage.setItem(PASSWORD_KEY, JSON.stringify(password));
+  }
+  return password;
+}
+
+export function getPassword() {
+  return password;
+}
+
+export function setPassword(next) {
+  password = next;
+  if (next) localStorage.setItem(PASSWORD_KEY, JSON.stringify(next));
+  else localStorage.removeItem(PASSWORD_KEY);
+}
+
+export function getOauth() {
+  return oauth;
+}
+
+export function setOauth(next) {
+  oauth = next;
+}
+
+export function currentDid() {
+  return oauth?.sub || password?.did || '';
+}
+
+export function signedIn() {
+  return Boolean(oauth || password?.accessJwt);
+}
+
+export function mutedWords() {
+  const list = readJson(MUTED_KEY);
+  return Array.isArray(list) ? list.filter((word) => typeof word === 'string' && word.trim()) : [];
+}
+
+export function setMutedWords(list) {
+  localStorage.setItem(MUTED_KEY, JSON.stringify(list));
+}
+
+export function loadDraft() {
+  return localStorage.getItem(DRAFT_KEY) || '';
+}
+
+export function saveDraft(text) {
+  if (text) localStorage.setItem(DRAFT_KEY, text);
+  else localStorage.removeItem(DRAFT_KEY);
+}

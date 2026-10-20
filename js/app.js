@@ -1,691 +1,1200 @@
-// LibreSky Main Application Boot & Controller
-import { state, setTheme, toggleBookmark, isBookmarked } from './state.js';
 import * as api from './api.js';
-import * as ai from './ai.js';
-import * as ui from './ui.js';
+import {
+  actorHtml,
+  convoHtml,
+  drainPosts,
+  emptyHtml,
+  feedHtml,
+  messageHtml,
+  notificationHtml,
+  postHtml,
+  profileHtml,
+  resetPosts,
+  skeletons,
+  threadList,
+} from './render.js';
+import {
+  currentDid,
+  getOauth,
+  getPassword,
+  loadDraft,
+  loadPassword,
+  mutedWords,
+  saveDraft,
+  setMutedWords,
+  setOauth,
+  setPassword,
+  signedIn,
+} from './session.js';
+import { escapeHtml, firstUrl, graphemeLength, parseHash, profileHash } from './util.js';
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
-} else {
-  initApp();
+const posts = new Map();
+const me = { profile: null };
+let client = null;
+let oauthReady = null;
+let generation = 0;
+let pager = null;
+let selected = -1;
+
+function $(id) { return document.getElementById(id); }
+
+function toast(message) {
+  const node = document.createElement('div');
+  node.className = 'toast';
+  node.textContent = message;
+  $('toasts').append(node);
+  setTimeout(() => node.remove(), 3400);
 }
 
-async function initApp() {
+function remember() {
+  drainPosts().forEach((item, uri) => posts.set(uri, item));
+}
+
+function myDid() {
+  return currentDid();
+}
+
+function account() {
+  return me.profile || getPassword() || null;
+}
+
+function applyTheme(theme) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('libresky.theme', next);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = next === 'dark' ? '#000000' : '#ffffff';
+}
+
+function setChrome({ title, back = false, tabs = [], nav = '' }) {
+  $('title').textContent = title;
+  $('back').hidden = !back;
+  const bar = $('tabs');
+  if (!tabs.length) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+  } else {
+    bar.hidden = false;
+    bar.innerHTML = tabs.map((tab) => `<a href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}">${escapeHtml(tab.label)}</a>`).join('');
+  }
+  document.querySelectorAll('[data-nav]').forEach((link) => {
+    link.classList.toggle('active', link.dataset.nav === nav);
+  });
+  document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
+}
+
+function showSkeletons() {
+  resetPosts();
+  $('view').innerHTML = skeletons();
+}
+
+function cancelled(token, error) {
+  return token !== generation || error?.name === 'AbortError';
+}
+
+function pagerFor(cursor, more) {
+  pager?.disconnect();
+  pager = null;
+  document.querySelectorAll('#view .sentinel').forEach((node) => node.remove());
+  if (!cursor) return;
+  const sentinel = document.createElement('div');
+  sentinel.className = 'sentinel';
+  $('view').append(sentinel);
+  pager = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      pager.disconnect();
+      more(cursor);
+    }
+  }, { rootMargin: '600px' });
+  pager.observe(sentinel);
+}
+
+function muted(post) {
+  const words = mutedWords();
+  if (!words.length || !post) return false;
+  const hay = `${post.record?.text || ''}\n${post.author?.displayName || ''}\n${post.author?.handle || ''}`.toLowerCase();
+  return words.some((word) => hay.includes(word.toLowerCase()));
+}
+
+function paintFeed(items, { append = false } = {}) {
+  const prepared = (items || []).map((item) => (muted(item.post || item) ? { ...item, muted: true } : item));
+  resetPosts();
+  const html = feedHtml(prepared);
+  if (append) {
+    const sentinel = $('view').querySelector('.sentinel');
+    if (sentinel) sentinel.insertAdjacentHTML('beforebegin', html);
+    else $('view').insertAdjacentHTML('beforeend', html);
+  } else $('view').innerHTML = html || emptyHtml('Nothing here', 'There are no posts to show.');
+  remember();
+}
+
+function requireSignIn() {
+  $('login').showModal();
+  $('login-handle').focus();
+}
+
+function updateAccount() {
+  const profile = account();
+  const name = profile?.displayName || profile?.handle || 'Sign in';
+  const handle = profile?.handle ? `@${profile.handle}` : 'Bluesky account';
+  $('account-name').textContent = name;
+  $('account-handle').textContent = handle;
+  const avatar = $('account-avatar');
+  avatar.dataset.initial = (name.trim().charAt(0) || 'L').toUpperCase();
+  avatar.innerHTML = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
+  const href = profile?.handle ? profileHash(profile) : '#/';
+  const nav = document.querySelector('[data-nav="profile"]');
+  if (nav) nav.href = href;
+  const mobile = document.querySelector('.tabbar a[aria-label="Profile"]');
+  if (mobile) mobile.href = href;
+}
+
+async function loadMe() {
+  const did = myDid();
+  if (!did) {
+    me.profile = null;
+    updateAccount();
+    refreshBadge();
+    loadRail();
+    return;
+  }
   try {
-    await applyShell();
-    setTheme(state.theme || 'black');
-    ui.initLightbox();
-    setupNavigation();
-    setupGrokPanel();
-    setupInlineComposer();
-    setupEventListeners();
-    setupOfficeMenu();
-    handleRoute();
-    window.addEventListener('hashchange', handleRoute);
-    scanAndConnectAi();
-    if (state.session?.accessJwt) checkNotifications();
+    me.profile = await api.getProfile(did);
+    if (getPassword()) {
+      const session = getPassword();
+      setPassword({ ...session, displayName: me.profile.displayName || session.handle, avatar: me.profile.avatar || '' });
+    }
+  } catch {
+    me.profile = getPassword();
+  }
+  updateAccount();
+  refreshBadge();
+  loadRail();
+}
+
+async function refreshBadge() {
+  if (!signedIn()) {
+    $('notif-badge').hidden = true;
+    return;
+  }
+  try {
+    const data = await api.getUnreadCount();
+    const count = data.count || 0;
+    $('notif-badge').hidden = count < 1;
+    $('notif-badge').textContent = count > 99 ? '99+' : String(count);
+  } catch {
+    /* the badge is optional */
+  }
+}
+
+async function loadRail() {
+  const card = $('rail-card');
+  if (!signedIn()) {
+    card.innerHTML = `<section class="panel"><h2>LibreSky</h2><p>A Bluesky client. Sign in with your Bluesky account.</p><button type="button" class="primary" data-act="signin">Sign in</button></section>`;
+    return;
+  }
+  try {
+    const data = await api.getSuggestions();
+    const people = data.actors || [];
+    card.innerHTML = people.length
+      ? `<section class="panel"><h2>Suggested follows</h2>${people.map(actorHtml).join('')}</section>`
+      : '';
+  } catch {
+    card.innerHTML = '';
+  }
+}
+
+async function showHome(mode) {
+  const token = ++generation;
+  const following = mode !== 'discover';
+  setChrome({
+    title: following ? 'Home' : 'Discover',
+    nav: 'home',
+    tabs: [
+      { href: '#/', label: 'Following', on: following },
+      { href: '#/discover', label: 'Discover', on: !following },
+    ],
+  });
+  if (following && !signedIn()) {
+    $('view').innerHTML = emptyHtml('Your home feed is on Bluesky', 'Sign in and LibreSky shows the people you follow.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button><a class="text-link" href="#/discover">See Discover</a>');
+    return;
+  }
+  showSkeletons();
+  try {
+    const data = following ? await api.getTimeline(null) : await api.getFeed(api.WHATS_HOT);
+    if (token !== generation) return;
+    const banner = following ? homePrompt() : '';
+    resetPosts();
+    $('view').innerHTML = banner + (feedHtml(data.feed) || emptyHtml('No posts yet', 'Follow a few people and they will show up here.'));
+    remember();
+    document.documentElement.dataset.ready = '1';
+    const more = async (cursor) => {
+      const page = following ? await api.getTimeline(cursor) : await api.getFeed(api.WHATS_HOT, cursor);
+      if (token !== generation) return;
+      paintFeed(page.feed, { append: true });
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
   } catch (error) {
-    const splash = document.getElementById('splash');
-    if (splash) {
-      splash.hidden = false;
-      splash.innerHTML = `<pre class="splash-error">${String(error && error.stack || error)}</pre>`;
-    }
-    throw error;
-  }
-
-  const splash = document.getElementById('splash');
-  if (splash) splash.hidden = true;
-  if (location.search.includes('smoke=1') && window.office) {
-    const started = Date.now();
-    while (Date.now() - started < 8000 && document.querySelectorAll('.post-card').length === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    window.office.smokeReady();
+    if (token !== generation) return;
+    $('view').innerHTML = emptyHtml('Could not load the feed', error.message, '<button type="button" class="primary" data-act="retry">Try again</button>');
   }
 }
 
-async function applyShell() {
-  if (!window.office) return;
-  document.documentElement.dataset.shell = 'office';
-  const info = await window.office.getInfo();
-  document.title = 'LibreOffice';
-  const splashTitle = document.getElementById('splash-title');
-  if (splashTitle) splashTitle.innerHTML = 'Libre<span style="color:var(--blue);">Office</span>';
-  document.querySelectorAll('.brand-title').forEach((el) => {
-    el.innerHTML = 'Libre<span class="accent">Office</span>';
-  });
-  document.querySelectorAll('.brand-sub').forEach((el) => {
-    el.textContent = 'Bluesky Client';
-  });
-  if (info?.settings?.theme) setTheme(info.settings.theme);
-  if (info?.settings?.grokOpen === false) state.grokOpen = false;
-  window.office.on('app:requestClose', () => window.office.closeResult(true));
+function homePrompt() {
+  if (!signedIn()) return '';
+  const profile = account();
+  const initial = escapeHtml((profile?.displayName || profile?.handle || 'You').charAt(0).toUpperCase());
+  const src = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
+  return `<button type="button" class="prompt" data-act="compose"><span class="avatar" data-initial="${initial}">${src}</span><span>What's up?</span></button>`;
 }
 
-function setupOfficeMenu() {
-  if (!window.office) return;
-  window.office.on('menu:command', (id) => {
-    if (id === 'auth.login') ui.openLoginModal();
-    else if (id === 'compose.open') ui.openComposerModal();
-    else if (id === 'view.timeline') window.location.hash = 'timeline';
-    else if (id === 'view.discover') window.location.hash = 'discover';
-    else if (id === 'view.search') window.location.hash = 'search';
-    else if (id === 'grok.toggle') document.getElementById('grok-sidebar')?.classList.toggle('collapsed');
-    else if (id === 'view.theme') setTheme(state.theme === 'light' ? 'black' : 'light');
-    else if (id === 'help.local') ui.openSettingsModal();
-    else if (id === 'help.about') ui.openAboutModal();
-  });
-}
-
-// ----------------- Route Handling -----------------
-
-function handleRoute() {
-  const hash = window.location.hash.slice(1);
-  if (!hash || hash === 'timeline' || hash === 'home') {
-    switchView('timeline');
-  } else if (hash === 'discover') {
-    switchView('discover');
-  } else if (hash.startsWith('search')) {
-    const query = decodeURIComponent(hash.split('/')[1] || '');
-    switchView('search', { query });
-  } else if (hash === 'notifications') {
-    switchView('notifications');
-  } else if (hash === 'chat') {
-    switchView('chat');
-  } else if (hash === 'bookmarks') {
-    switchView('bookmarks');
-  } else if (hash.startsWith('profile/')) {
-    const actor = hash.replace('profile/', '');
-    ui.openProfileView(actor);
-  } else if (hash.startsWith('thread/')) {
-    const uri = decodeURIComponent(hash.replace('thread/', ''));
-    ui.openThreadView(uri);
-  } else if (hash === 'settings') {
-    ui.openSettingsModal();
-  }
-}
-
-// ----------------- View Switcher -----------------
-
-export async function switchView(viewName, params = {}) {
-  state.view = viewName;
-  updateNavActiveState(viewName);
-
-  const container = document.getElementById('feed-container');
-  const title = document.getElementById('view-title');
-  const tabsBar = document.getElementById('feed-tabs-bar');
-  const inlineComposer = document.getElementById('inline-composer');
-
-  // Toggle inline composer visibility
-  if (viewName === 'timeline' || viewName === 'discover') {
-    inlineComposer.style.display = 'flex';
-    tabsBar.style.display = 'flex';
-  } else {
-    inlineComposer.style.display = 'none';
-    tabsBar.style.display = 'none';
-  }
-
-  container.innerHTML = '<div style="padding:40px;text-align:center;"><span class="spark pulse"></span><p class="dim" style="margin-top:10px;">Loading posts...</p></div>';
-
-  if (viewName === 'timeline') {
-    title.innerHTML = '<span>Home</span>';
-    loadTimelinePosts();
-  } else if (viewName === 'discover') {
-    title.innerHTML = '<span>Discover</span>';
-    loadDiscoverPosts();
-  } else if (viewName === 'notifications') {
-    title.innerHTML = '<span>Notifications</span>';
-    loadNotifications();
-  } else if (viewName === 'chat') {
-    title.innerHTML = '<span>Messages</span>';
-    loadChatConvos();
-  } else if (viewName === 'bookmarks') {
-    title.innerHTML = '<span>Bookmarks</span>';
-    loadBookmarks();
-  } else if (viewName === 'search') {
-    title.innerHTML = '<span>Search</span>';
-    loadSearchView(params.query || '');
-  }
-}
-
-function updateNavActiveState(viewName) {
-  document.querySelectorAll('.nav-item').forEach((item) => {
-    if (item.dataset.view === viewName) {
-      item.classList.add('active');
-    } else {
-      item.classList.remove('active');
-    }
-  });
-}
-
-// ----------------- Feed Loaders -----------------
-
-async function loadTimelinePosts() {
-  const container = document.getElementById('feed-container');
+async function showSearch(query) {
+  const token = ++generation;
+  setChrome({ title: 'Search', nav: 'search' });
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label></form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts and people.')}</div>`;
+  $('search-q')?.focus();
+  if (!query) return;
   try {
-    const res = await api.getTimeline();
-    const feed = res.feed || [];
-    renderPostsStream(container, feed, () => loadMoreTimeline(res.cursor));
-  } catch (err) {
-    container.innerHTML = `<div style="padding:30px;color:var(--red);text-align:center;">Failed to load timeline: ${ui.escapeHtml(err.message)}</div>`;
+    const [postData, actorData] = await Promise.all([
+      api.searchPosts(query),
+      api.searchActors(query),
+    ]);
+    if (token !== generation) return;
+    const people = (actorData.actors || []).slice(0, 5).map(actorHtml).join('');
+    resetPosts();
+    $('search-results').innerHTML = `${people ? `<div class="people">${people}</div>` : ''}${feedHtml((postData.posts || []).map((post) => ({ post }))) || emptyHtml('No posts', 'Nothing matched that search.')}`;
+    remember();
+  } catch (error) {
+    if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Search failed', error.message);
   }
 }
 
-async function loadMoreTimeline(cursor) {
-  if (!cursor) return;
-  try {
-    const res = await api.getTimeline(cursor);
-    const stream = document.getElementById('posts-stream');
-    (res.feed || []).forEach((item) => stream.appendChild(ui.renderPostCard(item)));
-  } catch (e) {
-    ui.toast('Failed to load more posts', 'error');
-  }
-}
-
-async function loadDiscoverPosts() {
-  const container = document.getElementById('feed-container');
-  try {
-    const res = await api.getDiscoverFeed();
-    const feed = res.feed || [];
-    renderPostsStream(container, feed, () => loadMoreDiscover(res.cursor));
-  } catch (err) {
-    container.innerHTML = `<div style="padding:30px;color:var(--red);text-align:center;">Failed to load discover: ${ui.escapeHtml(err.message)}</div>`;
-  }
-}
-
-async function loadMoreDiscover(cursor) {
-  if (!cursor) return;
-  try {
-    const res = await api.getDiscoverFeed(cursor);
-    const stream = document.getElementById('posts-stream');
-    (res.feed || []).forEach((item) => stream.appendChild(ui.renderPostCard(item)));
-  } catch (e) {}
-}
-
-function renderPostsStream(container, feed, onLoadMore) {
-  container.innerHTML = '';
-  if (!feed || feed.length === 0) {
-    container.innerHTML = '<p class="dim" style="padding:40px;text-align:center;">No posts available right now.</p>';
+async function showNotifications() {
+  const token = ++generation;
+  setChrome({ title: 'Notifications', nav: 'notifications' });
+  if (!signedIn()) {
+    $('view').innerHTML = emptyHtml('Notifications', 'Sign in to see likes, replies, and follows.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
     return;
   }
-  const stream = document.createElement('div');
-  stream.className = 'posts-stream';
-  stream.id = 'posts-stream';
-
-  feed.forEach((item) => stream.appendChild(ui.renderPostCard(item)));
-  container.appendChild(stream);
-
-  if (onLoadMore) {
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.className = 'quick-prompt-btn';
-    loadMoreBtn.style.cssText = 'margin:20px auto;display:block;padding:10px 24px;font-size:13px;';
-    loadMoreBtn.textContent = 'Load More Posts';
-    loadMoreBtn.addEventListener('click', onLoadMore);
-    container.appendChild(loadMoreBtn);
+  showSkeletons();
+  try {
+    const data = await api.getNotifications();
+    if (token !== generation) return;
+    const uris = [...new Set((data.notifications || []).map((note) => note.reasonSubject).filter(Boolean))].slice(0, 25);
+    let subjects = new Map();
+    if (uris.length) {
+      try {
+        const fetched = await api.getPosts(uris);
+        subjects = new Map((fetched.posts || []).map((post) => [post.uri, post]));
+      } catch { /* snippets are optional */ }
+    }
+    $('view').innerHTML = (data.notifications || []).map((note) => notificationHtml(note, subjects.get(note.reasonSubject))).join('')
+      || emptyHtml('No notifications', 'You are all caught up.');
+    api.updateSeen().then(refreshBadge).catch(() => {});
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load notifications', error.message);
   }
 }
 
-// ----------------- Notifications -----------------
-
-async function loadNotifications() {
-  const container = document.getElementById('feed-container');
-  if (!state.session) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;"><p class="dim">Please sign in to view your notifications.</p></div>';
+async function showMessages(convoId) {
+  const token = ++generation;
+  setChrome({ title: 'Messages', nav: 'messages', back: Boolean(convoId) });
+  if (!signedIn()) {
+    $('view').innerHTML = emptyHtml('Messages', 'Sign in to open your Bluesky chats.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
     return;
   }
+  showSkeletons();
   try {
-    const res = await api.getNotifications();
-    const list = res.notifications || [];
-    container.innerHTML = '';
-    if (list.length === 0) {
-      container.innerHTML = '<p class="dim" style="padding:40px;text-align:center;">No notifications yet.</p>';
+    if (!convoId) {
+      const data = await api.listConvos();
+      if (token !== generation) return;
+      const rows = (data.convos || []).map((convo) => convoHtml(convo, myDid())).join('');
+      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       return;
     }
-    const stream = document.createElement('div');
-    stream.className = 'posts-stream';
-    list.forEach((n) => {
-      const row = document.createElement('div');
-      row.className = 'post-card';
-      row.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;">
-          <img src="${n.author?.avatar || ''}" class="account-avatar" style="width:34px;height:34px;">
-          <div>
-            <strong>${ui.escapeHtml(n.author?.displayName || n.author?.handle)}</strong>
-            <span class="dim"> ${n.reason}</span>
-            <div style="font-size:12px;color:var(--text-muted);">${ui.formatRelativeTime(n.indexedAt)}</div>
-          </div>
-        </div>
-      `;
-      stream.appendChild(row);
-    });
-    container.appendChild(stream);
-  } catch (err) {
-    container.innerHTML = `<div style="padding:30px;color:var(--red);text-align:center;">${ui.escapeHtml(err.message)}</div>`;
-  }
-}
-
-async function checkNotifications() {
-  const count = await api.getUnreadNotificationCount();
-  const badge = document.getElementById('notif-badge');
-  if (badge) {
-    if (count > 0) {
-      badge.textContent = count > 99 ? '99+' : count;
-      badge.removeAttribute('hidden');
-    } else {
-      badge.setAttribute('hidden', '');
+    const data = await api.getConvo(convoId);
+    if (token !== generation) return;
+    const messages = (data.messages || []).slice().reverse();
+    $('view').innerHTML = `<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><input id="chat-text" maxlength="1000" placeholder="Message" autocomplete="off"><button class="primary small" type="submit">Send</button></form>`;
+    $('chat-text')?.focus();
+    const scroller = $('view').querySelector('.messages');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  } catch (error) {
+    if (!cancelled(token, error)) {
+      $('view').innerHTML = emptyHtml('Messages are unavailable', error.message || 'This sign-in does not include chat access.');
     }
   }
 }
 
-// ----------------- Direct Messages / Chat -----------------
-
-async function loadChatConvos() {
-  const container = document.getElementById('feed-container');
-  if (!state.session) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;"><p class="dim">Please sign in to access direct messages.</p></div>';
+async function showBookmarks() {
+  const token = ++generation;
+  setChrome({ title: 'Bookmarks', nav: 'bookmarks' });
+  if (!signedIn()) {
+    $('view').innerHTML = emptyHtml('Bookmarks', 'Sign in to see posts you saved on Bluesky.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
     return;
   }
-  container.innerHTML = '<div style="padding:40px;text-align:center;"><span class="spark pulse"></span><p class="dim" style="margin-top:10px;">Connecting to Bluesky Chat...</p></div>';
+  showSkeletons();
   try {
-    const res = await api.listConvos();
-    const convos = res.convos || [];
-    container.innerHTML = '';
-    if (convos.length === 0) {
-      container.innerHTML = '<p class="dim" style="padding:40px;text-align:center;">No direct messages yet.</p>';
+    const data = await api.getBookmarks();
+    if (token !== generation) return;
+    const items = (data.bookmarks || []).map((mark) => ({ post: mark.subject || mark.item || mark.post })).filter((item) => item.post?.uri);
+    paintFeed(items);
+    document.documentElement.dataset.ready = '1';
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load bookmarks', error.message);
+  }
+}
+
+async function showFeeds() {
+  const token = ++generation;
+  setChrome({ title: 'Feeds', nav: 'feeds' });
+  const hot = `<a class="person" href="#/discover"><span class="avatar" data-initial="D"></span><span><strong>Discover</strong><span class="handle">What's Hot</span></span></a>`;
+  if (!signedIn()) {
+    $('view').innerHTML = hot + emptyHtml('Your feeds', 'Sign in to see the feeds you pinned on Bluesky.');
+    return;
+  }
+  showSkeletons();
+  try {
+    const prefs = await api.getPreferences();
+    if (token !== generation) return;
+    const saved = (prefs.preferences || []).find((pref) => pref.$type?.includes('savedFeedsPref'));
+    const items = (saved?.items || saved?.pinned || []).filter((item) => (item.type || item) && (item.value || item).startsWith?.('at://') || item.value);
+    const uris = (saved?.items || []).filter((item) => item.type === 'feed' && item.value).map((item) => item.value);
+    let views = [];
+    if (uris.length) {
+      const gens = await api.getFeedGenerators(uris);
+      views = gens.feeds || [];
+    }
+    const rows = views.map((feed) => `<a class="person" href="#/feed/${encodeURIComponent(feed.uri)}">${feed.avatar ? `<span class="avatar"><img src="${escapeHtml(feed.avatar)}" alt=""></span>` : '<span class="avatar" data-initial="F"></span>'}<span><strong>${escapeHtml(feed.displayName || 'Feed')}</strong><span class="handle">${escapeHtml(feed.description || '')}</span></span></a>`).join('');
+    $('view').innerHTML = hot + rows;
+    if (!rows) $('view').insertAdjacentHTML('beforeend', emptyHtml('No pinned feeds', 'Pin feeds in Bluesky and they show up here.'));
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = hot + emptyHtml('Could not load feeds', error.message);
+  }
+}
+
+async function showCustomFeed(uri) {
+  const token = ++generation;
+  setChrome({ title: 'Feed', nav: 'feeds', back: true });
+  showSkeletons();
+  try {
+    const [info, data] = await Promise.all([
+      api.getFeedGenerator(uri).catch(() => null),
+      api.getFeed(uri),
+    ]);
+    if (token !== generation) return;
+    if (info?.view?.displayName) $('title').textContent = info.view.displayName;
+    paintFeed(data.feed);
+    const more = async (cursor) => {
+      const page = await api.getFeed(uri, cursor);
+      if (token !== generation) return;
+      paintFeed(page.feed, { append: true });
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load this feed', error.message);
+  }
+}
+
+async function showLists() {
+  const token = ++generation;
+  setChrome({ title: 'Lists', nav: 'lists' });
+  if (!signedIn()) {
+    $('view').innerHTML = emptyHtml('Lists', 'Sign in to see your Bluesky lists.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
+    return;
+  }
+  showSkeletons();
+  try {
+    const data = await api.getLists(myDid());
+    if (token !== generation) return;
+    const rows = (data.lists || []).map((list) => `<a class="person" href="#/list/${encodeURIComponent(list.uri)}"><span class="avatar" data-initial="${escapeHtml((list.name || 'L').charAt(0))}"></span><span><strong>${escapeHtml(list.name)}</strong><span class="handle">${escapeHtml(list.description || list.purpose || '')}</span></span></a>`).join('');
+    $('view').innerHTML = rows || emptyHtml('No lists', 'Lists you create on Bluesky show up here.');
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load lists', error.message);
+  }
+}
+
+async function showList(uri) {
+  const token = ++generation;
+  setChrome({ title: 'List', nav: 'lists', back: true });
+  showSkeletons();
+  try {
+    const data = await api.getListFeed(uri);
+    if (token !== generation) return;
+    paintFeed(data.feed);
+    const more = async (cursor) => {
+      const page = await api.getListFeed(uri, cursor);
+      if (token !== generation) return;
+      paintFeed(page.feed, { append: true });
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load this list', error.message);
+  }
+}
+
+const PROFILE_FILTERS = {
+  posts: ['posts_and_author_threads', 'Posts'],
+  replies: ['posts_with_replies', 'Replies'],
+  media: ['posts_with_media', 'Media'],
+  likes: ['likes', 'Likes'],
+};
+
+async function showProfile(actor, tab) {
+  const token = ++generation;
+  const current = PROFILE_FILTERS[tab] ? tab : 'posts';
+  setChrome({
+    title: 'Profile',
+    nav: 'profile',
+    back: true,
+    tabs: Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
+      href: id === 'posts' ? `#/profile/${encodeURIComponent(actor)}` : `#/profile/${encodeURIComponent(actor)}/${id}`,
+      label,
+      on: id === current,
+    })),
+  });
+  showSkeletons();
+  try {
+    const profile = await api.getProfile(actor);
+    if (token !== generation) return;
+    $('title').textContent = profile.displayName || profile.handle;
+    const action = profileAction(profile);
+    let feed;
+    if (current === 'likes') feed = await api.getActorLikes(profile.handle);
+    else feed = await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0]);
+    if (token !== generation) return;
+    resetPosts();
+    $('view').innerHTML = profileHtml(profile) + (feedHtml(feed.feed) || emptyHtml('No posts', 'Nothing in this tab yet.'));
+    $('profile-action').innerHTML = action;
+    remember();
+    document.documentElement.dataset.ready = '1';
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Profile unavailable', error.message);
+  }
+}
+
+function profileAction(profile) {
+  if (!signedIn()) return '<button type="button" class="primary small" data-act="signin">Sign in</button>';
+  if (profile.did === myDid()) return '';
+  const following = profile.viewer?.following || '';
+  return `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
+}
+
+async function showPeople(actor, kind) {
+  const token = ++generation;
+  setChrome({ title: kind === 'followers' ? 'Followers' : 'Following', nav: 'profile', back: true });
+  showSkeletons();
+  try {
+    const data = kind === 'followers' ? await api.getFollowers(actor) : await api.getFollows(actor);
+    if (token !== generation) return;
+    const list = data.followers || data.follows || [];
+    $('view').innerHTML = list.map(actorHtml).join('') || emptyHtml('Nobody here', 'This list is empty.');
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load this list', error.message);
+  }
+}
+
+async function showThread(actor, rkey) {
+  const token = ++generation;
+  setChrome({ title: 'Post', nav: 'home', back: true });
+  showSkeletons();
+  try {
+    const did = actor.startsWith('did:') ? actor : await api.resolveHandle(actor);
+    const data = await api.getPostThread(`at://${did}/app.bsky.feed.post/${rkey}`);
+    if (token !== generation) return;
+    const thread = data.thread;
+    if (!thread?.post) {
+      $('view').innerHTML = emptyHtml('Post unavailable', 'This post could not be loaded.');
       return;
     }
-    const list = document.createElement('div');
-    list.className = 'posts-stream';
-    convos.forEach((c) => {
-      const other = c.members?.find((m) => m.did !== state.session.did) || {};
-      const row = document.createElement('div');
-      row.className = 'post-card';
-      row.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;">
-          <img src="${other.avatar || ''}" class="account-avatar">
-          <div style="flex:1;">
-            <strong>${ui.escapeHtml(other.displayName || other.handle)}</strong>
-            <p class="dim" style="font-size:12px;">${ui.escapeHtml(c.lastMessage?.text || 'No messages yet')}</p>
-          </div>
-        </div>
-      `;
-      list.appendChild(row);
-    });
-    container.appendChild(list);
-  } catch (err) {
-    container.innerHTML = `<div style="padding:30px;color:var(--red);text-align:center;">${ui.escapeHtml(err.message)}</div>`;
+    const ancestors = threadList(thread);
+    resetPosts();
+    const above = ancestors.map((node, index) => (node.missing
+      ? '<div class="missing">Post unavailable</div>'
+      : postHtml(node, { connected: true, feed: true }))).join('');
+    const replies = (thread.replies || []).map((node) => (node.post ? postHtml(node) : '<div class="missing">Reply unavailable</div>')).join('');
+    const replyBox = signedIn()
+      ? `<button type="button" class="prompt" data-act="thread-reply" data-uri="${escapeHtml(thread.post.uri)}"><span>Write a reply</span></button>`
+      : '';
+    $('view').innerHTML = above + postHtml({ post: thread.post, reply: thread.parent ? { parent: thread.parent.post ? { author: thread.parent.post.author } : null } : null }) + replyBox + replies;
+    remember();
+    document.documentElement.dataset.ready = '1';
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not open this post', error.message);
   }
 }
 
-// ----------------- Bookmarks -----------------
-
-function loadBookmarks() {
-  const container = document.getElementById('feed-container');
-  container.innerHTML = '';
-  if (state.bookmarks.length === 0) {
-    container.innerHTML = '<p class="dim" style="padding:40px;text-align:center;">No saved posts yet. Click the bookmark icon on any post to save it locally.</p>';
-    return;
-  }
-  const stream = document.createElement('div');
-  stream.className = 'posts-stream';
-  state.bookmarks.forEach((item) => stream.appendChild(ui.renderPostCard(item)));
-  container.appendChild(stream);
-}
-
-// ----------------- Search -----------------
-
-async function loadSearchView(query) {
-  const container = document.getElementById('feed-container');
-  container.innerHTML = `
-    <div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;">
-      <input type="text" id="live-search-input" value="${ui.escapeHtml(query)}" placeholder="Search posts or @handles..." style="flex:1;">
-      <button type="button" class="submit-post-btn" id="run-search-btn">Search</button>
+function showSettings() {
+  generation += 1;
+  setChrome({ title: 'Settings', nav: 'settings', back: true });
+  const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  const words = mutedWords();
+  $('view').innerHTML = `<section class="settings">
+    <h2>Appearance</h2>
+    <div class="segmented">
+      <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
     </div>
-    <div id="search-results-box"></div>
-  `;
+    <h2>Muted words</h2>
+    <p class="dim">Posts containing these words are collapsed in your feeds on this browser.</p>
+    <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
+    <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}">${escapeHtml(word)} ×</button>`).join('')}</div>
+    <h2>Keyboard</h2>
+    <ul class="keys">
+      <li><kbd>n</kbd> New post</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
+      <li><kbd>b</kbd> Bookmark</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
+    </ul>
+    <h2>Account</h2>
+    <p class="dim">LibreSky talks to the Bluesky network. Sign in with Bluesky happens on Bluesky’s own login page. An app password is checked by your account’s server and stored only in this browser.</p>
+    ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary" data-act="signin">Sign in</button>'}
+  </section>`;
+}
 
-  const input = container.querySelector('#live-search-input');
-  const btn = container.querySelector('#run-search-btn');
-  const box = container.querySelector('#search-results-box');
+function route() {
+  closeMenu();
+  pager?.disconnect();
+  selected = -1;
+  const [a, b, c, d] = parseHash();
+  if (!a) return showHome('following');
+  if (a === 'discover') return showHome('discover');
+  if (a === 'search') return showSearch(b || '');
+  if (a === 'notifications') return showNotifications();
+  if (a === 'messages') return showMessages(b || '');
+  if (a === 'bookmarks') return showBookmarks();
+  if (a === 'feeds') return showFeeds();
+  if (a === 'feed' && b) return showCustomFeed(b);
+  if (a === 'lists') return showLists();
+  if (a === 'list' && b) return showList(b);
+  if (a === 'settings') return showSettings();
+  if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
+  if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
+  if (a === 'profile' && b) return showProfile(b, c || 'posts');
+  return showHome('following');
+}
 
-  const execute = async () => {
-    const q = input.value.trim();
-    if (!q) return;
-    window.location.hash = `search/${encodeURIComponent(q)}`;
-    box.innerHTML = '<div style="padding:30px;text-align:center;"><span class="spark pulse"></span></div>';
+function postFrom(node) {
+  const article = node?.closest?.('.post');
+  if (!article) return null;
+  return { article, item: posts.get(article.dataset.uri), post: posts.get(article.dataset.uri)?.post || posts.get(article.dataset.uri) };
+}
+
+function openComposer({ reply = null, quote = null, text = '' } = {}) {
+  if (!signedIn()) return requireSignIn();
+  const dialog = $('compose');
+  dialog.dataset.reply = reply ? JSON.stringify({ uri: reply.uri, cid: reply.cid, root: reply.record?.reply?.root || { uri: reply.uri, cid: reply.cid } }) : '';
+  dialog.dataset.quote = quote ? JSON.stringify({ uri: quote.uri, cid: quote.cid }) : '';
+  const context = $('compose-context');
+  if (reply) context.innerHTML = `<p class="dim">Replying to <strong>@${escapeHtml(reply.author?.handle || '')}</strong></p><p>${escapeHtml((reply.record?.text || '').slice(0, 160))}</p>`;
+  else if (quote) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quote.author?.handle || '')}</strong></p><p>${escapeHtml((quote.record?.text || '').slice(0, 160))}</p>`;
+  else context.innerHTML = '';
+  const area = $('compose-text');
+  area.value = text || (!reply && !quote ? loadDraft() : '');
+  dialog._files = [];
+  $('compose-previews').innerHTML = '';
+  updateCount();
+  if (!dialog.open) dialog.showModal();
+  area.focus();
+}
+
+function updateCount() {
+  const left = 300 - graphemeLength($('compose-text').value);
+  $('compose-count').textContent = String(left);
+  $('compose-count').classList.toggle('over', left < 0);
+  const files = $('compose')._files || [];
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length);
+}
+
+async function compress(file) {
+  if (file.type === 'image/gif') {
+    if (file.size > 1000000) throw new Error('GIFs need to be under 1 MB.');
+    return file;
+  }
+  if (file.size < 900000 && !file.type.startsWith('image/')) return file;
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+  if (!blob || blob.size > 1000000) throw new Error('That image is still over 1 MB after resizing.');
+  return new File([blob], 'image.jpg', { type: 'image/jpeg' });
+}
+
+function renderPreviews() {
+  const files = $('compose')._files || [];
+  $('compose-previews').innerHTML = files.map((file, index) => `<label class="preview"><img src="${file.url}" alt=""><input data-alt="${index}" value="${escapeHtml(file.alt)}" placeholder="Alt text"></label>`).join('');
+  updateCount();
+}
+
+async function addFiles(list) {
+  const bucket = $('compose')._files || [];
+  for (const file of list) {
+    if (bucket.length >= 4) break;
     try {
-      const res = await api.searchPosts(q);
-      const posts = res.posts || [];
-      box.innerHTML = '';
-      if (posts.length === 0) {
-        box.innerHTML = '<p class="dim" style="padding:30px;text-align:center;">No posts found for this query.</p>';
-        return;
-      }
-      const stream = document.createElement('div');
-      stream.className = 'posts-stream';
-      posts.forEach((p) => stream.appendChild(ui.renderPostCard(p)));
-      box.appendChild(stream);
-    } catch (err) {
-      box.innerHTML = `<div style="padding:30px;color:var(--red);text-align:center;">${ui.escapeHtml(err.message)}</div>`;
+      const image = await compress(file);
+      bucket.push({ file: image, alt: '', url: URL.createObjectURL(image) });
+    } catch (error) {
+      toast(error.message);
     }
-  };
+  }
+  $('compose')._files = bucket;
+  renderPreviews();
+}
 
-  btn.addEventListener('click', execute);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') execute();
-  });
-
-  if (query) {
-    execute();
+async function publish(event) {
+  event.preventDefault();
+  const dialog = $('compose');
+  const text = $('compose-text').value.trim();
+  const files = dialog._files || [];
+  if (!text && !files.length) return;
+  if (graphemeLength(text) > 300) return;
+  $('compose-send').disabled = true;
+  $('compose-send').textContent = 'Posting…';
+  try {
+    const images = [];
+    for (const item of files) {
+      images.push({ alt: item.alt, blob: await api.uploadBlob(item.file) });
+    }
+    let reply = null;
+    if (dialog.dataset.reply) {
+      const raw = JSON.parse(dialog.dataset.reply);
+      reply = { root: raw.root, parent: { uri: raw.uri, cid: raw.cid } };
+    }
+    const quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
+    let link = null;
+    if (!images.length && !quote) {
+      const url = firstUrl(text);
+      if (url) link = await api.linkCard(url);
+    }
+    await api.createPost({ text, images, reply, quote, link });
+    if (!reply && !quote) saveDraft('');
+    dialog.close();
+    toast('Posted');
+    route();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    $('compose-send').textContent = 'Post';
+    updateCount();
   }
 }
 
-// ----------------- Inline Feed Composer -----------------
-
-function setupInlineComposer() {
-  const composer = document.getElementById('inline-composer');
-  const textarea = document.getElementById('composer-textarea');
-  const countEl = document.getElementById('inline-char-count');
-  const submitBtn = document.getElementById('inline-submit-btn');
-  const fileInput = document.getElementById('inline-img-input');
-  const previews = document.getElementById('composer-previews');
-  const aiAssistBtn = document.getElementById('inline-ai-assist-btn');
-
-  const attachedImages = [];
-
-  textarea.addEventListener('input', () => {
-    const len = textarea.value.length;
-    const rem = 300 - len;
-    countEl.textContent = rem;
-    countEl.className = 'char-count-text' + (rem < 20 ? (rem < 0 ? ' over' : ' warn') : '');
-    submitBtn.disabled = len === 0 || rem < 0;
-  });
-
-  fileInput.addEventListener('change', (e) => {
-    const files = [...e.target.files].slice(0, 4 - attachedImages.length);
-    for (const file of files) {
-      attachedImages.push({ file, url: URL.createObjectURL(file), blob: null });
-    }
-    renderInlinePreviews();
-  });
-
-  function renderInlinePreviews() {
-    previews.innerHTML = '';
-    attachedImages.forEach((img, idx) => {
-      const chip = document.createElement('div');
-      chip.className = 'composer-img-chip';
-      chip.innerHTML = `<img src="${img.url}"><span class="remove-chip">&times;</span>`;
-      chip.querySelector('.remove-chip').addEventListener('click', () => {
-        attachedImages.splice(idx, 1);
-        renderInlinePreviews();
-      });
-      previews.appendChild(chip);
-    });
-  }
-
-  aiAssistBtn.addEventListener('click', async () => {
-    const val = textarea.value.trim();
-    if (!val) {
-      ui.toast('Type a post draft first');
-      return;
-    }
-    aiAssistBtn.innerHTML = '<span class="spark small pulse"></span>';
-    try {
-      const polished = await ai.polishComposerText(val, 'punchy');
-      textarea.value = polished;
-      textarea.dispatchEvent(new Event('input'));
-      ui.toast('Polished by local AI!', 'success');
-    } catch (err) {
-      ui.toast(err.message, 'error');
-    } finally {
-      aiAssistBtn.innerHTML = '<span class="spark small"></span>';
-    }
-  });
-
-  submitBtn.addEventListener('click', async () => {
-    if (!state.session) {
-      ui.openLoginModal();
-      return;
-    }
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Posting...';
-
-    try {
-      for (const img of attachedImages) {
-        if (!img.blob) {
-          const res = await api.uploadBlob(img.file);
-          img.blob = res.blob;
-        }
-      }
-
-      await api.createPost({
-        text: textarea.value,
-        images: attachedImages,
-      });
-
-      textarea.value = '';
-      textarea.dispatchEvent(new Event('input'));
-      attachedImages.length = 0;
-      renderInlinePreviews();
-      ui.toast('Post published!', 'success');
-      loadTimelinePosts();
-    } catch (err) {
-      ui.toast(err.message, 'error');
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Post';
-    }
-  });
+function closeMenu() {
+  $('menu').hidden = true;
 }
 
-// ----------------- Grok AI Sidebar & Engine -----------------
+function openMenu(anchor, items) {
+  const menu = $('menu');
+  menu.innerHTML = items.map((item) => `<button type="button" data-menu="${escapeHtml(item.id)}">${escapeHtml(item.label)}</button>`).join('');
+  menu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  const width = 220;
+  menu.style.top = `${rect.bottom + 6}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
+}
 
-async function scanAndConnectAi() {
-  const dot = document.getElementById('ai-nav-dot');
-  const statusTag = document.getElementById('grok-status-tag');
-  const modelSelect = document.getElementById('grok-model-select');
-
-  const res = await ai.scanLocalAi();
-  if (res.ok) {
-    if (dot) dot.classList.add('online');
-    if (statusTag) statusTag.textContent = `Local: ${res.activeModel}`;
-    if (modelSelect) {
-      modelSelect.innerHTML = res.models
-        .map((m) => `<option value="${m}" ${m === res.activeModel ? 'selected' : ''}>${m}</option>`)
-        .join('');
+async function onClick(event) {
+  const act = event.target.closest('[data-act]')?.dataset.act;
+  if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
+    /* buttons handle themselves below */
+  }
+  if (act === 'signin') return requireSignIn();
+  if (act === 'compose') return openComposer();
+  if (act === 'retry') return route();
+  if (act === 'signout') return signOut();
+  if (act === 'show-warn') {
+    event.preventDefault();
+    event.target.closest('.content')?.classList.remove('blurred');
+    event.target.remove();
+    return;
+  }
+  if (act === 'show-muted') {
+    const article = event.target.closest('.post');
+    const item = posts.get(article?.dataset.uri);
+    if (item) {
+      resetPosts();
+      article.outerHTML = postHtml(item, { force: true });
+      remember();
     }
-  } else {
-    if (statusTag) statusTag.textContent = 'Offline (click to retry)';
+    return;
+  }
+  if (act === 'image') {
+    event.preventDefault();
+    const shot = event.target.closest('.shot');
+    const shots = [...shot.closest('.gallery').querySelectorAll('.shot')];
+    openLightbox(shots.map((node) => ({ src: node.dataset.full, alt: node.dataset.alt })), shots.indexOf(shot));
+    return;
+  }
+  if (act === 'video') {
+    event.preventDefault();
+    playVideo(event.target.closest('.video'));
+    return;
+  }
+  if (act === 'new-chat') return newChat();
+  if (act === 'thread-reply') {
+    const item = posts.get(event.target.closest('[data-uri]')?.dataset.uri);
+    if (item?.post) openComposer({ reply: item.post });
+    return;
+  }
+  const found = postFrom(event.target);
+  if (!found?.post) {
+    if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
+    return;
+  }
+  if (act === 'reply') return openComposer({ reply: found.post });
+  if (act === 'like') return toggleLike(found);
+  if (act === 'bookmark') return toggleBookmark(found);
+  if (act === 'repost') return repostMenu(event.target.closest('.action'), found);
+  if (act === 'more') return moreMenu(event.target.closest('.more'), found);
+  if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
+  if (!act && event.target.closest('a, button, .quote, .card, .shot, .video')) return;
+  if (event.target.closest('.post-main') && !event.target.closest('a, button')) {
+    const link = found.article.querySelector('.time');
+    if (link) location.hash = link.getAttribute('href');
   }
 }
 
-function setupGrokPanel() {
-  const toggleBtn = document.getElementById('nav-ai-btn');
-  const sidebar = document.getElementById('grok-sidebar');
-  const closeBtn = document.getElementById('grok-close-btn');
-  if (sidebar && !state.grokOpen) sidebar.classList.add('collapsed');
-  const modelSelect = document.getElementById('grok-model-select');
-  const personaSelect = document.getElementById('grok-persona-select');
-  const input = document.getElementById('grok-prompt-input');
-  const sendBtn = document.getElementById('grok-send-btn');
-  const log = document.getElementById('grok-chat-log');
+function repostMenu(anchor, found) {
+  const on = Boolean(found.article.dataset.repost);
+  openMenu(anchor, [
+    { id: on ? 'unrepost' : 'repost', label: on ? 'Undo repost' : 'Repost' },
+    { id: 'quote', label: 'Quote' },
+  ]);
+  $('menu')._post = found;
+}
 
-  toggleBtn.addEventListener('click', () => {
-    sidebar.classList.toggle('collapsed');
-    state.grokOpen = !sidebar.classList.contains('collapsed');
-    if (window.office?.settingsSet) window.office.settingsSet({ grokOpen: state.grokOpen });
-  });
+function moreMenu(anchor, found) {
+  const own = found.post.author?.did && found.post.author.did === myDid();
+  const items = [
+    { id: 'copy', label: 'Copy link' },
+    { id: 'quote', label: 'Quote' },
+  ];
+  if (own) items.push({ id: 'delete', label: 'Delete' });
+  else items.push({ id: 'mute', label: 'Mute account' });
+  openMenu(anchor, items);
+  $('menu')._post = found;
+}
 
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      sidebar.classList.add('collapsed');
-      state.grokOpen = false;
-    });
+async function onMenu(event) {
+  const id = event.target.dataset.menu;
+  const found = $('menu')._post;
+  closeMenu();
+  if (!id || !found) return;
+  if (id === 'quote') return openComposer({ quote: found.post });
+  if (id === 'copy') {
+    const link = new URL(location.href);
+    link.hash = found.article.querySelector('.time')?.getAttribute('href') || location.hash;
+    await navigator.clipboard.writeText(link.href);
+    toast('Link copied');
+    return;
   }
-
-  modelSelect.addEventListener('change', () => {
-    state.ai.activeModel = modelSelect.value;
-    document.getElementById('grok-status-tag').textContent = `Local: ${state.ai.activeModel}`;
-  });
-
-  personaSelect.addEventListener('change', () => {
-    state.ai.persona = personaSelect.value;
-  });
-
-  // Quick prompt buttons
-  document.querySelectorAll('.quick-prompt-btn[data-prompt]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      input.value = btn.dataset.prompt;
-      submitGrokPrompt();
-    });
-  });
-
-  const submitGrokPrompt = async () => {
-    const text = input.value.trim();
-    if (!text || state.ai.streaming) return;
-
-    // Append User Message
-    appendGrokMessage('user', text);
-    input.value = '';
-
-    // Append AI Message placeholder
-    const aiBubble = appendGrokMessage('ai', '<span class="spark small pulse"></span> Thinking...');
-    sendBtn.disabled = true;
-
+  if (id === 'repost' || id === 'unrepost') return toggleRepost(found);
+  if (id === 'delete') return deletePost(found);
+  if (id === 'mute') {
     try {
-      const messages = state.ai.messages
-        .filter((m) => m.role !== 'system')
-        .slice(-6);
-      messages.push({ role: 'user', content: text });
-
-      let streamTarget = aiBubble.querySelector('.grok-msg-content');
-
-      await ai.streamChat(
-        messages,
-        (fullText) => {
-          streamTarget.innerHTML = ui.escapeHtml(fullText);
-          log.scrollTop = log.scrollHeight;
-        },
-        (finalText) => {
-          state.ai.messages.push({ role: 'user', content: text });
-          state.ai.messages.push({ role: 'assistant', content: finalText });
-          sendBtn.disabled = false;
-        }
-      );
-    } catch (err) {
-      aiBubble.querySelector('.grok-msg-content').innerHTML = `
-        <span style="color:var(--red);">Error: ${ui.escapeHtml(err.message)}</span><br>
-        <span class="dim" style="font-size:11px;">Make sure Ollama is running at 127.0.0.1:11434 with CORS enabled.</span>
-      `;
-      sendBtn.disabled = false;
-    }
-  };
-
-  sendBtn.addEventListener('click', submitGrokPrompt);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submitGrokPrompt();
-    }
-  });
+      await api.muteActor(found.post.author.did);
+      toast(`Muted @${found.post.author.handle}`);
+    } catch (error) { toast(error.message); }
+  }
 }
 
-function appendGrokMessage(role, text) {
-  const log = document.getElementById('grok-chat-log');
-  const msg = document.createElement('div');
-  msg.className = `grok-msg ${role}`;
-  msg.innerHTML = `
-    <div class="grok-msg-role">
-      ${role === 'ai' ? '<span class="spark small"></span> Grok' : 'You'}
-    </div>
-    <div class="grok-msg-content">${text}</div>
-  `;
-  log.appendChild(msg);
-  log.scrollTop = log.scrollHeight;
-  return msg;
+async function toggleLike(found) {
+  if (!signedIn()) return requireSignIn();
+  const article = found.article;
+  const existing = article.dataset.like;
+  const button = article.querySelector('.action.like');
+  const previous = Number(article.dataset.likeCount || 0);
+  const nextOn = !existing;
+  article.dataset.like = nextOn ? 'pending' : '';
+  article.dataset.likeCount = String(Math.max(0, previous + (nextOn ? 1 : -1)));
+  button.classList.toggle('on', nextOn);
+  button.querySelector('.count').textContent = compactCount(article.dataset.likeCount);
+  try {
+    if (existing && existing !== 'pending') await api.deleteRecord(existing);
+    else article.dataset.like = (await api.like(article.dataset.uri, article.dataset.cid)).uri;
+  } catch (error) {
+    article.dataset.like = existing;
+    article.dataset.likeCount = String(previous);
+    button.classList.toggle('on', Boolean(existing));
+    button.querySelector('.count').textContent = compactCount(previous);
+    toast(error.message);
+  }
 }
 
-// ----------------- Navigation & Event Listeners -----------------
+function compactCount(value) {
+  const n = Number(value) || 0;
+  if (n < 1) return '';
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, '')}K`;
+}
 
-function setupNavigation() {
-  document.querySelectorAll('.nav-item').forEach((item) => {
-    item.addEventListener('click', () => {
-      const v = item.dataset.view;
-      if (v) window.location.hash = v;
-    });
-  });
-
-  document.getElementById('primary-compose-btn')?.addEventListener('click', () => {
-    ui.openComposerModal();
-  });
-
-  document.getElementById('nav-account-pill')?.addEventListener('click', () => {
-    if (state.session) {
-      ui.openSettingsModal();
+async function toggleRepost(found) {
+  if (!signedIn()) return requireSignIn();
+  const article = found.article;
+  const existing = article.dataset.repost;
+  const button = article.querySelector('.action.repost');
+  try {
+    if (existing) {
+      await api.deleteRecord(existing);
+      article.dataset.repost = '';
+      button.classList.remove('on');
     } else {
-      ui.openLoginModal();
+      article.dataset.repost = (await api.repost(article.dataset.uri, article.dataset.cid)).uri;
+      button.classList.add('on');
     }
-  });
-
-  // Feed tabs switcher (Following / Discover)
-  document.querySelectorAll('.feed-tab[data-tab]').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.feed-tab[data-tab]').forEach((t) => t.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.dataset.tab;
-      window.location.hash = target;
-    });
-  });
-
-  // Header refresh button
-  document.getElementById('header-refresh-btn')?.addEventListener('click', () => {
-    handleRoute();
-    ui.toast('Feed refreshed', 'info', 1500);
-  });
+  } catch (error) { toast(error.message); }
 }
 
-function setupEventListeners() {
-  window.addEventListener('feed:refresh', () => handleRoute());
-  window.addEventListener('session:change', () => {
-    updateAccountPill();
-    handleRoute();
-  });
-
-  // Keyboard Shortcuts
-  window.addEventListener('keydown', (e) => {
-    if (e.target.matches('input, textarea')) return;
-    if (e.key === 'n' || e.key === 'c') {
-      e.preventDefault();
-      ui.openComposerModal();
-    } else if (e.key === 'g') {
-      e.preventDefault();
-      document.getElementById('grok-sidebar')?.classList.toggle('collapsed');
-    } else if (e.key === 'r') {
-      e.preventDefault();
-      handleRoute();
-    }
-  });
-
-  updateAccountPill();
+async function toggleBookmark(found) {
+  if (!signedIn()) return requireSignIn();
+  const article = found.article;
+  const on = article.dataset.bookmarked === '1';
+  const button = article.querySelector('.action.bookmark');
+  try {
+    if (on) await api.removeBookmark(article.dataset.uri);
+    else await api.bookmark(article.dataset.uri, article.dataset.cid);
+    article.dataset.bookmarked = on ? '0' : '1';
+    button.classList.toggle('on', !on);
+  } catch (error) { toast(error.message); }
 }
 
-function updateAccountPill() {
-  const pill = document.getElementById('nav-account-pill');
-  if (!pill) return;
-  if (state.session) {
-    pill.innerHTML = `
-      <img src="${state.session.avatar || ''}" class="account-avatar" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\' fill=\\'%23555\\'><circle cx=\\'12\\' cy=\\'12\\' r=\\'12\\'/></svg>'">
-      <div class="account-info">
-        <span class="account-name">${ui.escapeHtml(state.session.displayName || state.session.handle)}</span>
-        <span class="account-handle">@${ui.escapeHtml(state.session.handle)}</span>
-      </div>
-    `;
-  } else {
-    pill.innerHTML = `
-      <div class="account-avatar" style="display:flex;align-items:center;justify-content:center;">${ui.ICONS.user}</div>
-      <div class="account-info">
-        <span class="account-name">Guest Mode</span>
-        <span class="account-handle">Click to sign in</span>
-      </div>
-    `;
+async function toggleFollow(button) {
+  if (!button) return;
+  if (!signedIn()) return requireSignIn();
+  const did = button.dataset.did;
+  const existing = button.dataset.following;
+  try {
+    if (existing) {
+      await api.deleteRecord(existing);
+      button.dataset.following = '';
+      button.classList.remove('on');
+      button.textContent = 'Follow';
+    } else {
+      button.dataset.following = (await api.follow(did)).uri;
+      button.classList.add('on');
+      button.textContent = 'Following';
+    }
+  } catch (error) { toast(error.message); }
+}
+
+async function deletePost(found) {
+  if (!window.confirm('Delete this post?')) return;
+  try {
+    await api.deleteRecord(found.post.uri);
+    found.article.remove();
+    toast('Deleted');
+  } catch (error) { toast(error.message); }
+}
+
+async function newChat() {
+  const handle = window.prompt('Message which handle?');
+  if (!handle) return;
+  try {
+    const did = await api.resolveHandle(handle.trim().replace(/^@/, ''));
+    const data = await api.convoForMember(did);
+    const id = data.convo?.id;
+    if (!id) throw new Error('Could not open that conversation.');
+    location.hash = `#/messages/${encodeURIComponent(id)}`;
+  } catch (error) { toast(error.message); }
+}
+
+let lightbox = { images: [], index: 0 };
+
+function openLightbox(images, index) {
+  lightbox = { images, index };
+  paintLightbox();
+  if (!$('lightbox').open) $('lightbox').showModal();
+}
+
+function paintLightbox() {
+  const image = lightbox.images[lightbox.index];
+  if (!image) return;
+  $('lightbox-img').src = image.src;
+  $('lightbox-img').alt = image.alt || '';
+  $('lightbox-alt').hidden = !image.alt;
+  $('lightbox-alt').textContent = image.alt || '';
+}
+
+async function playVideo(node) {
+  if (!node || node.dataset.playing) return;
+  const playlist = node.dataset.playlist;
+  if (!playlist) return;
+  node.dataset.playing = '1';
+  const video = document.createElement('video');
+  video.controls = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  node.replaceChildren(video);
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = playlist;
+    return;
+  }
+  try {
+    const mod = await import('https://cdn.jsdelivr.net/npm/hls.js@1.6.13/+esm');
+    const Hls = mod.default;
+    if (Hls?.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(playlist);
+      hls.attachMedia(video);
+      return;
+    }
+  } catch {
+    /* fall through */
+  }
+  node.replaceChildren();
+  node.textContent = 'This browser could not play the video.';
+}
+
+async function startOAuth(event) {
+  event?.preventDefault();
+  const error = $('login-error');
+  error.hidden = true;
+  if (!client) {
+    error.hidden = false;
+    error.textContent = oauthReady || 'Sign in with Bluesky is unavailable here. Use an app password.';
+    $('app-password-box').hidden = false;
+    return;
+  }
+  const typed = $('login-handle').value.trim().replace(/^@/, '');
+  const button = $('login-oauth');
+  button.disabled = true;
+  button.textContent = 'Opening Bluesky…';
+  try {
+    await client.signInRedirect(typed || 'https://bsky.social');
+  } catch (err) {
+    error.hidden = false;
+    error.textContent = err.message || 'Bluesky did not open the login page.';
+    button.disabled = false;
+    button.textContent = 'Sign in with Bluesky';
   }
 }
+
+async function startPassword() {
+  const error = $('login-error');
+  const identifier = $('login-handle').value.trim();
+  const password = $('login-password').value;
+  error.hidden = true;
+  if (!identifier || !password) {
+    error.hidden = false;
+    error.textContent = 'Enter your handle and app password.';
+    return;
+  }
+  const button = $('login-password-btn');
+  button.disabled = true;
+  try {
+    await api.loginWithPassword(identifier, password);
+    $('login-password').value = '';
+    $('login').close();
+    await loadMe();
+    location.hash = '#/';
+    route();
+    toast(`Signed in as @${getPassword().handle}`);
+  } catch (err) {
+    error.hidden = false;
+    error.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function signOut() {
+  const sub = getOauth()?.sub;
+  try { await api.logoutPassword(); } catch { setPassword(null); }
+  setOauth(null);
+  me.profile = null;
+  if (sub && client) await client.revoke(sub).catch(() => {});
+  updateAccount();
+  loadRail();
+  location.hash = '#/';
+  route();
+}
+
+function onKey(event) {
+  if (event.key === 'Escape') closeMenu();
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+  if (typing || document.querySelector('dialog[open]')) {
+    if (event.key === 'Escape') document.querySelector('dialog[open]')?.close();
+    return;
+  }
+  const postsOnPage = () => [...document.querySelectorAll('#view .post.feed-post')];
+  if (event.key === 'n') return openComposer();
+  if (event.key === '/') {
+    event.preventDefault();
+    ( $('search-q') || $('rail-q') )?.focus();
+    return;
+  }
+  if (event.key === 'j' || event.key === 'k') {
+    const list = postsOnPage();
+    if (!list.length) return;
+    selected = Math.max(0, Math.min(list.length - 1, selected + (event.key === 'j' ? 1 : -1)));
+    list.forEach((post, index) => post.classList.toggle('selected', index === selected));
+    list[selected].scrollIntoView({ block: 'nearest' });
+  }
+  const current = postsOnPage()[selected];
+  if (!current) return;
+  if (event.key === 'l') current.querySelector('.action.like')?.click();
+  if (event.key === 'r') current.querySelector('.action.reply')?.click();
+  if (event.key === 't') current.querySelector('.action.repost')?.click();
+  if (event.key === 'b') current.querySelector('.action.bookmark')?.click();
+  if (event.key === 'Enter') current.querySelector('.time')?.click();
+}
+
+function bind() {
+  document.body.addEventListener('click', onClick);
+  $('menu').addEventListener('click', onMenu);
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#menu, [data-act="more"], [data-act="repost"], #account-btn')) closeMenu();
+  });
+  document.addEventListener('keydown', onKey);
+  $('back').addEventListener('click', () => {
+    if (history.length > 1) history.back();
+    else location.hash = '#/';
+  });
+  $('account-btn').addEventListener('click', () => {
+    if (!signedIn()) requireSignIn();
+    else openMenu($('account-btn'), [{ id: 'settings-go', label: 'Settings' }, { id: 'signout-go', label: 'Sign out' }]);
+  });
+  $('menu').addEventListener('click', (event) => {
+    if (event.target.dataset.menu === 'settings-go') location.hash = '#/settings';
+    if (event.target.dataset.menu === 'signout-go') signOut();
+  });
+  $('login-form').addEventListener('submit', (event) => {
+    const box = $('app-password-box');
+    if (!box.hidden && $('login-password').value) {
+      event.preventDefault();
+      startPassword();
+      return;
+    }
+    startOAuth(event);
+  });
+  $('login-app-toggle').addEventListener('click', () => {
+    $('app-password-box').hidden = !$('app-password-box').hidden;
+  });
+  $('login-password-btn').addEventListener('click', startPassword);
+  $('compose-form').addEventListener('submit', publish);
+  $('compose-cancel').addEventListener('click', () => $('compose').close());
+  $('compose-text').addEventListener('input', () => {
+    updateCount();
+    const dialog = $('compose');
+    if (!dialog.dataset.reply && !dialog.dataset.quote) saveDraft($('compose-text').value);
+  });
+  $('compose-files').addEventListener('change', () => {
+    addFiles($('compose-files').files);
+    $('compose-files').value = '';
+  });
+  $('compose-previews').addEventListener('input', (event) => {
+    const index = event.target.dataset.alt;
+    if (index == null || !$('compose')._files?.[index]) return;
+    $('compose')._files[index].alt = event.target.value;
+  });
+  $('rail-search').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const q = $('rail-q').value.trim();
+    if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
+  });
+  $('view').addEventListener('submit', (event) => {
+    if (event.target.id === 'search-form') {
+      event.preventDefault();
+      const q = $('search-q').value.trim();
+      location.hash = q ? `#/search/${encodeURIComponent(q)}` : '#/search';
+    }
+    if (event.target.id === 'chat-form') {
+      event.preventDefault();
+      const input = $('chat-text');
+      const text = input.value.trim();
+      const id = parseHash()[1];
+      if (!text || !id) return;
+      input.disabled = true;
+      api.sendMessage(id, text).then(() => {
+        input.value = '';
+        $('view').querySelector('.messages')?.insertAdjacentHTML('beforeend', messageHtml({ text, sender: { did: myDid() } }, myDid()));
+      }).catch((error) => toast(error.message)).finally(() => { input.disabled = false; input.focus(); });
+    }
+    if (event.target.id === 'thread-reply') {
+      event.preventDefault();
+      const uri = event.target.dataset.uri;
+      const item = posts.get(uri);
+      if (item?.post) openComposer({ reply: item.post });
+    }
+    if (event.target.id === 'mute-form') {
+      event.preventDefault();
+      const word = $('mute-input').value.trim();
+      if (!word) return;
+      const list = [...new Set([...mutedWords(), word])];
+      setMutedWords(list);
+      showSettings();
+    }
+  });
+  $('view').addEventListener('click', (event) => {
+    const theme = event.target.dataset?.themeSet;
+    if (theme) applyTheme(theme);
+    const word = event.target.dataset?.unmute;
+    if (word) {
+      setMutedWords(mutedWords().filter((item) => item !== word));
+      showSettings();
+    }
+  });
+  $('lightbox-close').addEventListener('click', () => $('lightbox').close());
+  $('lightbox-prev').addEventListener('click', () => {
+    lightbox.index = (lightbox.index + lightbox.images.length - 1) % lightbox.images.length;
+    paintLightbox();
+  });
+  $('lightbox-next').addEventListener('click', () => {
+    lightbox.index = (lightbox.index + 1) % lightbox.images.length;
+    paintLightbox();
+  });
+  document.querySelectorAll('dialog').forEach((dialog) => {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+  window.addEventListener('hashchange', route);
+  document.querySelectorAll('[data-nav]').forEach((link) => {
+    link.addEventListener('click', () => {
+      const href = link.getAttribute('href');
+      if (href === location.hash || (href === '#/' && (!location.hash || location.hash === '#/'))) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        route();
+      }
+    });
+  });
+}
+
+async function boot() {
+  bind();
+  loadPassword();
+  try {
+    const mod = await import('./vendor/auth.js');
+    client = mod.createClient();
+    client.addEventListener?.('deleted', () => {
+      setOauth(null);
+      me.profile = null;
+      updateAccount();
+      toast('Your Bluesky session ended. Sign in again.');
+    });
+    const result = await client.init();
+    if (result?.session) {
+      setOauth(result.session);
+      setPassword(null);
+    }
+  } catch (error) {
+    oauthReady = error?.message || 'Sign in with Bluesky needs the published site, or http://127.0.0.1.';
+    client = null;
+  }
+  await loadMe();
+  if ((!location.hash || location.hash === '#' || location.hash === '#/') && !signedIn()) {
+    location.replace('#/discover');
+  } else route();
+  document.getElementById('boot-error')?.remove();
+  setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 45000);
+}
+
+boot().catch((error) => {
+  const view = $('view');
+  if (view) view.innerHTML = emptyHtml('LibreSky could not start', error.message || String(error));
+});

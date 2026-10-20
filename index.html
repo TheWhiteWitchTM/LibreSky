@@ -1,229 +1,140 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="black">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LibreSky — Sovereign Bluesky Client</title>
-  <meta name="description" content="Sovereign Bluesky client with dark theme and local AI assistant.">
-  <link rel="stylesheet" href="./css/styles.css">
-  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LibreSky</title>
+  <meta name="description" content="LibreSky is a Bluesky client for the browser.">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/app.css">
+  <script>
+    (function () {
+      if (location.hostname === 'localhost') {
+        location.replace(location.href.replace('//localhost', '//127.0.0.1'));
+        return;
+      }
+      if (location.hostname.endsWith('github.io') && location.pathname === '/LibreSky') {
+        location.replace('/LibreSky/' + location.search + location.hash);
+        return;
+      }
+      try {
+        var theme = localStorage.getItem('libresky.theme') || localStorage.getItem('libresky:theme');
+        if (theme === 'black') theme = 'dark';
+        if (!theme && matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
+        if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
-  <div id="splash">
-    <div class="spark large pulse"></div>
-    <strong id="splash-title" style="font-size:20px;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
-      Libre<span style="color:var(--blue);">Sky</span>
-    </strong>
-    <span class="dim" style="font-size:12px;font-family:var(--mono);">Initializing sovereign ATProto client...</span>
-  </div>
-
-  <!-- App Shell -->
-  <div id="app">
-    <!-- Left Navigation Sidebar -->
-    <nav class="nav-sidebar" aria-label="Main Navigation">
-      <div class="brand-header" onclick="window.location.hash='timeline'">
-        <span class="spark"></span>
-        <div>
-          <div class="brand-title">Libre<span class="accent">Sky</span></div>
-          <div class="brand-sub">Sovereign Client</div>
-        </div>
-      </div>
-
-      <div class="nav-menu">
-        <a class="nav-item active" data-view="timeline" href="#timeline">
-          <svg viewBox="0 0 24 24"><path d="M12 2.1L1 12h3v9h6v-6h4v6h6v-9h3L12 2.1zm0 2.69L19 11v8h-3v-6H8v6H5v-8l7-6.21z"/></svg>
-          <span>Home</span>
-        </a>
-        <a class="nav-item" data-view="discover" href="#discover">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></svg>
-          <span>Discover</span>
-        </a>
-        <a class="nav-item" data-view="search" href="#search">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-5.2-5.2" stroke="currentColor" stroke-width="2"/></svg>
-          <span>Search</span>
-        </a>
-        <a class="nav-item" data-view="notifications" href="#notifications">
-          <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
-          <span>Notifications</span>
-          <span class="nav-badge" id="notif-badge" hidden>0</span>
-        </a>
-        <a class="nav-item" data-view="chat" href="#chat">
-          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/></svg>
-          <span>Messages</span>
-        </a>
-        <a class="nav-item" data-view="bookmarks" href="#bookmarks">
-          <svg viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></svg>
-          <span>Bookmarks</span>
-        </a>
-
-        <!-- Grok AI Assistant Button -->
-        <div class="nav-item ai-item" id="nav-ai-btn" style="cursor:pointer;" title="Grok Local AI Assistant (G)">
-          <span class="spark small"></span>
-          <span>Grok AI</span>
-          <span class="ai-status-dot" id="ai-nav-dot" title="Local AI connection status"></span>
-        </div>
-
-        <button type="button" class="compose-btn-primary" id="primary-compose-btn">
-          <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-          <span>Post</span>
-        </button>
-      </div>
-
-      <!-- Account / Sign In Pill -->
-      <div class="nav-account" id="nav-account-pill">
-        <div class="account-avatar" style="display:flex;align-items:center;justify-content:center;">
-          <svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:currentColor;"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        </div>
-        <div class="account-info">
-          <span class="account-name">Guest Mode</span>
-          <span class="account-handle">Click to sign in</span>
-        </div>
-      </div>
+  <div class="shell">
+    <nav class="left" aria-label="Primary">
+      <a class="brand" href="#/" aria-label="LibreSky home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0085ff"/><circle cx="22" cy="11" r="3.2" fill="#fff"/><path d="M6 21c4-4 7-4 11 0s7 4 11 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="brand-name">Libre<span>Sky</span></span>
+      </a>
+      <a class="nav-link" data-nav="home" href="#/"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg><span class="label">Home</span></a>
+      <a class="nav-link" data-nav="search" href="#/search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg><span class="label">Search</span></a>
+      <a class="nav-link" data-nav="notifications" href="#/notifications"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg><span class="label">Notifications</span><span class="badge" id="notif-badge" hidden>0</span></a>
+      <a class="nav-link" data-nav="messages" href="#/messages"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg><span class="label">Chat</span></a>
+      <a class="nav-link" data-nav="feeds" href="#/feeds"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v3A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5v-3zm0 8A1.5 1.5 0 0 1 5.5 12h13a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-3z"/></svg><span class="label">Feeds</span></a>
+      <a class="nav-link" data-nav="lists" href="#/lists"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 6h12v2H8V6zM8 11h12v2H8v-2zm0 5h8v2H8v-2zM4.5 6.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm0 5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm0 5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/></svg><span class="label">Lists</span></a>
+      <a class="nav-link" data-nav="bookmarks" href="#/bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
+      <a class="nav-link" data-nav="profile" href="#/"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
+      <a class="nav-link" data-nav="settings" href="#/settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7.2h6.1a2.4 2.4 0 0 0 4.6 0H20v2h-5.3a2.4 2.4 0 0 0-4.6 0H4v-2zm0 7.6h2.2a2.4 2.4 0 0 0 4.6 0H20v2H10.8a2.4 2.4 0 0 0-4.6 0H4v-2z"/></svg><span class="label">Settings</span></a>
+      <button type="button" class="post-btn" data-act="compose"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg><span>Post</span></button>
+      <button type="button" class="account" id="account-btn">
+        <span class="avatar" id="account-avatar" data-initial="L"></span>
+        <span class="account-text"><strong id="account-name">Sign in</strong><span id="account-handle">Bluesky account</span></span>
+      </button>
     </nav>
 
-    <!-- Main Wrapper -->
-    <div class="main-wrapper">
-      <!-- Center Feed Column -->
-      <main class="center-column">
-        <!-- Sticky Header -->
-        <header class="view-header">
-          <div class="view-header-title" id="view-title">
-            <span>Home</span>
-          </div>
-          <div class="header-actions">
-            <button type="button" class="icon-btn" id="header-refresh-btn" title="Refresh feed (R)">
-              <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-            </button>
-          </div>
-        </header>
-
-        <!-- Feed Tabs (Following / Discover) -->
-        <div class="feed-tabs-bar" id="feed-tabs-bar">
-          <div class="feed-tab active" data-tab="timeline">Following</div>
-          <div class="feed-tab" data-tab="discover">Discover</div>
+    <main class="center">
+      <header class="sticky-head">
+        <div class="title-row">
+          <button type="button" class="icon-btn" id="back" hidden aria-label="Back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/></svg></button>
+          <h1 id="title">Home</h1>
         </div>
+        <div class="tabs" id="tabs" hidden></div>
+      </header>
+      <div id="view" aria-live="polite"></div>
+    </main>
 
-        <!-- Scrollable Feed Body -->
-        <div class="feed-scroll-container">
-          <!-- Inline Composer -->
-          <div class="feed-composer" id="inline-composer">
-            <div class="composer-avatar" style="display:flex;align-items:center;justify-content:center;">
-              <span class="spark small"></span>
-            </div>
-            <div class="composer-body">
-              <textarea id="composer-textarea" class="composer-input" rows="2" placeholder="What is happening?!"></textarea>
-              <div id="composer-previews" class="composer-previews"></div>
-              <div class="composer-bottom">
-                <div class="composer-tools">
-                  <label class="composer-tool-btn" title="Add Images">
-                    <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-                    <input type="file" id="inline-img-input" accept="image/*" multiple hidden>
-                  </label>
-                  <button type="button" class="composer-tool-btn ai-tool" id="inline-ai-assist-btn" title="Grok AI Polish">
-                    <span class="spark small"></span>
-                  </button>
-                </div>
-                <div class="composer-submit-group">
-                  <span id="inline-char-count" class="char-count-text">300</span>
-                  <button type="button" class="submit-post-btn" id="inline-submit-btn" disabled>Post</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Feed Posts Container -->
-          <div id="feed-container"></div>
-        </div>
-      </main>
-
-      <!-- Right Grok AI & Info Sidebar -->
-      <aside class="grok-sidebar" id="grok-sidebar">
-        <div class="grok-header">
-          <div class="grok-title">
-            <span class="spark small"></span>
-            <span>LibreSky AI (Grok)</span>
-            <span class="grok-badge">Local</span>
-          </div>
-          <button type="button" class="icon-btn" id="grok-close-btn" title="Close AI Panel">
-            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-          </button>
-        </div>
-
-        <!-- Local AI Status Card -->
-        <div class="ai-status-card">
-          <div class="ai-status-row">
-            <span style="font-weight:700;">Status</span>
-            <span id="grok-status-tag" class="ai-endpoint-tag">Scanning local AI...</span>
-          </div>
-          <div class="ai-status-row" style="gap:8px;">
-            <select id="grok-model-select" class="ai-models-select">
-              <option value="">Searching local models...</option>
-            </select>
-            <select id="grok-persona-select" class="grok-persona-select">
-              <option value="grok">Grok / Witty</option>
-              <option value="summarizer">Summarizer</option>
-              <option value="factcheck">Fact-Checker</option>
-              <option value="writer">Ghostwriter</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Quick Action Prompt Pills -->
-        <div class="grok-quick-actions">
-          <button type="button" class="quick-prompt-btn" data-prompt="Summarize what's happening on the timeline right now.">✨ Summarize Feed</button>
-          <button type="button" class="quick-prompt-btn" data-prompt="What are the top discussions and debates right now?">🔍 Deep Dive</button>
-          <button type="button" class="quick-prompt-btn" data-prompt="Give me a witty, humorous take on recent tech news.">🎭 Roast</button>
-        </div>
-
-        <!-- Grok Chat Log -->
-        <div class="grok-log" id="grok-chat-log">
-          <div class="grok-msg ai">
-            <div class="grok-msg-role"><span class="spark small"></span> Grok</div>
-            <div class="grok-msg-content">Hello! I'm LibreSky AI, running locally on your hardware. Ask me to summarize feeds, explain posts, fact-check takes, or refine drafts.</div>
-          </div>
-        </div>
-
-        <!-- Prompt Input Form -->
-        <div class="grok-input-wrap">
-          <textarea id="grok-prompt-input" class="grok-textarea" placeholder="Ask Grok about Bluesky or enter a prompt..."></textarea>
-          <div class="grok-controls-row">
-            <span class="dim" style="font-size:11px;font-family:var(--mono);">Enter sends · Shift+Enter newline</span>
-            <button type="button" class="grok-send-btn" id="grok-send-btn">
-              <span class="spark small"></span> Ask
-            </button>
-          </div>
-        </div>
-      </aside>
-    </div>
+    <aside class="right">
+      <form id="rail-search" class="search-form" role="search">
+        <label class="search">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg>
+          <input id="rail-q" placeholder="Search" autocomplete="off" enterkeyhint="search">
+        </label>
+      </form>
+      <div id="rail-card"></div>
+    </aside>
   </div>
 
-  <!-- Mobile Bottom Bar -->
-  <nav class="mobile-bottom-bar" aria-label="Mobile Navigation">
-    <button type="button" class="icon-btn" onclick="window.location.hash='timeline'"><svg viewBox="0 0 24 24"><path d="M12 2.1L1 12h3v9h6v-6h4v6h6v-9h3L12 2.1z"/></svg></button>
-    <button type="button" class="icon-btn" onclick="window.location.hash='discover'"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></svg></button>
-    <button type="button" class="icon-btn" onclick="window.location.hash='notifications'"><svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg></button>
-    <button type="button" class="icon-btn" onclick="document.getElementById('grok-sidebar').classList.toggle('collapsed')"><span class="spark small"></span></button>
-    <button type="button" class="icon-btn" onclick="window.dispatchEvent(new CustomEvent('nav:compose'))"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg></button>
+  <nav class="tabbar" aria-label="Mobile">
+    <a href="#/" aria-label="Home"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg></a>
+    <a href="#/search" aria-label="Search"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg></a>
+    <a href="#/notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg></a>
+    <a href="#/messages" aria-label="Chat"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg></a>
+    <a href="#/profile" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg></a>
   </nav>
+  <button type="button" class="fab" data-act="compose" aria-label="Post"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg></button>
 
-  <!-- Modals -->
-  <div id="modal-overlay" class="modal-overlay" hidden></div>
+  <dialog id="login">
+    <form id="login-form">
+      <h2>Sign in</h2>
+      <p class="dim">LibreSky uses your Bluesky account. Your password is entered on Bluesky, not here.</p>
+      <label>Handle
+        <input id="login-handle" name="username" autocomplete="username" placeholder="you.bsky.social" spellcheck="false">
+      </label>
+      <p class="form-error" id="login-error" hidden></p>
+      <button class="primary" id="login-oauth" type="submit">Sign in with Bluesky</button>
+      <button class="text-btn" id="login-app-toggle" type="button">Use an app password</button>
+      <div id="app-password-box" hidden>
+        <label>App password
+          <input id="login-password" type="password" autocomplete="current-password">
+        </label>
+        <button class="primary" id="login-password-btn" type="button">Sign in</button>
+        <p class="dim"><a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Create one in Bluesky settings</a></p>
+      </div>
+    </form>
+  </dialog>
 
-  <!-- Lightbox -->
-  <div id="lightbox" class="lightbox" hidden>
-    <button type="button" class="lightbox-close-btn" id="lightbox-close">&times;</button>
-    <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev">&#10094;</button>
-    <button type="button" class="lightbox-nav-btn next" id="lightbox-next">&#10095;</button>
-    <div class="lightbox-img-wrap">
-      <img id="lightbox-img" class="lightbox-img" src="" alt="Fullscreen view">
-    </div>
-    <div id="lightbox-alt" class="lightbox-alt-bar" hidden></div>
-  </div>
+  <dialog id="compose">
+    <form id="compose-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="compose-cancel">Cancel</button>
+        <button type="submit" class="primary small" id="compose-send" disabled>Post</button>
+      </div>
+      <div id="compose-context"></div>
+      <textarea id="compose-text" rows="5" placeholder="What's up?" maxlength="2000"></textarea>
+      <div id="compose-previews"></div>
+      <div class="compose-tools">
+        <label class="icon-btn" title="Add images">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 5.5h14A1.5 1.5 0 0 1 20.5 7v10a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17V7A1.5 1.5 0 0 1 5 5.5zm1.2 9.2 2.3-2.8 1.8 2.1 2.6-3.4 4.4 5.6H6.2z"/></svg>
+          <input id="compose-files" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+        </label>
+        <span id="compose-count">300</span>
+      </div>
+    </form>
+  </dialog>
 
-  <!-- Toast Container -->
+  <dialog id="lightbox">
+    <button type="button" class="icon-btn light-close" id="lightbox-close" aria-label="Close"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <button type="button" class="icon-btn light-nav prev" id="lightbox-prev" aria-label="Previous"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/></svg></button>
+    <img id="lightbox-img" alt="">
+    <button type="button" class="icon-btn light-nav next" id="lightbox-next" aria-label="Next"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7"/></svg></button>
+    <p id="lightbox-alt" hidden></p>
+  </dialog>
+
+  <div id="menu" class="menu" hidden></div>
   <div id="toasts"></div>
-
-  <!-- Main JavaScript Module -->
+  <noscript><p class="empty">LibreSky needs JavaScript to reach Bluesky.</p></noscript>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
