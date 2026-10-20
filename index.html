@@ -5,8 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LibreSky</title>
   <meta name="description" content="LibreSky is a Bluesky client for the browser.">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#0085ff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="LibreSky">
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/icon.png">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -135,6 +140,11 @@
   <div id="menu" class="menu" hidden></div>
   <div id="toasts"></div>
   <noscript><p class="empty">LibreSky needs JavaScript to reach Bluesky.</p></noscript>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).catch(function () {});
+    }
+  </script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

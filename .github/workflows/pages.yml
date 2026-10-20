@@ -25,7 +25,7 @@ jobs:
       - name: Stage static site
         run: |
           mkdir -p _site
-          cp -a index.html 404.html client-metadata.json LICENSE README.md .nojekyll _site/
+          cp -a index.html 404.html client-metadata.json manifest.webmanifest sw.js LICENSE README.md .nojekyll _site/
           cp -a css js assets _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
