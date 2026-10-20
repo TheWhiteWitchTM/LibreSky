@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-20-desktop';
+const CACHE = 'libresky-2026-10-20-browse';
 
 const SHELL = [
   './',
@@ -14,12 +14,14 @@ const SHELL = [
   './js/util.js',
   './js/lang.js',
   './js/words.js',
+  './js/prefs.js',
   './js/vendor/auth.js',
   './manifest.webmanifest',
   './assets/icon.png',
   './assets/icon-512.png',
   './assets/icon.svg',
   './assets/banner.png',
+  './assets/login-hero.jpg',
 ];
 
 self.addEventListener('install', (event) => {

@@ -561,17 +561,26 @@ function messagePreview(message) {
   return 'Message';
 }
 
-export function convoHtml(convo, me) {
+export function convoHtml(convo, me, options = {}) {
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
   const gone = accountGone(other);
   const text = messagePreview(convo.lastMessage);
   const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');
   const unread = convoUnread(convo, me);
   const pill = unread ? `<b class="pill">${unread}</b>` : '';
+  const request = options.request
+    ? `<button type="button" class="primary mini" data-act="accept-convo" data-convo="${attr(convo.id)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${attr(convo.id)}">Delete</button>`
+    : '';
   const remove = gone
     ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
-  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
+  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
+}
+
+export function requestEntryHtml(count) {
+  const n = Number(count) || 0;
+  const detail = n === 1 ? '1 person waiting' : (n ? `${n} people waiting` : 'People you have not accepted');
+  return `<a class="person request-entry" href="#/messages/requests"><span class="avatar" data-initial="R"></span><span class="person-link"><strong>Message requests</strong><span class="handle">${escapeHtml(detail)}</span></span></a>`;
 }
 
 function callLine(parsed) {
@@ -677,6 +686,13 @@ export function packHtml(pack) {
   const by = creator.handle ? `by @${creator.handle}` : 'Starter pack';
   const meta = [by, count != null ? `${fullCount(count)} people` : ''].filter(Boolean).join(' · ');
   return `<a class="pack" href="${href}">${avatar(creator.avatar, creator.displayName || creator.handle, 'sm')}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(meta)}</span>${record.description ? `<span class="snip">${escapeHtml(record.description)}</span>` : ''}</span></a>`;
+}
+
+export function callRequestHtml(offer) {
+  const video = offer?.media === 'video';
+  const name = offer?.name || 'Someone';
+  const label = video ? 'Video call request' : 'Voice call request';
+  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 
 export function callBannerHtml(offer, extra = {}) {

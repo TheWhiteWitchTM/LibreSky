@@ -974,8 +974,33 @@ dialog {
   box-shadow: var(--shadow);
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-#login { width: min(420px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 8px 8px 18px; }
+#login {
+  width: min(460px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 0 0 8px;
+  background: #0085ff url('../assets/login-hero.jpg') center top / 100% auto no-repeat;
+}
+#login form { margin-top: 0; background: var(--bg); border-radius: 18px 18px 0 0; }
 #login form, #compose form { padding: 16px 18px 18px; }
+.login-features {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 18px 16px;
+  aspect-ratio: 1408 / 736;
+}
+.login-features span {
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 40, 110, 0.55);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
 #login h2 { margin: 8px 0; font-size: 24px; }
 #login label, .mute-form { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin: 12px 0; }
 #login input, .mute-form input, #compose-previews input {
@@ -1012,7 +1037,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .gate-brand span { color: var(--blue); }
 .gate-brand .mark { width: 36px; height: 36px; }
 .remember { font-size: 13px; line-height: 1.45; }
-html[data-signed-out] #login::backdrop { background: var(--bg); }
+html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 .boot {
   position: fixed;
   inset: 0;
@@ -1214,6 +1239,7 @@ html[data-signed-out] #login::backdrop { background: var(--bg); }
 .count-ring.over { background: conic-gradient(var(--danger) 100%, var(--danger) 0); }
 .tool-row { display: flex; align-items: center; gap: 2px; }
 .video-draft { position: relative; margin-top: 8px; }
+.video-draft img { width: 100%; max-height: 280px; object-fit: cover; border-radius: 12px; background: #111; }
 .video-draft video {
   width: 100%;
   max-height: 280px;
@@ -1276,6 +1302,7 @@ html[data-signed-out] #login::backdrop { background: var(--bg); }
 #compose-context { color: var(--text-2); font-size: 14px; }
 #compose-context p { margin: 4px 0; }
 #compose-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.preview { position: relative; }
 .preview img { width: 100%; height: 120px; object-fit: cover; border-radius: 12px; }
 .preview input { width: 100%; margin-top: 4px; }
 
@@ -1375,6 +1402,31 @@ button.nav-link { border: 0; background: transparent; color: inherit; font: inhe
 .fresh-faces .avatar::before { font-size: 12px; }
 .fresh-label { font-size: 14px; }
 .fresh-link { font-size: 14px; text-decoration: underline; text-underline-offset: 2px; }
+.fresh-update {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--blue);
+  font-weight: 800;
+  text-align: center;
+}
+.fresh-update:hover { background: var(--hover); }
+.request-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--hover);
+}
+.request-banner p { margin: 0; }
 .collection, .collection-wrap { position: relative; }
 a.collection, button.collection {
   display: grid;
@@ -1709,6 +1761,7 @@ body.ringing { padding-bottom: 120px; }
 .ai-doc .ai-thread { min-height: 0; padding: 4px 0 8px; }
 .ai-ask { position: static; margin-top: 8px; border: 1px solid var(--border); border-radius: 18px; }
 .segmented { display: flex; gap: 8px; margin-bottom: 18px; }
+.segmented.wrap { flex-wrap: wrap; }
 .segmented button { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 8px 14px; font-weight: 700; }
 .segmented button[aria-pressed="true"] { background: var(--blue); color: #fff; border-color: transparent; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }

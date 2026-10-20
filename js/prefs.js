@@ -8,6 +8,8 @@ const SEARCH_KEY = 'libresky.search';
 const VOICE_KEY = 'libresky.voice';
 const EMOJI_KEY = 'libresky.emoji';
 const THEME_KEY = 'libresky.theme';
+const CALL_KEY = 'libresky.calls';
+const CALL_ALLOWS = new Set(['all', 'following', 'none']);
 const FEED_TYPE = 'app.bsky.actor.defs#feedViewPref';
 const THREAD_TYPE = 'app.bsky.actor.defs#threadViewPref';
 const MUTED_TYPE = 'app.bsky.actor.defs#mutedWordsPref';
@@ -145,6 +147,29 @@ export function saveVoicePrefs(partial) {
   writeJson(VOICE_KEY, saved);
   queueClient();
   return voicePrefs();
+}
+
+export function callAllow() {
+  const saved = readJson(CALL_KEY);
+  return CALL_ALLOWS.has(saved?.allow) ? saved.allow : 'all';
+}
+
+export function saveCallAllow(allow) {
+  const next = CALL_ALLOWS.has(allow) ? allow : 'all';
+  writeJson(CALL_KEY, { allow: next });
+  queueClient();
+  return next;
+}
+
+export function callMayRing({ allow = 'all', followed = false, accepted = false } = {}) {
+  if (allow === 'none') return false;
+  if (allow === 'following') return Boolean(followed);
+  return Boolean(followed || accepted);
+}
+
+export function callIsRequest({ allow = 'all', followed = false, accepted = false } = {}) {
+  if (allow !== 'all') return false;
+  return !followed && !accepted;
 }
 
 export function syncMutedWords(list) {
@@ -343,6 +368,7 @@ function applyClient(record) {
   }
   if (record.languages && typeof record.languages === 'object') saveLanguagePrefs(record.languages);
   if (Array.isArray(record.emoji)) writeJson(EMOJI_KEY, record.emoji.filter((item) => typeof item === 'string').slice(0, 24));
+  if (record.calls && CALL_ALLOWS.has(record.calls.allow)) writeJson(CALL_KEY, { allow: record.calls.allow });
   if (record.theme === 'dark' || record.theme === 'light') {
     try { localStorage.setItem(THEME_KEY, record.theme); } catch { /* the screen still follows the record */ }
     return record.theme;
@@ -362,6 +388,7 @@ function clientRecord() {
     languages: languagePrefs(),
     theme: themeName(),
     emoji: recentEmoji(),
+    calls: { allow: callAllow() },
   };
 }
 

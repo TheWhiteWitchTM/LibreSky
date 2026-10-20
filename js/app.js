@@ -4,12 +4,14 @@ import {
   actorHtml,
   avatar,
   callBannerHtml,
+  callRequestHtml,
   collectionCardHtml,
   callConvoHtml,
   callStartHtml,
   chatHeaderHtml,
   hoverCardHtml,
   convoHtml,
+  requestEntryHtml,
   drainPosts,
   emptyHtml,
   feedHtml,
@@ -54,9 +56,13 @@ import { completeWord, rememberWords } from './words.js';
 import { icon } from './icons.js';
 import { emojiGroups } from './emoji.js';
 import {
+  callAllow,
+  callIsRequest,
+  callMayRing,
   feedView,
   homeAllows,
   pullAccountPrefs,
+  saveCallAllow,
   saveFeedView,
   saveSearchPrefs,
   saveThreadPrefs,
@@ -303,6 +309,21 @@ function clearBoot() {
   $('boot')?.remove();
 }
 
+let browsing = false;
+
+function rememberBrowse() {
+  browsing = true;
+  try { sessionStorage.setItem('libresky.browse', '1'); } catch { /* this visit can still close the sign-in screen */ }
+}
+
+function startBrowse() {
+  rememberBrowse();
+  document.documentElement.removeAttribute('data-signed-out');
+  if ($('login')?.open) $('login').close();
+  if (parseHash()[0]) location.hash = '#/';
+  else if (!$('view')?.querySelector('.post, .empty, .prompt')) route();
+}
+
 function openGate() {
   document.documentElement.dataset.signedOut = '1';
   const input = $('login-handle');
@@ -318,6 +339,13 @@ function openGate() {
 function closeGate() {
   document.documentElement.removeAttribute('data-signed-out');
   if ($('login')?.open) $('login').close();
+}
+
+function offerSignIn() {
+  if (signedIn() || browsing) return false;
+  const [page] = parseHash();
+  if (!page) return true;
+  return ['notifications', 'messages', 'bookmarks', 'calls', 'settings'].includes(page);
 }
 
 function requireSignIn() {
@@ -485,23 +513,92 @@ function playSound(kind, options = {}) {
 }
 playSound.at = {};
 
-function spotIncoming(convos, mine) {
-  for (const convo of convos || []) {
+const followCache = new Map();
+
+async function rememberFollows(dids) {
+  const missing = [...new Set(dids)].filter((did) => did && !followCache.has(did));
+  await Promise.all(missing.map(async (did) => {
+    try {
+      const profile = await api.getProfile(did);
+      followCache.set(did, Boolean(profile?.viewer?.following));
+    } catch {
+      followCache.set(did, false);
+    }
+  }));
+}
+
+function peerFollowed(member) {
+  if (!member?.did) return false;
+  if (member.viewer && Object.prototype.hasOwnProperty.call(member.viewer, 'following')) {
+    const yes = Boolean(member.viewer.following);
+    followCache.set(member.did, yes);
+    return yes;
+  }
+  return Boolean(followCache.get(member.did));
+}
+
+function callFacts(convo, member) {
+  return {
+    allow: callAllow(),
+    followed: peerFollowed(member),
+    accepted: convo?.status !== 'request',
+  };
+}
+
+async function classifyCalls(convos) {
+  const mine = myDid();
+  const rows = [];
+  const need = [];
+  (convos || []).forEach((convo) => {
     const other = (convo.members || []).find((member) => member?.did && member.did !== mine);
-    if (!other?.did || !convo.id) continue;
+    if (!other?.did || !convo.id) return;
     const offer = incomingCall(convo.lastMessage ? [convo.lastMessage] : [], mine, other.did);
-    if (!offer?.rkey) continue;
+    if (!offer?.rkey) return;
     const key = `${convo.id}:${offer.rkey}`;
-    if (ignoredRings.has(key)) continue;
-    return {
+    if (ignoredRings.has(key)) return;
+    const known = other.viewer && Object.prototype.hasOwnProperty.call(other.viewer, 'following');
+    if (!known && !followCache.has(other.did) && callAllow() !== 'none') need.push(other.did);
+    rows.push({ convo, other, offer, key });
+  });
+  if (need.length) await rememberFollows(need);
+  let ring = null;
+  const requests = [];
+  rows.forEach(({ convo, other, offer, key }) => {
+    const facts = callFacts(convo, other);
+    const row = {
       ...offer,
       convoId: convo.id,
       peerDid: other.did,
       name: other.displayName || (other.handle ? `@${other.handle}` : 'Someone'),
+      avatar: other.avatar || '',
       key,
     };
+    if (callMayRing(facts)) {
+      if (!ring) ring = row;
+      return;
+    }
+    if (callIsRequest(facts)) requests.push(row);
+  });
+  return { ring, requests };
+}
+
+async function loadConvoPages() {
+  const [accepted, requests] = await Promise.all([
+    api.listConvos(undefined, undefined, 'accepted').catch(() => null),
+    api.listConvos(undefined, undefined, 'request').catch(() => null),
+  ]);
+  if (accepted && requests) {
+    const requestRows = requests.convos || [];
+    const requestIds = new Set(requestRows.map((convo) => convo.id));
+    const main = (accepted.convos || []).filter((convo) => convo.status !== 'request' && !requestIds.has(convo.id));
+    return { main, requests: requestRows };
   }
-  return null;
+  const all = await api.listConvos().catch(() => ({ convos: [] }));
+  const rows = all.convos || [];
+  const requestRows = requests?.convos || rows.filter((convo) => convo.status === 'request');
+  const requestIds = new Set(requestRows.map((convo) => convo.id));
+  const main = (accepted?.convos || rows).filter((convo) => convo.status !== 'request' && !requestIds.has(convo.id));
+  return { main, requests: requestRows };
 }
 
 function paintIncomingBar(offer) {
@@ -550,19 +647,19 @@ async function refreshBadge() {
     /* the badge is optional */
   }
   try {
-    const data = await api.listConvos();
-    const convos = data.convos || [];
+    const { main, requests } = await loadConvoPages();
+    const convos = [...main, ...requests];
     const mine = myDid();
     const count = convos.reduce((sum, convo) => sum + convoUnread(convo, mine), 0);
     paintBadge('chat-badge', count);
-    const offer = spotIncoming(convos, mine);
+    const { ring: offer } = await classifyCalls(convos);
     paintIncomingBar(offer);
     const ring = offer?.key || '';
     if (ring && ring !== badgeMemory.ring) playSound('call');
     else if (badgeMemory.chat !== null && count > badgeMemory.chat) playSound('chat');
     badgeMemory.chat = count;
     badgeMemory.ring = ring;
-    convos.forEach((convo) => {
+    main.forEach((convo) => {
       if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
     });
   } catch {
@@ -650,14 +747,20 @@ async function loadRail() {
   }
 }
 
-const homeWatch = { timer: 0, token: 0, uris: new Set(), pending: [] };
+const FRESH_POLL_MS = 90000;
+const FRESH_PILL_MS = 60000;
+const homeWatch = { timer: 0, token: 0, uris: new Set(), pending: [], collapsed: false, collapseTimer: 0, checked: 0 };
 
 function stopHomeWatch() {
   clearInterval(homeWatch.timer);
+  clearTimeout(homeWatch.collapseTimer);
   homeWatch.timer = 0;
+  homeWatch.collapseTimer = 0;
   homeWatch.token = 0;
   homeWatch.pending = [];
+  homeWatch.collapsed = false;
   hideFresh();
+  document.querySelector('#view .fresh-update')?.remove();
 }
 
 function noteHome(items) {
@@ -682,7 +785,7 @@ function placeFresh() {
   const rect = column.getBoundingClientRect();
   const below = head ? head.getBoundingClientRect().bottom : 64;
   pill.style.left = `${rect.left + rect.width / 2}px`;
-  pill.style.top = `${Math.max(8, below + 10)}px`;
+  pill.style.top = `${Math.max(8, below - 18)}px`;
 }
 
 function hideFresh() {
@@ -692,14 +795,57 @@ function hideFresh() {
   pill.innerHTML = '';
 }
 
+function freshUpdateLabel(count) {
+  return count === 1 ? 'Update · 1 new post' : `Update · ${count} new posts`;
+}
+
+function paintFreshLink() {
+  const view = $('view');
+  if (!view) return;
+  let link = view.querySelector('.fresh-update');
+  const count = homeWatch.pending.length;
+  if (!count || parseHash()[0]) {
+    link?.remove();
+    return;
+  }
+  const label = freshUpdateLabel(count);
+  if (!link) {
+    link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'fresh-update';
+    link.dataset.act = 'fresh-update';
+    const prompt = view.querySelector('.prompt');
+    if (prompt) prompt.insertAdjacentElement('afterend', link);
+    else view.prepend(link);
+  }
+  if (link.textContent !== label) link.textContent = label;
+}
+
+function revealFresh() {
+  homeWatch.collapsed = false;
+  clearTimeout(homeWatch.collapseTimer);
+  homeWatch.collapseTimer = setTimeout(() => {
+    if (!homeWatch.pending.length) return;
+    homeWatch.collapsed = true;
+    paintFresh();
+  }, FRESH_PILL_MS);
+}
+
 function paintFresh() {
   const pill = $('fresh');
   if (!pill) return;
   const items = homeWatch.pending;
   if (!items.length || parseHash()[0]) {
     hideFresh();
+    document.querySelector('#view .fresh-update')?.remove();
     return;
   }
+  if (homeWatch.collapsed) {
+    hideFresh();
+    paintFreshLink();
+    return;
+  }
+  document.querySelector('#view .fresh-update')?.remove();
   const seen = new Set();
   const actors = [];
   items.forEach((item) => {
@@ -721,7 +867,11 @@ function paintFresh() {
 
 function applyFresh() {
   const items = homeWatch.pending.splice(0);
+  clearTimeout(homeWatch.collapseTimer);
+  homeWatch.collapseTimer = 0;
+  homeWatch.collapsed = false;
   hideFresh();
+  document.querySelector('#view .fresh-update')?.remove();
   if (!items.length || parseHash()[0]) return;
   noteHome(items);
   const prepared = items.map((item) => (muted(item.post || item) ? { ...item, muted: true } : item));
@@ -744,12 +894,17 @@ function armHomeWatch(token, items) {
   homeWatch.pending = [];
   noteHome(items);
   hideFresh();
-  homeWatch.timer = setInterval(() => { pollHome(token); }, 15000);
+  homeWatch.collapsed = false;
+  homeWatch.checked = Date.now();
+  homeWatch.timer = setInterval(() => { pollHome(token); }, FRESH_POLL_MS);
 }
 
 async function pollHome(token) {
   if (token !== generation || token !== homeWatch.token || document.hidden) return;
   if (parseHash()[0]) return;
+  const now = Date.now();
+  if (now - homeWatch.checked < FRESH_POLL_MS - 5000) return;
+  homeWatch.checked = now;
   try {
     const data = await api.getTimeline(null);
     if (token !== generation || token !== homeWatch.token) return;
@@ -767,8 +922,11 @@ async function pollHome(token) {
     const known = new Set(homeWatch.pending.map((item) => item?.post?.uri).filter(Boolean));
     const added = fresh.filter((item) => item?.post?.uri && !known.has(item.post.uri));
     homeWatch.pending = fresh;
+    if (added.length) {
+      revealFresh();
+      playSound('posts');
+    }
     paintFresh();
-    if (added.length) playSound('posts');
   } catch {
     /* the pill waits for the next check */
   }
@@ -861,20 +1019,20 @@ async function ensureHomeLanes(token) {
 }
 
 async function showHome(active) {
-  const token = ++generation;
   const following = active.kind === 'following';
   const discover = active.kind === 'discover';
   const lane = active.kind === 'lane' ? active : null;
+  if (following && !signedIn()) {
+    showBrowse();
+    return;
+  }
+  const token = ++generation;
   paintHomeChrome(active);
   const laneJob = ensureHomeLanes(token).then((changed) => {
     if (!changed || token !== generation) return;
     const now = homeActive();
     if (now) paintHomeChrome(now);
   });
-  if (following && !signedIn()) {
-    $('view').innerHTML = emptyHtml('Your home feed is on Bluesky', 'Sign in and LibreSky shows the people you follow.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button><a class="text-link" href="#/discover">See Discover</a>');
-    return;
-  }
   if (lane && !signedIn()) {
     $('view').innerHTML = emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
     return;
@@ -926,6 +1084,50 @@ async function showHome(active) {
   } catch (error) {
     if (token !== generation) return;
     $('view').innerHTML = emptyHtml('Could not load the feed', error.message, '<button type="button" class="primary" data-act="retry">Try again</button>');
+  }
+}
+
+async function showBrowse() {
+  const token = ++generation;
+  setChrome({
+    title: 'Browse',
+    nav: 'home',
+    tabs: [
+      { href: '#/', label: 'Browse', on: true },
+      { href: '#/discover', label: 'Discover', on: false },
+    ],
+  });
+  showSkeletons();
+  try {
+    const data = await api.getFeed(api.WHATS_HOT);
+    if (token !== generation) return;
+    const raw = data.feed || [];
+    const items = filterDiscover(raw);
+    resetPosts();
+    const posted = feedHtml(items);
+    const banner = '<button type="button" class="prompt" data-act="signin"><span>Sign in to see who you follow</span></button>';
+    const empty = emptyHtml('Nothing here yet', 'Discover is quiet in your content languages. Config can show every language.');
+    const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
+    $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
+    remember();
+    document.documentElement.dataset.ready = '1';
+    const more = async (cursor) => {
+      const page = await api.getFeed(api.WHATS_HOT, cursor);
+      if (token !== generation) return;
+      const nextItems = filterDiscover(page.feed || []);
+      if (!nextItems.length && !page.cursor && !$('view')?.querySelector('.post')) {
+        $('view').innerHTML = banner + empty;
+        pagerFor(null, more);
+        return;
+      }
+      paintFeed(nextItems, { append: true });
+      if (nextItems.length || !page.cursor) $('view')?.querySelector('.lang-wait')?.remove();
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
+  } catch (error) {
+    if (token !== generation) return;
+    $('view').innerHTML = emptyHtml('Could not load Browse', error.message, '<button type="button" class="primary" data-act="retry">Try again</button><button type="button" class="text-btn" data-act="signin">Sign in</button>');
   }
 }
 
@@ -1131,6 +1333,14 @@ function chatOptions(messages, peerDid, convoId, fresh) {
 function paintCallBanner(messages, peerDid, convoId) {
   let offer = incomingCall(messages, myDid(), peerDid);
   if (offer && ignoredRings.has(`${convoId}:${offer.rkey}`)) offer = null;
+  if (offer) {
+    const facts = {
+      allow: callAllow(),
+      followed: Boolean(followCache.get(peerDid)),
+      accepted: $('view')?.dataset.convoStatus !== 'request',
+    };
+    if (!callMayRing(facts) && !callIsRequest(facts)) offer = null;
+  }
   const current = $('view')?.querySelector('.call-banner');
   const busy = isInCall();
   document.querySelectorAll('#view .call-actions').forEach((node) => {
@@ -1176,8 +1386,14 @@ function watchOpenChat(convoId, peerDid, token) {
           }
         });
         if (added && near) list.scrollTop = list.scrollHeight;
-        if (incomingOffer) playSound('call');
-        else if (fromThem) playSound('chat');
+        if (incomingOffer) {
+          const facts = {
+            allow: callAllow(),
+            followed: Boolean(followCache.get(peerDid)),
+            accepted: $('view')?.dataset.convoStatus !== 'request',
+          };
+          if (callMayRing(facts)) playSound('call');
+        } else if (fromThem) playSound('chat');
         if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
       }
       paintCallBanner(messages, peerDid, convoId);
@@ -1197,15 +1413,22 @@ async function showMessages(convoId) {
   }
   showSkeletons();
   try {
-    if (!convoId) {
-      const data = await api.listConvos();
+    if (!convoId || convoId === 'requests') {
+      const { main, requests } = await loadConvoPages();
       if (token !== generation) return;
       const mine = myDid();
-      (data.convos || []).forEach((convo) => {
+      if (convoId === 'requests') {
+        setChrome({ title: 'Message requests', nav: 'messages', back: true });
+        const rows = requests.map((convo) => convoHtml(convo, mine, { request: true })).join('');
+        $('view').innerHTML = rows || emptyHtml('No message requests', 'When someone you have not accepted messages you, it shows up here.');
+        return;
+      }
+      main.forEach((convo) => {
         if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
       });
-      const rows = (data.convos || []).map((convo) => convoHtml(convo, mine)).join('');
-      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
+      const rows = main.map((convo) => convoHtml(convo, mine)).join('');
+      const entry = requestEntryHtml(requests.length);
+      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       refreshBadge();
       return;
     }
@@ -1217,9 +1440,19 @@ async function showMessages(convoId) {
     const messages = (data.messages || []).slice().reverse();
     const other = otherMember(convoWrap?.convo, messages);
     const peerDid = other?.did || '';
+    const requested = convoWrap?.convo?.status === 'request';
+    if (other?.did) {
+      if (other.viewer && Object.prototype.hasOwnProperty.call(other.viewer, 'following')) followCache.set(other.did, Boolean(other.viewer.following));
+      else await rememberFollows([other.did]);
+    }
+    if (token !== generation) return;
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
     const options = chatOptions(messages, peerDid, convoId, false);
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
+    const requestBar = requested
+      ? `<div class="request-banner"><p>This is a message request. Accept it to keep the chat, or delete it.</p><span class="row-actions"><button type="button" class="primary small" data-act="accept-convo" data-convo="${escapeHtml(convoId)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${escapeHtml(convoId)}">Delete</button></span></div>`
+      : '';
+    $('view').dataset.convoStatus = requested ? 'request' : 'accepted';
+    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -1958,7 +2191,7 @@ async function showThread(actor, rkey) {
     const replies = sortThreadReplies(thread.replies || [], threadPrefs(), myDid()).map((node) => (node.post ? postHtml(node) : '<div class="missing">Reply unavailable</div>')).join('');
     const replyBox = signedIn()
       ? `<button type="button" class="prompt" data-act="thread-reply" data-uri="${escapeHtml(thread.post.uri)}"><span>Write a reply</span></button>`
-      : '';
+      : '<button type="button" class="prompt" data-act="signin"><span>Sign in to reply</span></button>';
     const order = '<div class="toolbar"><button type="button" class="text-btn" data-act="thread-settings">Thread order</button></div>';
     $('view').innerHTML = order + above + postHtml({ post: thread.post, reply: thread.parent ? { parent: thread.parent.post ? { author: thread.parent.post.author } : null } : null }) + replyBox + replies;
     remember();
@@ -2331,6 +2564,9 @@ function showSettings() {
     <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
     <h2>Blocked accounts</h2>
     <div id="blocked-accounts" class="directory"><p class="dim">Loading blocked accounts…</p></div>
+    <h2>Messages and calls</h2>
+    <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
+    ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
     <h2>Appearance</h2>
     <div class="segmented">
       <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
@@ -2370,6 +2606,53 @@ function showSettings() {
     </ul>
   </section>`;
   loadSettingsLists(token);
+  loadChatAllow(token);
+}
+
+function allowButtons(kind, current) {
+  return [
+    ['all', 'Everyone'],
+    ['following', 'People you follow'],
+    ['none', 'No one'],
+  ].map(([id, label]) => `<button type="button" data-${kind}-allow="${id}" aria-pressed="${current === id ? 'true' : 'false'}">${label}</button>`).join('');
+}
+
+function paintAllow(kind, value) {
+  document.querySelectorAll(`[data-${kind}-allow]`).forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset[`${kind}Allow`] === value ? 'true' : 'false');
+  });
+}
+
+async function loadChatAllow(token = generation) {
+  if (!signedIn() || !$('chat-allow')) return;
+  try {
+    const allow = await api.readChatDeclaration();
+    if (token !== generation || !$('chat-allow') || $('chat-allow').dataset.touched === '1') return;
+    paintAllow('chat', allow);
+  } catch {
+    /* the buttons stay on Everyone until the record can be read */
+  }
+}
+
+async function chooseChatAllow(allow) {
+  if (!signedIn()) return requireSignIn();
+  const row = $('chat-allow');
+  if (row) row.dataset.touched = '1';
+  paintAllow('chat', allow);
+  try {
+    await api.writeChatDeclaration(allow);
+    toast(allow === 'none' ? 'New chats are off' : allow === 'following' ? 'Only people you follow can message you' : 'Anyone can send a message request');
+  } catch (error) {
+    toast(error.message || 'Could not save who can message you.');
+    loadChatAllow();
+  }
+}
+
+function chooseCallAllow(allow) {
+  if (!signedIn()) return requireSignIn();
+  const saved = saveCallAllow(allow);
+  paintAllow('call', saved);
+  toast(saved === 'none' ? 'New calls are off' : saved === 'following' ? 'Only people you follow can call you' : 'Other people can send a call request');
 }
 
 async function loadSettingsLists(token) {
@@ -2518,10 +2801,14 @@ async function showCalls() {
   }
   showSkeletons();
   try {
-    const data = await api.listConvos();
+    const { main, requests } = await loadConvoPages();
     if (token !== generation) return;
-    const rows = (data.convos || []).map((convo) => callConvoHtml(convo, myDid())).join('');
-    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
+    const { requests: waiting } = await classifyCalls([...requests, ...main]);
+    if (token !== generation) return;
+    const requestRows = waiting.map((offer) => callRequestHtml(offer)).join('');
+    const requestBlock = requestRows ? `<h2 class="section-label">Call requests</h2>${requestRows}` : '';
+    const rows = main.map((convo) => callConvoHtml(convo, myDid())).join('');
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${requestBlock}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
   }
@@ -2778,6 +3065,7 @@ function route() {
   closeHover();
   stopSpeech();
   stopHomeWatch();
+  if ($('view')) delete $('view').dataset.convoStatus;
   stopChatTimer();
   pager?.disconnect();
   selected = -1;
@@ -2812,33 +3100,156 @@ function postFrom(node) {
   return { article, item: posts.get(article.dataset.uri), post: posts.get(article.dataset.uri)?.post || posts.get(article.dataset.uri) };
 }
 
-function openComposer({ reply = null, quote = null, text = '' } = {}) {
+function gifEmbed(external) {
+  const url = String(external?.url || '').toLowerCase();
+  const title = String(external?.title || '').toLowerCase();
+  return title === 'gif' || /giphy|tenor|klipy|gifs\.bsky/.test(url);
+}
+
+function replyGate(post) {
+  const allow = post?.threadgate?.record?.allow || post?.threadgate?.allow;
+  if (!Array.isArray(allow)) return 'everyone';
+  if (!allow.length) return 'none';
+  const types = allow.map((rule) => String(rule?.$type || ''));
+  if (types.some((type) => type.includes('followingRule'))) return 'following';
+  if (types.some((type) => type.includes('mentionRule'))) return 'mentioned';
+  return 'everyone';
+}
+
+function editDraft(post) {
+  const record = post?.record || {};
+  const embed = record.embed || {};
+  const type = String(embed.$type || '');
+  const media = type.includes('recordWithMedia') ? (embed.media || {}) : embed;
+  const mediaType = String(media.$type || '');
+  const quoted = type.includes('recordWithMedia') ? embed.record : (mediaType === 'app.bsky.embed.record' ? embed : null);
+  const view = post?.embed || {};
+  const viewMedia = String(view.$type || '').includes('recordWithMedia') ? (view.media || {}) : view;
+  const images = mediaType === 'app.bsky.embed.images'
+    ? (media.images || []).map((image, index) => ({
+      kept: true,
+      alt: image.alt || '',
+      blob: image.image,
+      url: viewMedia.images?.[index]?.thumb || viewMedia.images?.[index]?.fullsize || '',
+    })).filter((image) => image.blob)
+    : [];
+  const video = mediaType === 'app.bsky.embed.video' && media.video
+    ? {
+      kept: true,
+      blob: media.video,
+      alt: media.alt || '',
+      aspectRatio: media.aspectRatio || viewMedia.aspectRatio || null,
+      poster: viewMedia.thumbnail || '',
+    }
+    : null;
+  const externalRecord = mediaType === 'app.bsky.embed.external' ? (media.external || null) : null;
+  const viewExternal = String(viewMedia.$type || '').includes('external') ? (viewMedia.external || null) : null;
+  const external = externalRecord?.uri
+    ? {
+      url: externalRecord.uri,
+      title: externalRecord.title || '',
+      description: externalRecord.description || '',
+      thumbBlob: externalRecord.thumb || null,
+      thumbUrl: viewExternal?.thumb || '',
+    }
+    : null;
+  const ref = quoted?.record;
+  const viewQuote = view.record || viewMedia.record || {};
+  const quote = ref?.uri && ref?.cid
+    ? { uri: ref.uri, cid: ref.cid, author: viewQuote.author || null, record: viewQuote.value || { text: '' } }
+    : null;
+  const parent = record.reply?.parent;
+  const root = record.reply?.root;
+  const reply = parent?.uri && parent?.cid && root?.uri
+    ? {
+      uri: parent.uri,
+      cid: parent.cid,
+      author: post?.reply?.parent?.author || {},
+      record: { text: '', reply: { root } },
+    }
+    : null;
+  return {
+    text: record.text || '',
+    images,
+    video,
+    external,
+    quote,
+    reply,
+    langs: Array.isArray(record.langs) ? record.langs.slice(0, 3) : [],
+    gate: replyGate(post),
+  };
+}
+
+function editFingerprint(dialog) {
+  const files = (dialog?._files || []).map((file) => `${file.blob?.ref?.$link || file.url || ''}:${file.alt || ''}`);
+  const video = dialog?._video ? `${dialog._video.kept ? 'kept' : 'new'}:${dialog._video.alt || ''}:${dialog._video.poster || dialog._video.url || ''}` : '';
+  return JSON.stringify({
+    text: $('compose-text')?.value || '',
+    files,
+    video,
+    quote: dialog?.dataset.quote || '',
+    reply: dialog?.dataset.reply || '',
+    gate: $('compose-replies')?.value || 'everyone',
+    gif: dialog?._gif?.url || '',
+    link: dialog?._keptExternal?.url || '',
+  });
+}
+
+function openComposer({ reply = null, quote = null, text = '', edit = null } = {}) {
   if (!signedIn()) return requireSignIn();
   const dialog = $('compose');
-  dialog.dataset.reply = reply ? JSON.stringify({ uri: reply.uri, cid: reply.cid, root: reply.record?.reply?.root || { uri: reply.uri, cid: reply.cid } }) : '';
-  dialog.dataset.quote = quote ? JSON.stringify({ uri: quote.uri, cid: quote.cid }) : '';
+  const source = edit?.record ? editDraft(edit) : null;
+  const replySource = source?.reply || reply;
+  const quoteSource = source?.quote || quote;
+  dialog.dataset.edit = edit?.uri || '';
+  dialog.dataset.reply = replySource ? JSON.stringify({ uri: replySource.uri, cid: replySource.cid, root: replySource.record?.reply?.root || { uri: replySource.uri, cid: replySource.cid } }) : '';
+  dialog.dataset.quote = quoteSource ? JSON.stringify({ uri: quoteSource.uri, cid: quoteSource.cid }) : '';
   const context = $('compose-context');
-  if (reply) context.innerHTML = `<p class="dim">Replying to <strong>@${escapeHtml(reply.author?.handle || '')}</strong></p><p>${escapeHtml((reply.record?.text || '').slice(0, 160))}</p>`;
-  else if (quote) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quote.author?.handle || '')}</strong></p><p>${escapeHtml((quote.record?.text || '').slice(0, 160))}</p>`;
+  if (source) context.innerHTML = '<p class="dim">Editing replaces this post. The original is deleted and the new one is posted. Likes and replies stay on the original.</p>';
+  else if (replySource) context.innerHTML = `<p class="dim">Replying to <strong>@${escapeHtml(replySource.author?.handle || '')}</strong></p><p>${escapeHtml((replySource.record?.text || '').slice(0, 160))}</p>`;
+  else if (quoteSource) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quoteSource.author?.handle || '')}</strong></p><p>${escapeHtml((quoteSource.record?.text || '').slice(0, 160))}</p>`;
   else context.innerHTML = '';
   const area = $('compose-text');
-  area.value = text || (!reply && !quote ? loadDraft() : '');
+  area.value = source ? source.text : (text || (!replySource && !quoteSource ? loadDraft() : ''));
   const replies = $('reply-control');
-  if (replies) replies.hidden = Boolean(reply);
-  if (!reply && $('compose-replies')) $('compose-replies').value = 'everyone';
+  if (replies) replies.hidden = Boolean(replySource);
+  if (!replySource && $('compose-replies')) $('compose-replies').value = source?.gate || 'everyone';
   if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
-  dialog._files = [];
+  dialog._files = source?.images || [];
   dialog._card = null;
   dialog._gif = null;
-  dialog._video = null;
+  dialog._video = source?.video || null;
   dialog._attach = null;
-  dialog._langs = languagePrefs().posts.slice();
+  dialog._langs = source?.langs?.length ? source.langs.slice() : languagePrefs().posts.slice();
   dialog._dismissedUrl = '';
+  dialog._keptExternal = null;
+  if (source?.external?.url && !quoteSource) {
+    const external = source.external;
+    if (gifEmbed(external)) {
+      dialog._gif = {
+        url: external.url,
+        title: external.title || 'GIF',
+        thumb: external.thumbUrl || external.url,
+        thumbBlob: external.thumbBlob || null,
+      };
+    } else {
+      dialog._keptExternal = external;
+      dialog._card = {
+        kind: 'external',
+        url: external.url,
+        title: external.title || external.url,
+        description: external.description || '',
+        image: external.thumbUrl || '',
+        sourceUrl: external.url,
+        kept: true,
+      };
+    }
+  }
   closePicker();
   $('compose-previews').innerHTML = '';
   paintAttach();
   const videoBox = $('compose-video');
-  if (videoBox) {
+  if (videoBox && !dialog._video) {
     videoBox.hidden = true;
     videoBox.innerHTML = '';
   }
@@ -2847,11 +3258,21 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
     linkBox.hidden = true;
     linkBox.innerHTML = '';
   }
+  renderPreviews();
+  renderVideo();
+  if (dialog._gif) {
+    const gif = dialog._gif;
+    chooseGif({ url: gif.url, title: gif.title || 'GIF', thumb: gif.thumb || gif.url });
+    if (dialog._gif) dialog._gif.thumbBlob = gif.thumbBlob || null;
+  } else paintLinkPreview();
   paintComposeAvatar();
   paintLangChip();
   applyFieldLanguage(area);
   updateCount();
   scheduleLinkPreview();
+  dialog._editBase = source ? editFingerprint(dialog) : '';
+  const send = $('compose-send');
+  if (send) send.textContent = source ? 'Update' : 'Post';
   if (!dialog.open) dialog.showModal();
   area.focus();
 }
@@ -2894,6 +3315,7 @@ function updateCount() {
   const gif = $('compose')._gif;
   const video = $('compose')._video;
   const attached = Boolean($('compose')?._attach?.uri);
+  const quoted = Boolean($('compose')?.dataset.quote);
   const count = $('compose-count');
   const used = Math.min(300, Math.max(0, 300 - left));
   if (count) {
@@ -2903,7 +3325,7 @@ function updateCount() {
     else count.textContent = String(left);
   }
   count?.classList.toggle('over', left < 0);
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video && !attached);
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video && !attached && !quoted);
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -3178,7 +3600,13 @@ async function refreshLinkPreview() {
   if (!dialog?.open || !box) return;
   if (dialog._gif || dialog._video) return;
   const url = firstUrl($('compose-text').value);
+  if (url && dialog._keptExternal && url !== dialog._keptExternal.url) dialog._keptExternal = null;
   if (!url || dialog.dataset.quote || dialog._attach || dialog._dismissedUrl === url) {
+    if (!url && dialog._card?.kept && !dialog.dataset.quote && !dialog._attach) {
+      paintLinkPreview();
+      return;
+    }
+    if (dialog._card?.kept) dialog._keptExternal = null;
     dialog._card = null;
     box.hidden = true;
     box.innerHTML = '';
@@ -3272,7 +3700,7 @@ async function compress(file) {
 
 function renderPreviews() {
   const files = $('compose')._files || [];
-  $('compose-previews').innerHTML = files.map((file, index) => `<label class="preview"><img src="${file.url}" alt=""><input data-alt="${index}" value="${escapeHtml(file.alt)}" placeholder="Alt text"></label>`).join('');
+  $('compose-previews').innerHTML = files.map((file, index) => `<label class="preview"><img src="${escapeHtml(file.url)}" alt=""><button type="button" class="card-dismiss" data-act="remove-image" data-index="${index}" aria-label="Remove image">×</button><input data-alt="${index}" value="${escapeHtml(file.alt)}" placeholder="Alt text"></label>`).join('');
   updateCount();
 }
 
@@ -3317,14 +3745,24 @@ async function publish(event) {
     return;
   }
   $('compose-send').disabled = true;
-  $('compose-send').textContent = 'Posting…';
+  $('compose-send').textContent = dialog.dataset.edit ? 'Updating…' : 'Posting…';
   try {
+    const editing = dialog.dataset.edit || '';
+    let gateWarning = '';
+    if (editing && dialog._editBase && editFingerprint(dialog) === dialog._editBase) {
+      dialog.close();
+      toast('Nothing changed');
+      return;
+    }
     const images = [];
     for (const item of files) {
-      images.push({ alt: item.alt, blob: await api.uploadBlob(item.file) });
+      if (item.kept && item.blob) images.push({ alt: item.alt, blob: item.blob });
+      else images.push({ alt: item.alt, blob: await api.uploadBlob(item.file) });
     }
     let video = null;
-    if (draftVideo?.file) {
+    if (draftVideo?.kept && draftVideo.blob) {
+      video = { blob: draftVideo.blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio };
+    } else if (draftVideo?.file) {
       const blob = await api.uploadVideo(draftVideo.file, {
         onProgress: (label) => {
           if ($('compose-send')) $('compose-send').textContent = label;
@@ -3346,12 +3784,14 @@ async function publish(event) {
     const url = firstUrl(text);
     let card = dialog._card;
     if (gif && !images.length && !quote) {
-      let thumb = null;
-      try {
-        const file = await thumbFile(gif.thumb || gif.url);
-        if (file) thumb = await api.uploadBlob(file);
-      } catch {
-        thumb = null;
+      let thumb = gif.thumbBlob || null;
+      if (!thumb) {
+        try {
+          const file = await thumbFile(gif.thumb || gif.url);
+          if (file) thumb = await api.uploadBlob(file);
+        } catch {
+          thumb = null;
+        }
       }
       link = api.externalEmbed({ url: gif.url, title: gif.title || 'GIF', description: '', thumb });
     } else if (url && !video && dialog._dismissedUrl !== url && !quote) {
@@ -3362,8 +3802,8 @@ async function publish(event) {
         quote = { uri: card.post.uri, cid: card.post.cid };
         text = dropUrl(text, card.sourceUrl || url);
       } else if (card?.kind === 'external' && !images.length) {
-        let thumb = null;
-        if (card.image) {
+        let thumb = card.kept && dialog._keptExternal?.thumbBlob ? dialog._keptExternal.thumbBlob : null;
+        if (!thumb && card.image) {
           try {
             const file = await thumbFile(card.image);
             if (file) thumb = await api.uploadBlob(file);
@@ -3374,10 +3814,32 @@ async function publish(event) {
         link = api.externalEmbed({ ...card, url: card.url || url, thumb });
       }
     }
+    if (!link && dialog._keptExternal?.url && !images.length && !video && !quote && !gif) {
+      link = api.externalEmbed({
+        url: dialog._keptExternal.url,
+        title: dialog._keptExternal.title,
+        description: dialog._keptExternal.description,
+        thumb: dialog._keptExternal.thumbBlob || null,
+      });
+    }
     if (!text && !images.length && !video && !quote && !link) return;
     rememberWords(text);
     const created = await api.createPost({ text, images, video, reply, quote, link, langs: dialog._langs || languagePrefs().posts });
-    let gateWarning = '';
+    if (editing && created?.uri) {
+      try {
+        if (me.profile?.pinnedPost?.uri === editing && created.cid) {
+          await api.updateProfile({ pinnedPost: { uri: created.uri, cid: created.cid } });
+          me.profile.pinnedPost = { uri: created.uri, cid: created.cid };
+        }
+      } catch {
+        gateWarning = ' The profile pin still points at the original.';
+      }
+      try {
+        await api.deleteRecord(editing);
+      } catch {
+        gateWarning = `${gateWarning} The original post is still up.`;
+      }
+    }
     const gate = $('compose-replies')?.value || 'everyone';
     if (!reply && gate !== 'everyone' && created?.uri) {
       const allow = gate === 'none'
@@ -3388,17 +3850,18 @@ async function publish(event) {
       try {
         await api.createThreadgate(created.uri, allow);
       } catch {
-        gateWarning = ' Reply limits were not saved.';
+        gateWarning = `${gateWarning} Reply limits were not saved.`;
       }
     }
-    if (!reply && !quote) saveDraft('');
+    if (!reply && !quote && !editing) saveDraft('');
     dialog.close();
-    toast(`Posted.${gateWarning}`);
+    toast(`${editing ? 'Updated' : 'Posted'}.${gateWarning}`);
     route();
   } catch (error) {
     toast(error.message);
   } finally {
-    $('compose-send').textContent = 'Post';
+    const send = $('compose-send');
+    if (send) send.textContent = $('compose')?.dataset.edit ? 'Update' : 'Post';
     updateCount();
   }
 }
@@ -3797,7 +4260,10 @@ function renderVideo() {
     return;
   }
   box.hidden = false;
-  box.innerHTML = `<div class="video-draft"><video src="${escapeHtml(video.url)}" controls muted playsinline></video><input id="video-alt" value="${escapeHtml(video.alt || '')}" placeholder="Alt text" maxlength="1000"><button type="button" class="card-dismiss" data-act="dismiss-video" aria-label="Remove video">×</button></div>`;
+  const picture = video.url
+    ? `<video src="${escapeHtml(video.url)}" controls muted playsinline></video>`
+    : `<img src="${escapeHtml(video.poster || '')}" alt="">`;
+  box.innerHTML = `<div class="video-draft">${picture}<input id="video-alt" value="${escapeHtml(video.alt || '')}" placeholder="Alt text" maxlength="1000"><button type="button" class="card-dismiss" data-act="dismiss-video" aria-label="Remove video">×</button></div>`;
   updateCount();
 }
 
@@ -4126,6 +4592,11 @@ function chatLines() {
 
 async function deliverChat(convoId, text) {
   rememberWords(text);
+  if ($('view')?.dataset.convoStatus === 'request') {
+    await api.acceptConvo(convoId);
+    if ($('view')) $('view').dataset.convoStatus = 'accepted';
+    $('view')?.querySelector('.request-banner')?.remove();
+  }
   const sent = await api.sendMessage(convoId, text);
   const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
   if (!message.sender) message.sender = { did: myDid() };
@@ -4683,6 +5154,15 @@ async function handleChromeAct(act, event) {
     silenceRing(convoId, rkey);
     $('view')?.querySelector('.call-banner')?.remove();
     button?.closest('.call-actions')?.remove();
+    const requested = $('view')?.dataset.convoStatus === 'request' || Boolean(button?.closest('.request-row'));
+    if (requested && convoId) {
+      api.acceptConvo(convoId).then(() => {
+        if ($('view')) {
+          $('view').dataset.convoStatus = 'accepted';
+          $('view').querySelector('.request-banner')?.remove();
+        }
+      }).catch(() => {});
+    }
     acceptCall({
       convoId,
       peerDid: peer,
@@ -4722,6 +5202,36 @@ async function handleChromeAct(act, event) {
   if (act === 'chat-cleanup') {
     event.preventDefault();
     await cleanupDeletedChats(button);
+    return true;
+  }
+  if (act === 'accept-convo') {
+    event.preventDefault();
+    const id = button?.dataset.convo;
+    if (!id) return true;
+    try {
+      await api.acceptConvo(id);
+      toast('Request accepted');
+      if (parseHash()[1] === 'requests') route();
+      else if ($('view')) {
+        $('view').dataset.convoStatus = 'accepted';
+        $('view').querySelector('.request-banner')?.remove();
+      }
+      refreshBadge();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'decline-convo') {
+    event.preventDefault();
+    const id = button?.dataset.convo;
+    if (!id) return true;
+    if (!window.confirm('Delete this message request?')) return true;
+    try {
+      await api.leaveConvo(id);
+      toast('Request deleted');
+      refreshBadge();
+      if (parseHash()[1] === id) location.hash = '#/messages/requests';
+      else route();
+    } catch (error) { toast(error.message); }
     return true;
   }
   if (act === 'leave-convo') {
@@ -4900,6 +5410,19 @@ async function onClick(event) {
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
   }
+  if (act === 'remove-image') {
+    event.preventDefault();
+    const index = Number(event.target.closest('[data-index]')?.dataset.index);
+    const dialog = $('compose');
+    const files = dialog?._files || [];
+    if (!Number.isInteger(index) || !files[index]) return;
+    const [gone] = files.splice(index, 1);
+    if (gone?.url && !gone.kept) URL.revokeObjectURL(gone.url);
+    dialog._files = files;
+    renderPreviews();
+    scheduleLinkPreview();
+    return;
+  }
   if (act === 'dismiss-video') {
     event.preventDefault();
     const dialog = $('compose');
@@ -4925,6 +5448,7 @@ async function onClick(event) {
   if (act === 'dismiss-link') {
     event.preventDefault();
     const dialog = $('compose');
+    if (dialog._card?.kept) dialog._keptExternal = null;
     dialog._dismissedUrl = dialog._card?.sourceUrl || firstUrl($('compose-text').value);
     dialog._card = null;
     const box = $('compose-link');
@@ -5137,6 +5661,7 @@ function moreMenu(anchor, found) {
   items.push({ id: 'send-chat', label: 'Send in chat' });
   if (found.article.dataset.bookmarked === '1') items.push({ id: 'unbookmark', label: 'Remove bookmark', danger: true });
   if (own) {
+    items.push({ id: 'edit-post', label: 'Edit' });
     items.push({ id: pinnedUri === found.post.uri ? 'unpin' : 'pin', label: pinnedUri === found.post.uri ? 'Unpin from profile' : 'Pin to profile' });
     items.push({ id: 'delete', label: 'Delete', danger: true });
   } else {
@@ -5365,6 +5890,13 @@ async function onMenu(event) {
     return;
   }
   if (id === 'repost' || id === 'unrepost') return toggleRepost(found);
+  if (id === 'edit-post') {
+    if (!found.post?.record || !found.post?.uri) {
+      toast('This post cannot be edited.');
+      return;
+    }
+    return openComposer({ edit: found.post });
+  }
   if (id === 'delete') return deletePost(found);
   if (id === 'report') return openReport(found);
   if (id === 'mute' || id === 'unmute') {
@@ -5818,7 +6350,10 @@ async function signOut() {
   loadRail();
   $('view').innerHTML = '';
   location.hash = '#/';
+  browsing = false;
+  try { sessionStorage.removeItem('libresky.browse'); } catch { /* the sign-in screen still opens */ }
   openGate();
+  route();
 }
 
 function onKey(event) {
@@ -5828,7 +6363,6 @@ function onKey(event) {
     if (event.key === 'Escape') {
       const open = [...document.querySelectorAll('dialog[open]')];
       const dialog = open[open.length - 1];
-      if (dialog?.id === 'login' && !signedIn()) return;
       if (dialog?.id === 'call') return;
       dialog?.close();
     }
@@ -5957,11 +6491,12 @@ function bind() {
   });
   $('login-signup').addEventListener('click', startSignup);
   $('login-password-btn').addEventListener('click', startPassword);
-  $('login').addEventListener('cancel', (event) => {
-    if (!signedIn()) event.preventDefault();
-  });
+  $('login-browse')?.addEventListener('click', () => startBrowse());
   $('login').addEventListener('close', () => {
-    if (!signedIn()) queueMicrotask(() => { if (!signedIn()) openGate(); });
+    if (signedIn()) return;
+    rememberBrowse();
+    document.documentElement.removeAttribute('data-signed-out');
+    if (!$('view')?.innerHTML.trim()) route();
   });
   $('report-form').addEventListener('submit', submitReport);
   $('report-cancel').addEventListener('click', () => $('report').close());
@@ -5985,7 +6520,7 @@ function bind() {
   $('compose-text').addEventListener('input', () => {
     updateCount();
     const dialog = $('compose');
-    if (!dialog.dataset.reply && !dialog.dataset.quote) saveDraft($('compose-text').value);
+    if (!dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit) saveDraft($('compose-text').value);
     scheduleLinkPreview();
   });
   $('compose-text').addEventListener('keydown', onSuggestKey);
@@ -6008,6 +6543,10 @@ function bind() {
     if (video?.url) URL.revokeObjectURL(video.url);
     $('compose')._video = null;
     $('compose')._attach = null;
+    $('compose')._keptExternal = null;
+    $('compose').dataset.edit = '';
+    const send = $('compose-send');
+    if (send) send.textContent = 'Post';
     paintAttach();
   });
   $('attach-cancel')?.addEventListener('click', () => $('attach')?.close());
@@ -6228,6 +6767,16 @@ function bind() {
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());
   $('view').addEventListener('click', (event) => {
+    const chatChoice = event.target.closest('[data-chat-allow]')?.dataset.chatAllow;
+    if (chatChoice) {
+      chooseChatAllow(chatChoice);
+      return;
+    }
+    const callChoice = event.target.closest('[data-call-allow]')?.dataset.callAllow;
+    if (callChoice) {
+      chooseCallAllow(callChoice);
+      return;
+    }
     const theme = event.target.dataset?.themeSet;
     if (theme) {
       applyTheme(theme);
@@ -6274,7 +6823,6 @@ function bind() {
   document.querySelectorAll('dialog').forEach((dialog) => {
     dialog.addEventListener('click', (event) => {
       if (event.target !== dialog) return;
-      if (dialog.id === 'login' && !signedIn()) return;
       if (dialog.id === 'call') return;
       dialog.close();
     });
@@ -6525,11 +7073,12 @@ async function boot() {
   } catch {
     /* a saved session can still be opened on the next visit */
   }
+  try { browsing = sessionStorage.getItem('libresky.browse') === '1'; } catch { browsing = false; }
   await loadMe();
   clearBoot();
-  if (!signedIn()) openGate();
-  else closeGate();
-  if (signedIn() || parseHash()[0] === 'downloads') route();
+  route();
+  if (signedIn()) closeGate();
+  else if (offerSignIn()) openGate();
   document.getElementById('boot-error')?.remove();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshBadge();

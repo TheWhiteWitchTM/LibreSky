@@ -3,11 +3,11 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
+import { assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
-import { homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
+import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { setSoundPrefs, soundPrefs } from '../js/session.js';
 import { completeWord } from '../js/words.js';
 
@@ -579,6 +579,28 @@ const ownChat = convoHtml({
   lastMessage: { text: 'hello from me', sender: { did: 'did:me' } },
 }, 'did:me');
 assert.doesNotMatch(ownChat, /class="pill"/);
+const requestChat = convoHtml({
+  id: 'req',
+  status: 'request',
+  members: [{ did: 'did:me' }, { did: 'did:them', handle: 'them.bsky.social', displayName: 'Them' }],
+  lastMessage: { text: 'hello', sender: { did: 'did:them' } },
+}, 'did:me', { request: true });
+assert.match(requestChat, /data-act="accept-convo"/);
+assert.match(requestChat, /data-act="decline-convo"/);
+assert.match(requestEntryHtml(2), /Message requests/);
+assert.match(requestEntryHtml(2), /#\/messages\/requests/);
+const callRequest = callRequestHtml({ media: 'video', name: 'Ada', rkey: 'abc', convoId: 'c1', peerDid: 'did:ada' });
+assert.match(callRequest, /data-act="call-accept"/);
+assert.match(callRequest, /Video call request/);
+assert.equal(callMayRing({ allow: 'none', followed: true, accepted: true }), false);
+assert.equal(callMayRing({ allow: 'following', followed: true }), true);
+assert.equal(callMayRing({ allow: 'following', followed: false, accepted: true }), false);
+assert.equal(callMayRing({ allow: 'all', followed: false, accepted: true }), true);
+assert.equal(callMayRing({ allow: 'all', followed: false, accepted: false }), false);
+assert.equal(callIsRequest({ allow: 'all', followed: false, accepted: false }), true);
+assert.equal(callIsRequest({ allow: 'all', followed: true, accepted: false }), false);
+assert.equal(callIsRequest({ allow: 'following', followed: false, accepted: false }), false);
+assert.equal(callIsRequest({ allow: 'none', followed: false, accepted: false }), false);
 assert.deepEqual(caretToken('hi @ja', 6), { sigil: '@', query: 'ja', start: 3 });
 assert.equal(caretToken('hi @jay ', 8), null);
 assert.deepEqual(caretWord('Say lang', 8), { query: 'lang', start: 4 });

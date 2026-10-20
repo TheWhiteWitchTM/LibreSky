@@ -1200,8 +1200,44 @@ function chat(ns, options = {}) {
   });
 }
 
-export function listConvos(cursor, signal) {
-  return chat('chat.bsky.convo.listConvos', { params: { limit: 40, cursor }, signal });
+export function listConvos(cursor, signal, status) {
+  const params = { limit: 40, cursor };
+  if (status === 'request' || status === 'accepted') params.status = status;
+  return chat('chat.bsky.convo.listConvos', { params, signal });
+}
+
+export function acceptConvo(convoId) {
+  return chat('chat.bsky.convo.acceptConvo', { body: { convoId } });
+}
+
+const CHAT_DECLARATION = 'chat.bsky.actor.declaration';
+
+export async function readChatDeclaration() {
+  try {
+    const data = await xrpc('com.atproto.repo.getRecord', {
+      params: { repo: currentDid(), collection: CHAT_DECLARATION, rkey: 'self' },
+      auth: 'required',
+    });
+    const allow = data?.value?.allowIncoming;
+    if (allow === 'none' || allow === 'following' || allow === 'all') return allow;
+    return 'all';
+  } catch (error) {
+    if (missingRecord(error)) return 'all';
+    throw error;
+  }
+}
+
+export function writeChatDeclaration(allowIncoming) {
+  const allow = allowIncoming === 'none' || allowIncoming === 'following' ? allowIncoming : 'all';
+  return xrpc('com.atproto.repo.putRecord', {
+    body: {
+      repo: currentDid(),
+      collection: CHAT_DECLARATION,
+      rkey: 'self',
+      record: { $type: CHAT_DECLARATION, allowIncoming: allow },
+    },
+    auth: 'required',
+  });
 }
 
 export function getConvo(convoId, signal) {
