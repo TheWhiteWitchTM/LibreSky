@@ -1,5 +1,5 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
-import { bskyPostParts, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
+import { bskyPostParts, httpUrlRe, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -882,7 +882,7 @@ export async function facetsFor(text) {
   const bytes = new TextEncoder();
   const facets = [];
   const patterns = [
-    { re: /https?:\/\/[^\s]+/g, type: 'link' },
+    { re: httpUrlRe(), type: 'link' },
     { re: /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, type: 'mention' },
     { re: /(^|\s)#([a-zA-Z0-9_]+)/g, type: 'tag' },
   ];

@@ -74,7 +74,7 @@ function verifiedMark(actor) {
 function action(name, label, on, count, listAct) {
   const shown = compact(count);
   const glyph = name === 'like' ? 'heart' : name === 'bookmark' ? 'bookmark' : name;
-  const button = `<button type="button" class="action ${name}${on ? ' on' : ''}" data-act="${name}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${attr(label)}">${icon(glyph)}</button>`;
+  const button = `<button type="button" class="action ${name}${on ? ' on' : ''}" data-act="${name}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${attr(label)}">${icon(glyph)}<span class="sr-name" aria-hidden="true">${escapeHtml(label)}</span></button>`;
   if (name === 'bookmark' || name === 'share') return button;
   const countHtml = listAct
     ? `<button type="button" class="count-link" data-act="${listAct}" aria-label="${attr(`${label} count`)}">${shown}</button>`
@@ -279,7 +279,7 @@ export function postHtml(item, options = {}) {
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
-          <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read this post aloud">${icon('speaker')}</button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button></span>
+          <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read aloud">${icon('speaker')}<span class="sr-name" aria-hidden="true">Read aloud</span></button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}<span class="sr-name" aria-hidden="true">More</span></button></span>
         </div>
         ${parentHandle ? `<a class="replying" href="${profileHash(parentHandle)}">Replying to @${escapeHtml(parentHandle)}</a>` : ''}
         <div class="content${blur}">

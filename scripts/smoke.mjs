@@ -247,8 +247,15 @@ assert.equal(xStatusParts('https://x.com/jack/status/20')?.id, '20');
 assert.equal(trimLink('https://example.com/a.'), 'https://example.com/a');
 assert.equal(trimLink('https://en.wikipedia.org/wiki/Foo_(bar)'), 'https://en.wikipedia.org/wiki/Foo_(bar)');
 assert.equal(firstUrl('see (https://example.com/a).'), 'https://example.com/a');
+assert.equal(firstUrl('https://example.com/a👍 more'), 'https://example.com/a');
+const emojiLink = richText('https://example.com/a👍', null, { links: false, breaks: false });
+assert.match(emojiLink, /facet link">https:\/\/example.com\/a</);
+assert.match(emojiLink, /👍/);
+assert.doesNotMatch(emojiLink, /facet link">https:\/\/example.com\/a👍/);
 const plainLink = await facetsFor('Look https://example.com/path.');
 assert.equal(plainLink[0].features[0].uri, 'https://example.com/path');
+const emojiFacet = await facetsFor('Go https://example.com/a👍 now');
+assert.equal(emojiFacet[0].features[0].uri, 'https://example.com/a');
 const homeHtml = `<title>The White Witch™</title>
 <img src="/assets/images/banner.jpg" alt="The White Witch banner">
 <img src="https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg" alt="" width="1200" height="630">
@@ -511,6 +518,13 @@ assert.deepEqual(savedV1.saved, ['at://did:example/app.bsky.feed.generator/hot']
 assert.equal(writtenFeeds.find((pref) => pref.$type === 'app.bsky.actor.defs#adultContentPref').enabled, true);
 assert.match(index, /id="profile-banner"/);
 assert.match(index, /id="compose-link"/);
+assert.match(index, /id="compose-leave"/);
+assert.match(index, /id="compose-save-draft"/);
+assert.match(index, /Save as draft/);
+assert.match(index, /class="skip"/);
+assert.match(appSource, /data-settings-tab/);
+assert.match(appSource, /contrast-dark/);
+assert.match(appSource, /requestCloseComposer/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);
 assert.match(index, /id="more-btn"/);
 assert.match(index, /id="head-help"/);

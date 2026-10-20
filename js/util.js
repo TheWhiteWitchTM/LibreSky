@@ -153,6 +153,10 @@ function overlaps(marks, start, end) {
   return marks.some((mark) => mark.start < end && start < mark.end);
 }
 
+export function httpUrlRe() {
+  return /https?:\/\/(?:(?![\p{Extended_Pictographic}\u200d\ufe0f])[^\s<>"'])+/gu;
+}
+
 function syntheticMarks(source) {
   const marks = [];
   const take = (start, end, features) => {
@@ -167,7 +171,7 @@ function syntheticMarks(source) {
     take(start, start + encoder.encode(`@${match[2]}`).length, [{ $type: 'libresky.richtext#ai' }]);
     match = aiRe.exec(source);
   }
-  const linkRe = /https?:\/\/[^\s<>"']+/g;
+  const linkRe = httpUrlRe();
   match = linkRe.exec(source);
   while (match) {
     const raw = trimLink(match[0]);
@@ -346,7 +350,7 @@ export function trimLink(raw) {
 }
 
 export function firstUrl(text) {
-  const match = String(text ?? '').match(/https?:\/\/[^\s<>"']+/);
+  const match = String(text ?? '').match(httpUrlRe());
   if (!match) return '';
   return trimLink(match[0]);
 }

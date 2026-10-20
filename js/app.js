@@ -57,12 +57,14 @@ import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
 import { emojiGroups } from './emoji.js';
 import {
+  a11yPrefs,
   callAllow,
   callIsRequest,
   callMayRing,
   feedView,
   homeAllows,
   pullAccountPrefs,
+  saveA11yPrefs,
   saveCallAllow,
   saveFeedView,
   saveSearchPrefs,
@@ -152,13 +154,22 @@ function account() {
   return me.profile || getPassword() || null;
 }
 
+const THEMES = ['light', 'dark', 'contrast-light', 'contrast-dark'];
+
 function applyTheme(theme, options = {}) {
-  const next = theme === 'dark' ? 'dark' : 'light';
+  const next = THEMES.includes(theme) ? theme : 'light';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('libresky.theme', next);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = next === 'dark' ? '#000000' : '#ffffff';
+  if (meta) meta.content = next === 'dark' || next === 'contrast-dark' ? '#000000' : '#ffffff';
   if (!options.quiet) syncClientPrefs();
+}
+
+function applyA11y(prefs = a11yPrefs()) {
+  const scale = Math.max(100, Math.min(200, Math.round(Number(prefs.scale) || 100)));
+  document.documentElement.style.setProperty('--post-scale', String(scale / 100));
+  if (prefs.reader) document.documentElement.dataset.reader = 'on';
+  else delete document.documentElement.dataset.reader;
 }
 
 const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'packs', 'pack', 'downloads']);
@@ -402,6 +413,7 @@ async function loadMe() {
   try {
     const pulled = await pullAccountPrefs();
     if (pulled?.theme) applyTheme(pulled.theme, { quiet: true });
+    applyA11y(a11yPrefs());
   } catch {
     /* this browser keeps the last saved settings */
   }
@@ -2548,6 +2560,9 @@ function onPrefToggle(name, checked) {
     const query = parseHash()[0] === 'search' ? (parseHash()[1] || '') : '';
     if (query) showSearch(query, { focus: false });
     return;
+  } else if (name === 'a11y.reader') {
+    applyA11y(saveA11yPrefs({ reader: checked }));
+    return;
   } else return;
   const feedId = name.startsWith('feed.') ? tuneFeed : 'home';
   if (feedId === 'home' && !parseHash()[0]) route();
@@ -2628,15 +2643,62 @@ function fillVoiceSelect() {
   select.innerHTML = voiceOptions(current);
 }
 
+const SETTINGS_TABS = [
+  ['you', 'You'],
+  ['safety', 'Safety'],
+  ['display', 'Display'],
+  ['feeds', 'Feeds'],
+  ['languages', 'Languages'],
+  ['sound', 'Sound'],
+  ['ai', 'AI'],
+];
+let settingsTab = 'you';
+
+function settingsPanel(id, body) {
+  const on = settingsTab === id;
+  return `<div class="settings-panel" role="tabpanel" id="settings-${id}" data-settings-panel="${id}" aria-labelledby="settings-tab-${id}"${on ? '' : ' hidden'}>${body}</div>`;
+}
+
+function displaySettingsHtml() {
+  const theme = THEMES.includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'light';
+  const access = a11yPrefs();
+  const themes = [
+    ['light', 'Light'],
+    ['dark', 'Dark'],
+    ['contrast-light', 'High contrast light'],
+    ['contrast-dark', 'High contrast dark'],
+  ];
+  return `<h2>Appearance</h2>
+    <p class="dim">High contrast uses stronger borders and colors that stay readable. The choice is saved on your account.</p>
+    <div class="segmented wrap" role="group" aria-label="Theme">
+      ${themes.map(([id, label]) => `<button type="button" data-theme-set="${id}" aria-pressed="${theme === id}">${label}</button>`).join('')}
+    </div>
+    <h2>Post text</h2>
+    <p class="dim">Makes posts, quotes, chats, and the post box larger. 100% is the normal size.</p>
+    <label class="vol voice-vol"><span>Size</span> <b id="post-scale-label">${access.scale}%</b><input id="post-scale" type="range" min="100" max="200" step="25" value="${access.scale}" aria-label="Post text size"></label>
+    <h2>Screen reader</h2>
+    <p class="dim">A screen reader can read posts either way. This adds strong focus rings, underlines links, and shows the names of the post buttons.</p>
+    ${switchRow('a11y.reader', 'Screen reader layout', access.reader, 'Focus rings, link underlines, and button names.')}
+    <h2>Keyboard</h2>
+    <ul class="keys">
+      <li><kbd>n</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>a</kbd> Read the selected post aloud</li>
+      <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
+      <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
+      <li><kbd>Escape</kbd> In a post: continue, save as draft, or discard</li>
+    </ul>`;
+}
+
 function showSettings() {
   generation += 1;
   const token = generation;
   setChrome({ title: 'Settings', nav: 'settings', back: true });
-  const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   const words = mutedWords();
   const sounds = soundPrefs();
+  const tabs = SETTINGS_TABS.map(([id, label]) => `<button type="button" role="tab" id="settings-tab-${id}" data-settings-tab="${id}" aria-selected="${settingsTab === id ? 'true' : 'false'}" aria-controls="settings-${id}" tabindex="${settingsTab === id ? '0' : '-1'}">${label}</button>`).join('');
   $('view').innerHTML = `<section class="settings">
-    <h2>Accounts</h2>
+    <div class="settings-tabs" role="tablist" aria-label="Settings">${tabs}</div>
+    ${settingsPanel('you', `<h2>Accounts</h2>
     <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8.</p>
     <div id="account-list">${accountListHtml()}</div>
     <div class="toolbar">
@@ -2649,53 +2711,53 @@ function showSettings() {
     <div id="app-pass-reveal" hidden></div>
     <div id="app-pass-list"><p class="dim">Loading app passwords…</p></div>
     <p class="dim">If this server refuses the request, create one at <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>
-    <h2>Muted accounts</h2>
-    <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
-    <h2>Blocked accounts</h2>
-    <div id="blocked-accounts" class="directory"><p class="dim">Loading blocked accounts…</p></div>
     <h2>Messages and calls</h2>
     <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
     ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
-    <h2>Appearance</h2>
-    <div class="segmented">
-      <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
-      <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
-    </div>
-    <h2>Sounds</h2>
+    ${profileSettingsHtml()}`)}
+    ${settingsPanel('safety', `<h2>Muted accounts</h2>
+    <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
+    <h2>Blocked accounts</h2>
+    <div id="blocked-accounts" class="directory"><p class="dim">Loading blocked accounts…</p></div>
+    <h2>Muted words</h2>
+    <p class="dim">Posts containing these words are collapsed in your feeds. Signed in, they are saved as Bluesky muted words, so the official app hides them too.</p>
+    <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
+    <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}" aria-label="Remove ${escapeHtml(word)}"><span>${escapeHtml(word)}</span><span class="chip-x" aria-hidden="true">×</span></button>`).join('')}</div>`)}
+    ${settingsPanel('display', displaySettingsHtml())}
+    ${settingsPanel('feeds', `${homeSettingsHtml()}${threadSettingsHtml()}${searchSettingsHtml()}`)}
+    ${settingsPanel('languages', `<h2>Languages</h2>
+    <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type. Bluesky has no shared language preference, so these are saved on your account as LibreSky settings and kept in this browser too.</p>
+    <input id="lang-find" class="lang-find" placeholder="Find a language" autocomplete="off">
+    <h3>Content</h3>
+    <div class="lang-grid" id="content-langs">${languageButtons('content', languagePrefs().content)}</div>
+    <h3>Posts</h3>
+    <div class="lang-grid" id="post-langs">${languageButtons('posts', languagePrefs().posts)}</div>`)}
+    ${settingsPanel('sound', `<h2>Sounds</h2>
     <p class="dim">Each notice has its own volume. Incoming calls use the chat sound. New posts on Home start off. The browser may stay quiet until you click the page. Signed-in choices are saved on your account.</p>
     <div class="sound-list">
       ${soundRow('chat', 'New chat messages', sounds)}
       ${soundRow('notifications', 'New notifications', sounds)}
       ${soundRow('posts', 'New posts on Home', sounds)}
     </div>
-    ${voiceSettingsHtml()}
-    ${homeSettingsHtml()}
-    ${threadSettingsHtml()}
-    ${searchSettingsHtml()}
-    ${profileSettingsHtml()}
-    <h2>Languages</h2>
-    <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type. Bluesky has no shared language preference, so these are saved on your account as LibreSky settings and kept in this browser too.</p>
-    <input id="lang-find" class="lang-find" placeholder="Find a language" autocomplete="off">
-    <h3>Content</h3>
-    <div class="lang-grid" id="content-langs">${languageButtons('content', languagePrefs().content)}</div>
-    <h3>Posts</h3>
-    <div class="lang-grid" id="post-langs">${languageButtons('posts', languagePrefs().posts)}</div>
-    <h2>AI</h2>
-    ${aiSettingsHtml()}
-    <h2>Muted words</h2>
-    <p class="dim">Posts containing these words are collapsed in your feeds. Signed in, they are saved as Bluesky muted words, so the official app hides them too.</p>
-    <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
-    <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}" aria-label="Remove ${escapeHtml(word)}"><span>${escapeHtml(word)}</span><span class="chip-x" aria-hidden="true">×</span></button>`).join('')}</div>
-    <h2>Keyboard</h2>
-    <ul class="keys">
-      <li><kbd>n</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
-      <li><kbd>a</kbd> Read the selected post aloud</li>
-      <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
-      <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
-    </ul>
+    ${voiceSettingsHtml()}`)}
+    ${settingsPanel('ai', `<h2>AI</h2>${aiSettingsHtml()}`)}
   </section>`;
   loadSettingsLists(token);
   loadChatAllow(token);
+  fillVoiceSelect();
+}
+
+function selectSettingsTab(id) {
+  if (!SETTINGS_TABS.some(([tab]) => tab === id)) return;
+  settingsTab = id;
+  document.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    const on = button.dataset.settingsTab === id;
+    button.setAttribute('aria-selected', on ? 'true' : 'false');
+    button.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('[data-settings-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== id;
+  });
 }
 
 function allowButtons(kind, current) {
@@ -3383,6 +3445,8 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
     }
   }
   closePicker();
+  const leave = $('compose-leave');
+  if (leave) leave.hidden = true;
   $('compose-previews').innerHTML = '';
   paintAttach();
   const videoBox = $('compose-video');
@@ -3578,7 +3642,8 @@ function paintFieldHighlight(area, pre) {
   const end = area.selectionEnd ?? 0;
   const typos = area.id === 'compose-text' ? composeTypos(area) : null;
   const opts = { links: false, breaks: false, typos };
-  const body = document.activeElement === area && end > start
+  const markSelection = area.id !== 'compose-text' && document.activeElement === area && end > start;
+  const body = markSelection
     ? `${richText(value.slice(0, start), null, opts)}<mark class="field-selection">${richText(value.slice(start, end), null, opts)}</mark>${richText(value.slice(end), null, opts)}`
     : richText(value, null, opts);
   pre.innerHTML = `${body}\n`;
@@ -3808,6 +3873,8 @@ function onSuggestKey(event) {
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
+    composerEscapeLock = true;
+    queueMicrotask(() => { composerEscapeLock = false; });
     hideSuggest();
     return true;
   }
@@ -4448,7 +4515,7 @@ function openEmojiPicker(query = '') {
   box.hidden = false;
   box.innerHTML = `<div class="picker"><input id="emoji-find" placeholder="Search emoji" autocomplete="off" value="${escapeHtml(query)}"><div id="emoji-groups"></div></div>`;
   paintEmojiList(query);
-  if (query) $('emoji-find')?.focus();
+  $('emoji-find')?.focus();
 }
 
 function insertEmoji(char) {
@@ -6630,18 +6697,85 @@ async function signOut() {
   route();
 }
 
-function onKey(event) {
-  if (event.key === 'Escape') closeMenu();
-  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
-  if (typing || document.querySelector('dialog[open]')) {
-    if (event.key === 'Escape') {
-      const open = [...document.querySelectorAll('dialog[open]')];
-      const dialog = open[open.length - 1];
-      if (dialog?.id === 'call') return;
-      dialog?.close();
-    }
+let composerEscapeLock = false;
+
+function composerHasWork() {
+  const dialog = $('compose');
+  if (!dialog) return false;
+  if (($('compose-text')?.value || '').trim()) return true;
+  if ((dialog._files || []).length) return true;
+  if (dialog._gif || dialog._video || dialog._attach?.uri) return true;
+  if (dialog._card) return true;
+  if (dialog.dataset.quote) return true;
+  return false;
+}
+
+function requestCloseComposer() {
+  if (composerEscapeLock) return;
+  composerEscapeLock = true;
+  queueMicrotask(() => { composerEscapeLock = false; });
+  const dialog = $('compose');
+  if (!dialog?.open) return;
+  const suggest = $('suggest');
+  if (suggest && !suggest.hidden && suggestArea?.id === 'compose-text') {
+    hideSuggest();
     return;
   }
+  if (pickerMode && $('compose-picker') && !$('compose-picker').hidden) {
+    closePicker();
+    return;
+  }
+  const leave = $('compose-leave');
+  if (leave && !leave.hidden) {
+    leave.hidden = true;
+    $('compose-text')?.focus();
+    return;
+  }
+  const unchanged = Boolean(dialog.dataset.edit && dialog._editBase && editFingerprint(dialog) === dialog._editBase);
+  if (!composerHasWork() || unchanged) {
+    if (!dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit && !($('compose-text')?.value || '').trim()) saveDraft('');
+    dialog.close();
+    return;
+  }
+  const note = $('compose-leave-note');
+  if (note) note.hidden = !((dialog._files || []).length || dialog._gif || dialog._video);
+  if (!leave) {
+    dialog.close();
+    return;
+  }
+  leave.hidden = false;
+  $('compose-continue')?.focus();
+}
+
+function dismissComposer(mode) {
+  const dialog = $('compose');
+  const leave = $('compose-leave');
+  if (leave) leave.hidden = true;
+  if (!dialog) return;
+  if (mode === 'draft') saveDraft($('compose-text')?.value || '');
+  if (mode === 'discard' && !dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit) saveDraft('');
+  dialog.close();
+}
+
+function onKey(event) {
+  if (event.key === 'Escape') {
+    const menu = $('menu');
+    if (menu && !menu.hidden) {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
+    const open = [...document.querySelectorAll('dialog[open]')];
+    const dialog = open[open.length - 1];
+    if (!dialog || dialog.id === 'call') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (dialog.id === 'compose') requestCloseComposer();
+    else dialog.close();
+    return;
+  }
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+  if (typing || document.querySelector('dialog[open]')) return;
   const postsOnPage = () => [...document.querySelectorAll('#view .post.feed-post')];
   if (event.key === 'n') return openComposer();
   if (event.key === '/') {
@@ -6795,7 +6929,18 @@ function bind() {
     $('profile-banner-preview').removeAttribute('src');
   });
   $('compose-form').addEventListener('submit', publish);
-  $('compose-cancel').addEventListener('click', () => $('compose').close());
+  $('compose-cancel').addEventListener('click', () => requestCloseComposer());
+  $('compose-continue')?.addEventListener('click', () => {
+    const leave = $('compose-leave');
+    if (leave) leave.hidden = true;
+    $('compose-text')?.focus();
+  });
+  $('compose-save-draft')?.addEventListener('click', () => dismissComposer('draft'));
+  $('compose-discard')?.addEventListener('click', () => dismissComposer('discard'));
+  $('compose')?.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    requestCloseComposer();
+  });
   $('compose-text').addEventListener('input', () => {
     updateCount();
     const dialog = $('compose');
@@ -6819,6 +6964,8 @@ function bind() {
     stopDictate();
     hideSuggest();
     closePicker();
+    const leave = $('compose-leave');
+    if (leave) leave.hidden = true;
     const video = $('compose')._video;
     if (video?.url) URL.revokeObjectURL(video.url);
     $('compose')._video = null;
@@ -7007,6 +7154,20 @@ function bind() {
   });
   $('tune-close')?.addEventListener('click', () => $('tune')?.close());
   $('view').addEventListener('keydown', (event) => {
+    const tab = event.target.closest?.('[data-settings-tab]');
+    if (tab && (event.key === 'ArrowRight' || event.key === 'ArrowLeft' || event.key === 'Home' || event.key === 'End')) {
+      const buttons = [...document.querySelectorAll('[data-settings-tab]')];
+      const index = buttons.indexOf(tab);
+      let next = index;
+      if (event.key === 'ArrowRight') next = (index + 1) % buttons.length;
+      else if (event.key === 'ArrowLeft') next = (index - 1 + buttons.length) % buttons.length;
+      else if (event.key === 'Home') next = 0;
+      else next = buttons.length - 1;
+      event.preventDefault();
+      buttons[next]?.focus();
+      selectSettingsTab(buttons[next]?.dataset.settingsTab || '');
+      return;
+    }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     if (onSuggestKey(event)) return;
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
@@ -7042,6 +7203,12 @@ function bind() {
       const label = event.target.closest('.vol')?.querySelector('b');
       if (label) label.textContent = `${Math.round(value)}%`;
     }
+    if (event.target.id === 'post-scale') {
+      const saved = saveA11yPrefs({ scale: Number(event.target.value) });
+      applyA11y(saved);
+      const label = $('post-scale-label');
+      if (label) label.textContent = `${saved.scale}%`;
+    }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     fitChatInput(event.target);
     paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
@@ -7067,6 +7234,11 @@ function bind() {
     const callChoice = event.target.closest('[data-call-allow]')?.dataset.callAllow;
     if (callChoice) {
       chooseCallAllow(callChoice);
+      return;
+    }
+    const settingsTabId = event.target.closest('[data-settings-tab]')?.dataset.settingsTab;
+    if (settingsTabId) {
+      selectSettingsTab(settingsTabId);
       return;
     }
     const theme = event.target.dataset?.themeSet;
@@ -7116,6 +7288,10 @@ function bind() {
     dialog.addEventListener('click', (event) => {
       if (event.target !== dialog) return;
       if (dialog.id === 'call') return;
+      if (dialog.id === 'compose') {
+        requestCloseComposer();
+        return;
+      }
       dialog.close();
     });
   });
@@ -7325,6 +7501,7 @@ async function settleSession(result) {
 }
 
 async function boot() {
+  applyA11y(a11yPrefs());
   setupCall({ toast });
   bind();
   loadPassword();

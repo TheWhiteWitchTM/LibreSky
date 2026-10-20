@@ -8,6 +8,8 @@ const SEARCH_KEY = 'libresky.search';
 const VOICE_KEY = 'libresky.voice';
 const EMOJI_KEY = 'libresky.emoji';
 const THEME_KEY = 'libresky.theme';
+const A11Y_KEY = 'libresky.a11y';
+const THEMES = new Set(['light', 'dark', 'contrast-light', 'contrast-dark']);
 const CALL_KEY = 'libresky.calls';
 const CALL_ALLOWS = new Set(['all', 'following', 'none']);
 const FEED_TYPE = 'app.bsky.actor.defs#feedViewPref';
@@ -369,15 +371,49 @@ function applyClient(record) {
   if (record.languages && typeof record.languages === 'object') saveLanguagePrefs(record.languages);
   if (Array.isArray(record.emoji)) writeJson(EMOJI_KEY, record.emoji.filter((item) => typeof item === 'string').slice(0, 24));
   if (record.calls && CALL_ALLOWS.has(record.calls.allow)) writeJson(CALL_KEY, { allow: record.calls.allow });
-  if (record.theme === 'dark' || record.theme === 'light') {
+  if (record.a11y && typeof record.a11y === 'object') {
+    writeJson(A11Y_KEY, {
+      reader: Boolean(record.a11y.reader),
+      scale: snapScale(record.a11y.scale),
+    });
+  }
+  if (THEMES.has(record.theme)) {
     try { localStorage.setItem(THEME_KEY, record.theme); } catch { /* the screen still follows the record */ }
     return record.theme;
   }
   return '';
 }
 
+function snapScale(value) {
+  const num = clamp(value, 100, 200, 100);
+  return Math.max(100, Math.min(200, Math.round(num / 25) * 25));
+}
+
+export function a11yPrefs() {
+  const saved = readJson(A11Y_KEY) || {};
+  return {
+    reader: flag(saved.reader, false),
+    scale: snapScale(saved.scale),
+  };
+}
+
+export function saveA11yPrefs(partial) {
+  const next = { ...a11yPrefs(), ...partial };
+  const saved = {
+    reader: Boolean(next.reader),
+    scale: snapScale(next.scale),
+  };
+  writeJson(A11Y_KEY, saved);
+  queueClient();
+  return a11yPrefs();
+}
+
 function themeName() {
-  try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch { return 'light'; }
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (THEMES.has(saved)) return saved;
+  } catch { /* the screen still follows the default */ }
+  return 'light';
 }
 
 function clientRecord() {
@@ -387,6 +423,7 @@ function clientRecord() {
     search: searchPrefs(),
     languages: languagePrefs(),
     theme: themeName(),
+    a11y: a11yPrefs(),
     emoji: recentEmoji(),
     calls: { allow: callAllow() },
   };
