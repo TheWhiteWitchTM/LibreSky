@@ -264,7 +264,9 @@ assert.match(index, /id="compose-link"/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);
 assert.match(index, /id="more-btn"/);
 assert.match(index, /id="more-head"/);
-assert.match(index, /Coming soon/);
+assert.match(index, /data-nav="ai"/);
+assert.match(index, /href="#\/ai"/);
+assert.match(appSource, /Coming soon/);
 assert.match(index, /id="about"/);
 assert.match(index, /id="legal-privacy"/);
 assert.match(index, /id="legal-terms"/);
@@ -337,11 +339,16 @@ const pinnedPost = postHtml({
 assert.match(pinnedPost, /class="pinned-label"/);
 assert.match(pinnedPost, /Pinned/);
 const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }, { calls: false });
-assert.match(quietCalls, /Coming soon/);
-assert.match(quietCalls, /aria-disabled="true"/);
+assert.match(quietCalls, /data-act="calls-page"/);
+assert.match(quietCalls, /Voice/);
+assert.match(quietCalls, /Video/);
+assert.match(quietCalls, /class="call-btn video"/);
+assert.doesNotMatch(quietCalls, /aria-disabled/);
 const liveCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }, { calls: true, video: true });
 assert.match(liveCalls, /data-act="call-audio"/);
 assert.match(liveCalls, /data-act="call-video"/);
+const goneCalls = chatHeaderHtml({ did: 'did:gone', handle: 'handle.invalid' }, { calls: true });
+assert.doesNotMatch(goneCalls, /call-btn/);
 const packRow = packHtml({
   uri: 'at://did:example/app.bsky.graph.starterpack/abc',
   record: { name: 'Cats', description: 'meow' },

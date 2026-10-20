@@ -76,10 +76,27 @@ function gallery(images) {
   }).join('')}</div>`;
 }
 
+function gifHost(href) {
+  try {
+    const url = new URL(href);
+    const host = url.hostname;
+    if (host === 'klipy.com' || host.endsWith('.klipy.com')) return true;
+    if (host === 'tenor.com' || host.endsWith('.tenor.com')) return true;
+    if (host === 'giphy.com' || host.endsWith('.giphy.com')) return true;
+    return /\.gif$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function linkCard(external) {
   if (!external?.uri) return '';
   const href = safeUrl(external.uri);
   if (!href) return '';
+  if (gifHost(href)) {
+    const animated = /\.gif/i.test(href) ? href : (safeUrl(external.thumb || '') || href);
+    return `<a class="card gif-card" href="${attr(href)}" target="_blank" rel="noopener noreferrer"><img src="${attr(animated)}" alt="${attr(external.title || 'GIF')}"></a>`;
+  }
   const thumb = safeUrl(external.thumb || '');
   return `<a class="card" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${thumb ? `<img src="${attr(thumb)}" alt="" onerror="this.remove()">` : ''}<span class="card-body"><span class="domain">${escapeHtml(hostOf(href))}</span><strong>${escapeHtml(external.title || href)}</strong>${external.description ? `<span class="desc">${escapeHtml(external.description)}</span>` : ''}</span></a>`;
 }
@@ -427,8 +444,9 @@ export function messageHtml(message, me) {
   return `<div class="bubble${mine ? ' mine' : ''}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
 }
 
-function soonButton(label, glyph) {
-  return `<button type="button" class="icon-btn soon" aria-disabled="true" title="Coming soon" aria-label="${attr(label)}, coming soon">${icon(glyph)}<span class="soon-tip">Coming soon</span></button>`;
+function callButton(act, label, glyph, peer) {
+  const prominent = label.startsWith('Video');
+  return `<button type="button" class="call-btn${prominent ? ' video' : ''}" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
 }
 
 export function chatHeaderHtml(actor, options = {}) {
@@ -436,14 +454,12 @@ export function chatHeaderHtml(actor, options = {}) {
   const gone = accountGone(actor);
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
   const handle = gone ? 'This account was deleted' : `@${actor.handle || ''}`;
-  const calls = !gone && options.calls
-    ? `${iconButton('call-audio', 'Voice call', 'phone', actor.did)}${options.video ? iconButton('call-video', 'Video call', 'video', actor.did) : soonButton('Video call', 'video')}`
-    : `${soonButton('Voice call', 'phone')}${soonButton('Video call', 'video')}`;
+  const voiceAct = !gone && options.calls ? 'call-audio' : 'calls-page';
+  const videoAct = !gone && options.calls ? 'call-video' : 'calls-page';
+  const calls = gone
+    ? ''
+    : `${callButton(voiceAct, 'Voice call', 'phone', actor.did)}${callButton(videoAct, 'Video call', 'video', actor.did)}`;
   return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a><span class="chat-tools">${calls}</span></div>`;
-}
-
-function iconButton(act, label, glyph, peer) {
-  return `<button type="button" class="icon-btn" data-act="${act}" data-peer="${attr(peer || '')}" title="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}</button>`;
 }
 
 export function packHtml(pack) {

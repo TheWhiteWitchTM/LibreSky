@@ -20,14 +20,19 @@ import {
   trendsHtml,
 } from './render.js';
 import {
+  activeDid,
   currentDid,
+  forgetAccount,
   getOauth,
   getPassword,
   lastHandle,
+  listAccounts,
   loadDraft,
   loadPassword,
   mutedWords,
+  rememberAccount,
   saveDraft,
+  setActiveDid,
   setLastHandle,
   setMutedWords,
   setOauth,
@@ -59,6 +64,10 @@ let chatTimer = 0;
 let suggestTimer = 0;
 let suggestSeq = 0;
 let suggestArea = null;
+let tipTimer = 0;
+let pickerMode = '';
+let gifSeq = 0;
+let gifTimer = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -216,8 +225,52 @@ async function loadMe() {
     me.profile = getPassword();
   }
   updateAccount();
+  rememberCurrent();
   refreshBadge();
   loadRail();
+}
+
+function rememberCurrent() {
+  const did = myDid();
+  if (!did) return;
+  const profile = me.profile;
+  const password = getPassword();
+  if (password?.did === did) {
+    rememberAccount({
+      kind: 'password',
+      did,
+      handle: profile?.handle || password.handle || '',
+      displayName: profile?.displayName || password.displayName || password.handle || '',
+      avatar: profile?.avatar || password.avatar || '',
+      session: getPassword(),
+    });
+    return;
+  }
+  const oauth = getOauth();
+  if (oauth?.sub === did) {
+    rememberAccount({
+      kind: 'oauth',
+      did,
+      handle: profile?.handle || '',
+      displayName: profile?.displayName || profile?.handle || '',
+      avatar: profile?.avatar || '',
+    });
+  }
+}
+
+function keepPasswordCopy() {
+  const session = getPassword();
+  if (!session?.did) return;
+  const previous = activeDid();
+  rememberAccount({
+    kind: 'password',
+    did: session.did,
+    handle: session.handle || '',
+    displayName: session.displayName || session.handle || '',
+    avatar: session.avatar || '',
+    session,
+  });
+  if (previous && previous !== session.did) setActiveDid(previous);
 }
 
 function paintBadge(id, count) {
@@ -1013,12 +1066,46 @@ async function showThread(actor, rkey) {
   }
 }
 
+function accountListHtml() {
+  const current = myDid();
+  const list = listAccounts();
+  if (!list.length) return '<p class="dim">No saved accounts on this browser yet.</p>';
+  return list.map((entry) => {
+    const name = entry.displayName || entry.handle || 'Account';
+    const handle = entry.handle ? `@${entry.handle}` : entry.did;
+    const kind = entry.kind === 'password' ? 'App password' : 'Bluesky login';
+    const on = entry.did === current;
+    const initial = (name.trim().charAt(0) || 'L').toUpperCase();
+    const photo = entry.avatar ? `<img src="${escapeHtml(entry.avatar)}" alt="">` : '';
+    const removeLabel = on ? 'Sign out' : 'Remove';
+    return `<div class="account-line"><button type="button" class="account-switch${on ? ' on' : ''}" data-act="switch-account" data-did="${escapeHtml(entry.did)}"><span class="avatar" data-initial="${escapeHtml(initial)}">${photo}</span><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)} · ${kind}${on ? ' · Current' : ''}</span></span></button><button type="button" class="text-btn mini" data-act="remove-account" data-did="${escapeHtml(entry.did)}">${removeLabel}</button></div>`;
+  }).join('');
+}
+
 function showSettings() {
   generation += 1;
+  const token = generation;
   setChrome({ title: 'Settings', nav: 'settings', back: true });
   const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   const words = mutedWords();
   $('view').innerHTML = `<section class="settings">
+    <h2>Accounts</h2>
+    <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8.</p>
+    <div id="account-list">${accountListHtml()}</div>
+    <div class="toolbar">
+      <button type="button" class="primary small" data-act="add-account">Add account</button>
+      ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary small" data-act="signin">Sign in</button>'}
+    </div>
+    <h2>App passwords</h2>
+    <p class="dim">Create a token for another app. The password is shown once, then only the name stays here.</p>
+    <form id="app-pass-form" class="mute-form"><input id="app-pass-name" placeholder="App name" maxlength="40" autocomplete="off"><button class="primary small" type="submit">Create</button></form>
+    <div id="app-pass-reveal" hidden></div>
+    <div id="app-pass-list"><p class="dim">Loading app passwords…</p></div>
+    <p class="dim">If this server refuses the request, create one at <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>
+    <h2>Muted accounts</h2>
+    <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
+    <h2>Blocked accounts</h2>
+    <div id="blocked-accounts" class="directory"><p class="dim">Loading blocked accounts…</p></div>
     <h2>Appearance</h2>
     <div class="segmented">
       <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
@@ -1034,10 +1121,89 @@ function showSettings() {
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
       <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
     </ul>
-    <h2>Account</h2>
-    <p class="dim">You stay signed in on this browser until you sign out. Sign in with Bluesky happens on Bluesky’s own page. LibreSky cannot read the session stored in the Bluesky app.</p>
-    ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary" data-act="signin">Sign in</button>'}
   </section>`;
+  loadSettingsLists(token);
+}
+
+async function loadSettingsLists(token) {
+  await Promise.all([loadAppPasswords(token), loadMutedAccounts(token), loadBlockedAccounts(token)]);
+}
+
+async function loadAppPasswords(token = generation) {
+  const box = $('app-pass-list');
+  if (!box) return;
+  if (!signedIn()) {
+    box.innerHTML = '<p class="dim">Sign in to create tokens for other apps.</p>';
+    return;
+  }
+  try {
+    const data = await api.listAppPasswords();
+    if (token !== generation || !$('app-pass-list')) return;
+    const rows = data.passwords || [];
+    box.innerHTML = rows.length
+      ? rows.map((item) => `<div class="person"><span class="person-link"><strong>${escapeHtml(item.name || 'App')}</strong><span class="handle">${escapeHtml(item.createdAt ? new Date(item.createdAt).toLocaleString() : '')}</span></span><button type="button" class="danger mini" data-act="revoke-token" data-name="${escapeHtml(item.name || '')}">Revoke</button></div>`).join('')
+      : '<p class="dim">No app passwords yet.</p>';
+  } catch (error) {
+    if (token !== generation || !$('app-pass-list')) return;
+    box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'App passwords are unavailable for this sign-in.')} Use <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>`;
+  }
+}
+
+async function loadMutedAccounts(token = generation) {
+  const box = $('muted-accounts');
+  if (!box) return;
+  if (!signedIn()) {
+    box.innerHTML = '<p class="dim">Sign in to see muted accounts.</p>';
+    return;
+  }
+  try {
+    const data = await api.getMutes();
+    if (token !== generation || !$('muted-accounts')) return;
+    const list = data.mutes || [];
+    box.innerHTML = list.length
+      ? list.map((actor) => actorHtml(actor, { extra: `<button type="button" class="text-btn mini" data-act="unmute-account" data-did="${escapeHtml(actor.did || '')}">Unmute</button>` })).join('')
+      : '<p class="dim">No muted accounts.</p>';
+  } catch (error) {
+    if (token !== generation || !$('muted-accounts')) return;
+    box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Muted accounts are unavailable.')}</p>`;
+  }
+}
+
+async function loadBlockedAccounts(token = generation) {
+  const box = $('blocked-accounts');
+  if (!box) return;
+  if (!signedIn()) {
+    box.innerHTML = '<p class="dim">Sign in to see blocked accounts.</p>';
+    return;
+  }
+  try {
+    const data = await api.getBlocks();
+    if (token !== generation || !$('blocked-accounts')) return;
+    const list = data.blocks || [];
+    box.innerHTML = list.length
+      ? list.map((actor) => actorHtml(actor, { extra: `<button type="button" class="danger mini" data-act="unblock-account" data-uri="${escapeHtml(actor.viewer?.blocking || '')}">Unblock</button>` })).join('')
+      : '<p class="dim">No blocked accounts.</p>';
+  } catch (error) {
+    if (token !== generation || !$('blocked-accounts')) return;
+    box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Blocked accounts are unavailable.')}</p>`;
+  }
+}
+
+function showAi() {
+  generation += 1;
+  setChrome({ title: 'AI', nav: 'ai', back: true });
+  $('view').innerHTML = `<section class="settings"><h2>Coming soon</h2><p class="dim">This is where the LibreSky helper will open. Nothing you type here is sent to a model yet.</p></section>`;
+}
+
+function showCalls() {
+  generation += 1;
+  setChrome({ title: 'Calls', nav: 'messages', back: true });
+  const ready = canCall();
+  const title = ready ? 'Voice and video' : 'Coming soon';
+  const body = ready
+    ? 'A voice or video call connects two LibreSky windows. Chat messages carry the call setup, so open this conversation in LibreSky on both sides and press Voice or Video.'
+    : 'This page is not a secure context, or this browser has no WebRTC, so a call cannot start here. Open LibreSky over https, or on http://127.0.0.1. Two LibreSky windows still set the call up through chat messages when the browser allows it.';
+  $('view').innerHTML = `<section class="settings"><h2>${title}</h2><p class="dim">${escapeHtml(body)}</p></section>`;
 }
 
 function packList(packs) {
@@ -1186,6 +1352,8 @@ function route() {
   if (a === 'notifications') return showNotifications(b || '');
   if ((a === 'likes' || a === 'reposts') && b) return showEngagement(a, b);
   if (a === 'messages') return showMessages(b || '');
+  if (a === 'ai') return showAi();
+  if (a === 'calls') return showCalls();
   if (a === 'bookmarks') return showBookmarks();
   if (a === 'feeds') return showFeeds();
   if (a === 'feed' && b) return showCustomFeed(b);
@@ -1222,7 +1390,9 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
   if (!reply && $('compose-replies')) $('compose-replies').value = 'everyone';
   dialog._files = [];
   dialog._card = null;
+  dialog._gif = null;
   dialog._dismissedUrl = '';
+  closePicker();
   $('compose-previews').innerHTML = '';
   const linkBox = $('compose-link');
   if (linkBox) {
@@ -1246,7 +1416,8 @@ function updateCount() {
   $('compose-count').classList.toggle('over', left < 0);
   const files = $('compose')._files || [];
   const card = $('compose')._card;
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card);
+  const gif = $('compose')._gif;
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif);
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -1268,20 +1439,49 @@ function hideSuggest() {
   box.hidden = true;
 }
 
-function showSuggest(box, area) {
+function caretPoint(area) {
+  const mirror = document.createElement('div');
+  const style = getComputedStyle(area);
   const rect = area.getBoundingClientRect();
-  const width = Math.min(Math.max(rect.width, 240), window.innerWidth - 16);
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-  box.style.left = `${left}px`;
-  box.style.width = `${width}px`;
-  const spaceBelow = window.innerHeight - rect.bottom;
-  if (spaceBelow < 200 && rect.top > 220) {
-    box.style.top = 'auto';
-    box.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 4)}px`;
-  } else {
-    box.style.bottom = 'auto';
-    box.style.top = `${rect.bottom + 4}px`;
+  mirror.style.position = 'fixed';
+  mirror.style.visibility = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.overflowWrap = 'anywhere';
+  mirror.style.wordBreak = 'break-word';
+  mirror.style.top = `${rect.top - area.scrollTop}px`;
+  mirror.style.left = `${rect.left}px`;
+  mirror.style.width = `${area.offsetWidth}px`;
+  ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'textTransform', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle', 'boxSizing'].forEach((key) => {
+    mirror.style[key] = style[key];
+  });
+  const mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  mirror.textContent = area.value.slice(0, area.selectionStart || 0);
+  mirror.append(mark);
+  document.body.append(mirror);
+  try {
+    const markRect = mark.getBoundingClientRect();
+    return { x: markRect.left, y: markRect.bottom, top: markRect.top };
+  } finally {
+    mirror.remove();
   }
+}
+
+function showSuggest(box, area) {
+  let point;
+  try {
+    point = caretPoint(area);
+  } catch {
+    const rect = area.getBoundingClientRect();
+    point = { x: rect.left, y: rect.bottom, top: rect.top };
+  }
+  const width = Math.min(320, window.innerWidth - 16);
+  const left = Math.max(8, Math.min(point.x, window.innerWidth - width - 8));
+  box.style.width = `${width}px`;
+  box.style.left = `${left}px`;
+  box.style.right = 'auto';
+  box.style.bottom = 'auto';
+  box.style.transform = 'none';
   if (typeof box.showPopover !== 'function') {
     const host = area.closest('dialog') || document.body;
     if (box.parentElement !== host) host.append(box);
@@ -1292,6 +1492,14 @@ function showSuggest(box, area) {
       if (!box.matches(':popover-open')) box.showPopover();
     } catch { /* the list stays in the page */ }
   }
+  const height = box.offsetHeight || 200;
+  const spaceBelow = window.innerHeight - point.y;
+  const spaceAbove = point.top;
+  let top;
+  if (spaceBelow < 220 && spaceAbove > spaceBelow) top = point.top - height - 6;
+  else top = point.y + 6;
+  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  box.style.top = `${top}px`;
 }
 
 function scheduleSuggest(area) {
@@ -1394,6 +1602,7 @@ async function refreshLinkPreview() {
   const dialog = $('compose');
   const box = $('compose-link');
   if (!dialog?.open || !box) return;
+  if (dialog._gif) return;
   const url = firstUrl($('compose-text').value);
   if (!url || dialog.dataset.quote || dialog._dismissedUrl === url) {
     dialog._card = null;
@@ -1479,6 +1688,10 @@ function renderPreviews() {
 }
 
 async function addFiles(list) {
+  if ($('compose')._gif) {
+    toast('Remove the GIF before adding images.');
+    return;
+  }
   const bucket = $('compose')._files || [];
   for (const file of list) {
     if (bucket.length >= 4) break;
@@ -1499,7 +1712,16 @@ async function publish(event) {
   const dialog = $('compose');
   let text = $('compose-text').value.trim();
   const files = dialog._files || [];
+  const gif = dialog._gif;
   if (graphemeLength(text) > 300) return;
+  if (gif && files.length) {
+    toast('Remove the images or the GIF before posting.');
+    return;
+  }
+  if (gif && dialog.dataset.quote) {
+    toast('Remove the quote to attach a GIF.');
+    return;
+  }
   $('compose-send').disabled = true;
   $('compose-send').textContent = 'Posting…';
   try {
@@ -1516,7 +1738,16 @@ async function publish(event) {
     let link = null;
     const url = firstUrl(text);
     let card = dialog._card;
-    if (url && dialog._dismissedUrl !== url && !quote) {
+    if (gif && !images.length && !quote) {
+      let thumb = null;
+      try {
+        const file = await thumbFile(gif.thumb || gif.url);
+        if (file) thumb = await api.uploadBlob(file);
+      } catch {
+        thumb = null;
+      }
+      link = api.externalEmbed({ url: gif.url, title: gif.title || 'GIF', description: '', thumb });
+    } else if (url && dialog._dismissedUrl !== url && !quote) {
       if (!card || card.sourceUrl !== url) {
         try { card = await api.inspectLink(url); } catch { card = null; }
       }
@@ -1566,13 +1797,22 @@ function closeMenu() {
 
 function openMenu(anchor, items) {
   const menu = $('menu');
+  hideTip();
   menu._post = null;
   menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
   const rect = anchor.getBoundingClientRect();
-  const width = 250;
-  menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
+  const width = menu.offsetWidth || 250;
+  const height = menu.offsetHeight || 0;
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) left = rect.right - width;
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  let top = rect.bottom + 6;
+  if (top + height > window.innerHeight - 8) top = rect.top - height - 6;
+  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.bottom = 'auto';
 }
 
 function openMoreMenu(anchor) {
@@ -1585,8 +1825,154 @@ function openMoreMenu(anchor) {
     { id: 'go-about', label: 'About' },
     { id: 'go-privacy', label: 'Privacy' },
     { id: 'go-terms', label: 'Terms' },
-    { id: 'go-ai', label: 'AI · Coming soon', disabled: true },
+    { id: 'go-ai', label: 'AI' },
   ]);
+}
+
+function accountMenuItems() {
+  const current = myDid();
+  const rows = listAccounts().map((entry) => ({
+    id: `switch-account:${entry.did}`,
+    label: `${entry.did === current ? '✓ ' : ''}${entry.displayName || entry.handle || entry.did}`,
+  }));
+  return [
+    ...rows,
+    { id: 'add-account', label: 'Add account' },
+    { id: 'settings-go', label: 'Settings' },
+    { id: 'signout-go', label: 'Sign out', danger: true },
+  ];
+}
+
+const EMOJI = {
+  Smileys: ['😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😎', '🤔', '😅', '😢', '😭', '😡', '😴', '🤗', '😇'],
+  Gestures: ['👍', '👎', '👏', '🙏', '💪', '👋', '🤝', '👀', '🤷', '✌️', '🤞', '🔥'],
+  Hearts: ['❤️', '💙', '💚', '💛', '💜', '🖤', '🤍', '💖', '💯', '✨', '🌟', '🎉'],
+  Nature: ['🌞', '🌙', '⭐', '🌈', '🌸', '🍀', '🐶', '🐱', '🦋', '🌊'],
+  Food: ['☕', '🍕', '🍔', '🍣', '🍰', '🍓', '🍩', '🥑'],
+  Activities: ['⚽', '🏀', '🎮', '🎵', '📚', '✈️', '🎬', '🏆'],
+};
+
+function recentEmoji() {
+  try {
+    const list = JSON.parse(localStorage.getItem('libresky.emoji') || '[]');
+    return Array.isArray(list) ? list.filter((item) => typeof item === 'string').slice(0, 16) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberEmoji(char) {
+  const next = [char, ...recentEmoji().filter((item) => item !== char)].slice(0, 16);
+  localStorage.setItem('libresky.emoji', JSON.stringify(next));
+}
+
+function closePicker() {
+  pickerMode = '';
+  const box = $('compose-picker');
+  if (!box) return;
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
+function openEmojiPicker() {
+  pickerMode = 'emoji';
+  const box = $('compose-picker');
+  if (!box) return;
+  const groups = [];
+  const recent = recentEmoji();
+  if (recent.length) groups.push(['Recent', recent]);
+  Object.entries(EMOJI).forEach(([name, list]) => groups.push([name, list]));
+  box.hidden = false;
+  box.innerHTML = `<div class="picker">${groups.map(([name, list]) => `<p class="picker-label">${escapeHtml(name)}</p><div class="emoji-grid">${list.map((char) => `<button type="button" data-emoji="${escapeHtml(char)}" aria-label="${escapeHtml(char)}">${char}</button>`).join('')}</div>`).join('')}</div>`;
+}
+
+function insertEmoji(char) {
+  const area = $('compose-text');
+  if (!area || !char) return;
+  const start = area.selectionStart ?? area.value.length;
+  const end = area.selectionEnd ?? start;
+  area.value = `${area.value.slice(0, start)}${char}${area.value.slice(end)}`;
+  const caret = start + char.length;
+  area.setSelectionRange(caret, caret);
+  rememberEmoji(char);
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  area.focus();
+  openEmojiPicker();
+}
+
+function gifMedia(item, names) {
+  const media = item?.media_formats || {};
+  for (const name of names) {
+    if (media[name]?.url) return media[name].url;
+  }
+  return '';
+}
+
+function openGifPicker() {
+  pickerMode = 'gif';
+  const box = $('compose-picker');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `<div class="picker"><input id="gif-q" placeholder="Search KLIPY" autocomplete="off"><p class="picker-note">GIFs by KLIPY</p><div id="gif-grid" class="gif-grid"></div></div>`;
+  const input = $('gif-q');
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') event.preventDefault();
+  });
+  input?.addEventListener('input', () => {
+    clearTimeout(gifTimer);
+    gifTimer = setTimeout(() => refreshGifs(input.value), 280);
+  });
+  input?.focus();
+  refreshGifs('');
+}
+
+async function refreshGifs(query) {
+  const seq = ++gifSeq;
+  const grid = $('gif-grid');
+  if (!grid) return;
+  grid.innerHTML = '<p class="picker-note">Loading GIFs…</p>';
+  const q = String(query || '').trim();
+  const url = q
+    ? `https://gifs.bsky.app/klipy/v2/search?q=${encodeURIComponent(q)}&limit=24&contentfilter=medium`
+    : 'https://gifs.bsky.app/klipy/v2/featured?limit=24';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('GIFs are unavailable right now.');
+    const data = await res.json();
+    if (seq !== gifSeq || pickerMode !== 'gif' || !$('gif-grid')) return;
+    const items = data.results || [];
+    const cards = items.map((item) => {
+      const thumb = gifMedia(item, ['tinygif', 'gif', 'mediumgif']);
+      const full = gifMedia(item, ['gif', 'mediumgif', 'tinygif']);
+      if (!thumb || !full) return '';
+      return `<button type="button" data-gif="${escapeHtml(full)}" data-gif-title="${escapeHtml(item.title || 'GIF')}" data-gif-thumb="${escapeHtml(thumb)}"><img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.title || 'GIF')}"></button>`;
+    }).join('');
+    $('gif-grid').innerHTML = cards || '<p class="picker-note">No GIFs found.</p>';
+  } catch (error) {
+    if (seq === gifSeq && $('gif-grid')) $('gif-grid').innerHTML = `<p class="picker-note">${escapeHtml(error.message || 'GIFs are unavailable right now.')}</p>`;
+  }
+}
+
+function chooseGif(gif) {
+  const dialog = $('compose');
+  if (!dialog || !gif?.url) return;
+  if ((dialog._files || []).length) {
+    toast('Remove the images to attach a GIF.');
+    return;
+  }
+  if (dialog.dataset.quote) {
+    toast('Remove the quote to attach a GIF.');
+    return;
+  }
+  dialog._gif = gif;
+  dialog._card = null;
+  closePicker();
+  const box = $('compose-link');
+  if (box) {
+    box.hidden = false;
+    box.innerHTML = `<div class="link-preview"><a class="card gif-card" href="${escapeHtml(gif.url)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(gif.thumb || gif.url)}" alt="${escapeHtml(gif.title || 'GIF')}"></a><button type="button" class="card-dismiss" data-act="dismiss-gif" aria-label="Remove GIF">×</button></div>`;
+  }
+  updateCount();
 }
 
 function openAbout() {
@@ -1855,6 +2241,78 @@ async function handleChromeAct(act, event) {
   }
   if (act === 'soon') {
     event.preventDefault();
+    location.hash = '#/ai';
+    return true;
+  }
+  if (act === 'calls-page') {
+    event.preventDefault();
+    location.hash = '#/calls';
+    return true;
+  }
+  if (act === 'emoji' || act === 'gif') {
+    event.preventDefault();
+    if (pickerMode === act) closePicker();
+    else if (act === 'emoji') openEmojiPicker();
+    else openGifPicker();
+    return true;
+  }
+  if (act === 'add-account') {
+    event.preventDefault();
+    addAccount();
+    return true;
+  }
+  if (act === 'switch-account') {
+    event.preventDefault();
+    await switchAccount(button?.dataset.did || '');
+    return true;
+  }
+  if (act === 'remove-account') {
+    event.preventDefault();
+    await removeAccount(button?.dataset.did || '');
+    return true;
+  }
+  if (act === 'copy-token') {
+    event.preventDefault();
+    try {
+      await navigator.clipboard.writeText(button?.dataset.token || '');
+      toast('App password copied');
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'revoke-token') {
+    event.preventDefault();
+    const name = button?.dataset.name || '';
+    if (!name || !window.confirm(`Revoke the app password “${name}”?`)) return true;
+    try {
+      await api.revokeAppPassword(name);
+      toast('App password revoked');
+      await loadAppPasswords();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'unmute-account') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    try {
+      await api.unmuteActor(button?.dataset.did || '');
+      toast('Unmuted');
+      await loadMutedAccounts();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'unblock-account') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const uri = button?.dataset.uri || '';
+    if (!uri) {
+      toast('This block has no record to remove.');
+      return true;
+    }
+    try {
+      await api.deleteRecord(uri);
+      toast('Unblocked');
+      await loadBlockedAccounts();
+    } catch (error) { toast(error.message); }
     return true;
   }
   if (act === 'pack-follow') {
@@ -2045,6 +2503,18 @@ async function onClick(event) {
   if (act && await handleChromeAct(act, event)) return;
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
+  }
+  if (act === 'dismiss-gif') {
+    event.preventDefault();
+    const dialog = $('compose');
+    if (dialog) dialog._gif = null;
+    const box = $('compose-link');
+    if (box) {
+      box.hidden = true;
+      box.innerHTML = '';
+    }
+    updateCount();
+    return;
   }
   if (act === 'dismiss-link') {
     event.preventDefault();
@@ -2301,6 +2771,9 @@ async function onMenu(event) {
   if (id === 'go-about') return openAbout();
   if (id === 'go-privacy') return openLegal('privacy');
   if (id === 'go-terms') return openLegal('terms');
+  if (id === 'go-ai') return void (location.hash = '#/ai');
+  if (id === 'add-account') return addAccount();
+  if (id.startsWith('switch-account:')) return switchAccount(id.slice('switch-account:'.length));
   if (id === 'signout-go') return signOut();
   if (!found) return;
   if (!['copy', 'copy-text', 'share', 'quote'].includes(id) && !signedIn()) return requireSignIn();
@@ -2593,6 +3066,7 @@ async function startOAuth(event) {
   button.disabled = true;
   button.textContent = 'Opening Bluesky…';
   try {
+    rememberCurrent();
     await client.signInRedirect(typed || 'https://bsky.social');
   } catch (err) {
     error.hidden = false;
@@ -2615,6 +3089,7 @@ async function startSignup() {
   button.disabled = true;
   button.textContent = 'Opening Bluesky…';
   try {
+    rememberCurrent();
     // No handle is sent, so Bluesky’s page can offer account creation.
     await client.signInRedirect('https://bsky.social');
   } catch (err) {
@@ -2637,8 +3112,14 @@ async function startPassword() {
   }
   const button = $('login-password-btn');
   button.disabled = true;
+  const previousOauth = getOauth();
+  const previousPassword = getPassword();
+  rememberCurrent();
+  setOauth(null);
   try {
     await api.loginWithPassword(identifier, password);
+    setOauth(null);
+    setActiveDid(getPassword()?.did || '');
     $('login-password').value = '';
     closeGate();
     await loadMe();
@@ -2646,6 +3127,9 @@ async function startPassword() {
     route();
     toast(`Signed in as @${getPassword().handle}`);
   } catch (err) {
+    setOauth(previousOauth);
+    if (previousPassword && getPassword()?.did !== previousPassword.did) setPassword(previousPassword);
+    else if (!getPassword() && previousPassword) setPassword(previousPassword);
     error.hidden = false;
     error.textContent = err.message;
   } finally {
@@ -2653,12 +3137,104 @@ async function startPassword() {
   }
 }
 
+async function useAccount(entry) {
+  if (!entry?.did) throw new Error('That account is not saved on this browser.');
+  if (entry.kind === 'password') {
+    setOauth(null);
+    setPassword(entry.session);
+    const ok = await api.ensurePasswordSession();
+    if (!ok) {
+      forgetAccount(entry.did);
+      setPassword(null);
+      throw new Error('That sign-in expired. Add the account again.');
+    }
+  } else {
+    if (!client) throw new Error('Sign in with Bluesky is unavailable in this browser.');
+    const session = await client.restore(entry.did);
+    setPassword(null);
+    setOauth(session);
+  }
+  setActiveDid(entry.did);
+  await loadMe();
+}
+
+async function switchAccount(did) {
+  if (!did || did === myDid()) {
+    if (parseHash()[0] !== 'settings') location.hash = '#/';
+    return;
+  }
+  rememberCurrent();
+  const previous = listAccounts().find((item) => item.did === myDid());
+  const entry = listAccounts().find((item) => item.did === did);
+  if (!entry) {
+    toast('That account is not saved on this browser.');
+    return;
+  }
+  try {
+    await useAccount(entry);
+    closeGate();
+    location.hash = '#/';
+    route();
+    toast(`Signed in as @${me.profile?.handle || entry.handle || 'account'}`);
+  } catch (error) {
+    toast(error.message || 'Could not switch accounts.');
+    if (previous && previous.did !== did) {
+      try { await useAccount(previous); } catch { /* the previous session stays saved */ }
+    }
+  }
+}
+
+function addAccount() {
+  rememberCurrent();
+  const error = $('login-error');
+  if (error) error.hidden = true;
+  const dialog = $('login');
+  if (dialog && !dialog.open) dialog.showModal();
+  $('login-handle')?.focus();
+}
+
+async function removeAccount(did) {
+  if (!did) return;
+  if (did === myDid()) return signOut();
+  const entry = listAccounts().find((item) => item.did === did);
+  if (!entry) return;
+  const name = entry.handle ? `@${entry.handle}` : 'this account';
+  if (!window.confirm(`Remove ${name} from this browser?`)) return;
+  if (entry.kind === 'oauth') await revokeOauth(did);
+  if (entry.kind === 'password') await api.deletePasswordSession(entry.session);
+  forgetAccount(did);
+  toast('Account removed');
+  if (parseHash()[0] === 'settings') showSettings();
+}
+
 async function signOut() {
-  const sub = getOauth()?.sub;
-  try { await api.logoutPassword(); } catch { setPassword(null); }
-  setOauth(null);
+  const did = myDid();
+  const oauthSub = getOauth()?.sub;
+  const password = getPassword();
+  if (password?.did === did) {
+    try { await api.logoutPassword(); } catch { setPassword(null); }
+  }
+  if (oauthSub && oauthSub === did) {
+    setOauth(null);
+    await revokeOauth(oauthSub);
+  }
+  forgetAccount(did);
   me.profile = null;
-  if (sub && client) await client.revoke(sub).catch(() => {});
+  const next = listAccounts()[0];
+  if (next) {
+    try {
+      await useAccount(next);
+      closeGate();
+      location.hash = '#/';
+      route();
+      toast(`Switched to @${me.profile?.handle || next.handle || 'another account'}`);
+      return;
+    } catch {
+      /* no saved session could be restored */
+    }
+  }
+  setOauth(null);
+  setPassword(null);
   updateAccount();
   loadRail();
   $('view').innerHTML = '';
@@ -2716,7 +3292,7 @@ function bind() {
   });
   $('account-btn').addEventListener('click', () => {
     if (!signedIn()) requireSignIn();
-    else openMenu($('account-btn'), [{ id: 'settings-go', label: 'Settings' }, { id: 'signout-go', label: 'Sign out' }]);
+    else openMenu($('account-btn'), accountMenuItems());
   });
   $('suggest')?.addEventListener('mousedown', (event) => {
     const button = event.target.closest('[data-insert]');
@@ -2777,9 +3353,27 @@ function bind() {
   $('compose-text').addEventListener('click', () => scheduleSuggest($('compose-text')));
   $('compose-text').addEventListener('scroll', () => {
     const pre = $('compose-highlight');
-    if (pre) pre.scrollTop = $('compose-text').scrollTop;
+    const area = $('compose-text');
+    if (pre) pre.scrollTop = area.scrollTop;
+    const box = $('suggest');
+    if (box && !box.hidden && suggestArea === area) showSuggest(box, area);
   });
-  $('compose').addEventListener('close', hideSuggest);
+  $('compose').addEventListener('close', () => {
+    hideSuggest();
+    closePicker();
+  });
+  $('compose-picker')?.addEventListener('click', (event) => {
+    const emoji = event.target.closest('[data-emoji]');
+    if (emoji) {
+      event.preventDefault();
+      insertEmoji(emoji.dataset.emoji || '');
+      return;
+    }
+    const gif = event.target.closest('[data-gif]');
+    if (!gif) return;
+    event.preventDefault();
+    chooseGif({ url: gif.dataset.gif || '', title: gif.dataset.gifTitle || 'GIF', thumb: gif.dataset.gifThumb || '' });
+  });
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
     $('compose-files').value = '';
@@ -2857,6 +3451,10 @@ function bind() {
       setMutedWords(list);
       showSettings();
     }
+    if (event.target.id === 'app-pass-form') {
+      event.preventDefault();
+      submitAppPassword();
+    }
   });
   $('view').addEventListener('keyup', (event) => {
     if (event.target.id === 'chat-text') scheduleSuggest(event.target);
@@ -2879,13 +3477,21 @@ function bind() {
     scheduleSuggest(event.target);
   });
   $('view').addEventListener('scroll', (event) => {
-    if (event.target.id === 'chat-text') paintFieldHighlight(event.target, $('chat-highlight'));
+    if (event.target.id !== 'chat-text') return;
+    paintFieldHighlight(event.target, $('chat-highlight'));
+    const box = $('suggest');
+    if (box && !box.hidden && suggestArea === event.target) showSuggest(box, event.target);
   }, true);
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());
   $('view').addEventListener('click', (event) => {
     const theme = event.target.dataset?.themeSet;
-    if (theme) applyTheme(theme);
+    if (theme) {
+      applyTheme(theme);
+      event.target.closest('.segmented')?.querySelectorAll('[data-theme-set]').forEach((button) => {
+        button.setAttribute('aria-pressed', button.dataset.themeSet === theme ? 'true' : 'false');
+      });
+    }
     const word = event.target.dataset?.unmute;
     if (word) {
       setMutedWords(mutedWords().filter((item) => item !== word));
@@ -2926,6 +3532,7 @@ function bind() {
     if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text') return;
     hideSuggest();
   }, true);
+  bindTips();
   window.addEventListener('hashchange', route);
   document.querySelectorAll('[data-nav]').forEach((link) => {
     link.addEventListener('click', () => {
@@ -2938,36 +3545,233 @@ function bind() {
   });
 }
 
+const TIP_SELECTOR = 'button, a.nav-link, a.tip, .tabbar a, label.icon-btn';
+
+function tipLabel(node) {
+  if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return '';
+  const explicit = node.dataset.tip || '';
+  if (explicit) return explicit;
+  const label = node.getAttribute('aria-label') || '';
+  if (!label) return '';
+  const visible = (node.innerText || '').replace(/\s+/g, ' ').trim();
+  if (visible && visible.toLowerCase().includes(label.toLowerCase())) return '';
+  return label;
+}
+
+function hideTip() {
+  clearTimeout(tipTimer);
+  const tip = $('float-tip');
+  if (!tip) return;
+  if (typeof tip.hidePopover === 'function' && tip.matches(':popover-open')) {
+    try { tip.hidePopover(); } catch { /* already closed */ }
+  }
+  tip.hidden = true;
+}
+
+function placeTip(node, text) {
+  const tip = $('float-tip');
+  if (!tip) return;
+  tip.textContent = text;
+  tip.hidden = false;
+  if (typeof tip.showPopover === 'function') {
+    try {
+      if (!tip.matches(':popover-open')) tip.showPopover();
+    } catch { /* the tip stays in the page */ }
+  }
+  const rect = node.getBoundingClientRect();
+  const width = tip.offsetWidth || 80;
+  const height = tip.offsetHeight || 28;
+  const nearBottom = rect.bottom > window.innerHeight - 72;
+  let left;
+  let top;
+  if (nearBottom) {
+    left = rect.left + (rect.width / 2) - (width / 2);
+    top = rect.top - height - 8;
+  } else if (rect.left < 300) {
+    left = rect.right + 10;
+    top = rect.top + (rect.height / 2) - (height / 2);
+  } else {
+    left = rect.left + (rect.width / 2) - (width / 2);
+    top = rect.bottom + 8;
+  }
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function bindTips() {
+  let current = null;
+  const show = (node, immediate) => {
+    const text = tipLabel(node);
+    if (!text) {
+      if (current === node) hideTip();
+      return;
+    }
+    current = node;
+    clearTimeout(tipTimer);
+    if (immediate) placeTip(node, text);
+    else tipTimer = setTimeout(() => { if (current === node) placeTip(node, text); }, 280);
+  };
+  document.addEventListener('pointerover', (event) => {
+    const node = event.target.closest?.(TIP_SELECTOR);
+    if (!node || node === current) return;
+    show(node, false);
+  });
+  document.addEventListener('pointerout', (event) => {
+    const node = event.target.closest?.(TIP_SELECTOR);
+    if (!node) return;
+    const next = event.relatedTarget?.closest?.(TIP_SELECTOR);
+    if (next === node) return;
+    if (current === node) {
+      current = null;
+      hideTip();
+    }
+  });
+  document.addEventListener('focusin', (event) => {
+    const node = event.target.closest?.(TIP_SELECTOR);
+    if (node) show(node, true);
+  });
+  document.addEventListener('focusout', () => {
+    current = null;
+    hideTip();
+  });
+  document.addEventListener('pointerdown', () => {
+    current = null;
+    hideTip();
+  });
+  window.addEventListener('scroll', () => {
+    current = null;
+    hideTip();
+  }, true);
+}
+
+async function revokeOauth(did) {
+  if (!did || !client) return;
+  const key = '@@atproto/oauth-client-browser(sub)';
+  const marked = localStorage.getItem(key);
+  await client.revoke(did).catch(() => {});
+  if (marked && marked !== did) localStorage.setItem(key, marked);
+}
+
+async function submitAppPassword() {
+  if (!signedIn()) return requireSignIn();
+  const input = $('app-pass-name');
+  const name = input?.value.trim() || '';
+  if (!name) return;
+  try {
+    const created = await api.createAppPassword(name);
+    const password = created?.password || created?.appPassword || '';
+    const box = $('app-pass-reveal');
+    if (box) {
+      box.hidden = false;
+      box.innerHTML = `<p><strong>${escapeHtml(created?.name || name)}</strong></p><p class="token">${escapeHtml(password)}</p><button type="button" class="primary small" data-act="copy-token" data-token="${escapeHtml(password)}">Copy</button><p class="dim">Copy it now. LibreSky does not keep this password.</p>`;
+    }
+    if (input) input.value = '';
+    toast('App password created');
+    await loadAppPasswords();
+  } catch (error) {
+    const box = $('app-pass-reveal');
+    if (box) {
+      box.hidden = false;
+      box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not create an app password.')} Create one at <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>`;
+    }
+    toast(error.message || 'Could not create an app password.');
+  }
+}
+
+async function settleSession(result) {
+  const fresh = Boolean(result && Object.prototype.hasOwnProperty.call(result, 'state'));
+  keepPasswordCopy();
+  if (fresh && result.session) {
+    setOauth(result.session);
+    setPassword(null);
+    setActiveDid(result.session.sub);
+    return;
+  }
+  const entry = listAccounts().find((item) => item.did === activeDid());
+  if (entry?.kind === 'password' && entry.session?.accessJwt) {
+    setOauth(null);
+    setPassword(entry.session);
+    try {
+      const ok = await api.ensurePasswordSession();
+      if (!ok) throw new Error('expired');
+      setActiveDid(entry.did);
+      return;
+    } catch {
+      forgetAccount(entry.did);
+      setPassword(null);
+    }
+  } else if (entry?.kind === 'oauth' && client) {
+    try {
+      const session = await client.restore(entry.did);
+      setPassword(null);
+      setOauth(session);
+      setActiveDid(entry.did);
+      return;
+    } catch {
+      /* the saved Bluesky login could not be restored */
+    }
+  }
+  if (result?.session) {
+    keepPasswordCopy();
+    setOauth(result.session);
+    setPassword(null);
+    setActiveDid(result.session.sub);
+    return;
+  }
+  if (getPassword()?.accessJwt) {
+    setOauth(null);
+    try {
+      const ok = await api.ensurePasswordSession();
+      if (!ok) setPassword(null);
+      else setActiveDid(getPassword().did);
+    } catch {
+      setPassword(null);
+    }
+  }
+}
+
 async function boot() {
   setupCall({ toast });
   bind();
   loadPassword();
+  let result = null;
   try {
     const mod = await import('./vendor/auth.js');
     client = mod.createClient();
-    client.addEventListener?.('deleted', () => {
+    client.addEventListener?.('deleted', (event) => {
+      const sub = event?.detail?.sub || event?.sub || '';
+      const current = getOauth()?.sub || '';
+      if (!current || (sub && sub !== current)) return;
       setOauth(null);
+      forgetAccount(current);
+      const next = listAccounts()[0];
+      if (next) {
+        useAccount(next).then(() => {
+          closeGate();
+          route();
+          toast('Your Bluesky session ended. Switched accounts.');
+        }).catch(() => {
+          me.profile = null;
+          updateAccount();
+          openGate();
+        });
+        return;
+      }
       me.profile = null;
       updateAccount();
       toast('Your Bluesky session ended. Sign in again.');
       openGate();
     });
-    const result = await client.init();
-    if (result?.session) {
-      setOauth(result.session);
-      setPassword(null);
-    }
+    result = await client.init();
   } catch (error) {
     oauthReady = error?.message || 'Sign in with Bluesky needs the published site, or http://127.0.0.1.';
-    client = null;
   }
-  if (getPassword() && !getOauth()) {
-    try {
-      const ok = await api.ensurePasswordSession();
-      if (!ok) setPassword(null);
-    } catch {
-      setPassword(null);
-    }
+  try {
+    await settleSession(result);
+  } catch {
+    /* a saved session can still be opened on the next visit */
   }
   await loadMe();
   clearBoot();

@@ -194,11 +194,35 @@ export async function loginWithPassword(identifier, password) {
 export async function logoutPassword() {
   const session = getPassword();
   setPassword(null);
-  if (!session?.accessJwt) return;
+  await deletePasswordSession(session);
+}
+
+export async function deletePasswordSession(session) {
+  if (!session?.accessJwt || !session?.pds) return;
   await fetch(`${session.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.deleteSession`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${session.accessJwt}` },
   }).catch(() => {});
+}
+
+export function listAppPasswords() {
+  return xrpc('com.atproto.server.listAppPasswords', { auth: 'required' });
+}
+
+export function createAppPassword(name) {
+  return xrpc('com.atproto.server.createAppPassword', { body: { name }, auth: 'required' });
+}
+
+export function revokeAppPassword(name) {
+  return xrpc('com.atproto.server.revokeAppPassword', { body: { name }, auth: 'required' });
+}
+
+export function getMutes(cursor) {
+  return xrpc('app.bsky.graph.getMutes', { params: { limit: 50, cursor }, auth: 'required' });
+}
+
+export function getBlocks(cursor) {
+  return xrpc('app.bsky.graph.getBlocks', { params: { limit: 50, cursor }, auth: 'required' });
 }
 
 export function getTimeline(cursor, signal) {

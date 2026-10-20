@@ -91,3 +91,37 @@ export function saveDraft(text) {
   if (text) localStorage.setItem(DRAFT_KEY, text);
   else localStorage.removeItem(DRAFT_KEY);
 }
+
+const ROSTER_KEY = 'libresky.accounts';
+const ACTIVE_KEY = 'libresky.activeDid';
+
+export function listAccounts() {
+  const list = readJson(ROSTER_KEY);
+  if (!Array.isArray(list)) return [];
+  return list.filter((item) => item && item.did && (item.kind === 'oauth' || item.kind === 'password'));
+}
+
+export function rememberAccount(entry) {
+  if (!entry?.did || (entry.kind !== 'oauth' && entry.kind !== 'password')) return;
+  const next = [entry, ...listAccounts().filter((item) => item.did !== entry.did)].slice(0, 8);
+  localStorage.setItem(ROSTER_KEY, JSON.stringify(next));
+  localStorage.setItem(ACTIVE_KEY, entry.did);
+}
+
+export function forgetAccount(did) {
+  const next = listAccounts().filter((item) => item.did !== did);
+  localStorage.setItem(ROSTER_KEY, JSON.stringify(next));
+  if (localStorage.getItem(ACTIVE_KEY) === did) {
+    if (next[0]) localStorage.setItem(ACTIVE_KEY, next[0].did);
+    else localStorage.removeItem(ACTIVE_KEY);
+  }
+}
+
+export function activeDid() {
+  return localStorage.getItem(ACTIVE_KEY) || '';
+}
+
+export function setActiveDid(did) {
+  if (did) localStorage.setItem(ACTIVE_KEY, did);
+  else localStorage.removeItem(ACTIVE_KEY);
+}
