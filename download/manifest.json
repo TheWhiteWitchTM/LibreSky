@@ -1,0 +1,46 @@
+{
+  "files": {
+    "LibreSky-linux-x64.zip": [
+      {
+        "name": "LibreSky-linux-x64.zip.01",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.02",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.03",
+        "size": 24444807
+      }
+    ],
+    "LibreSky-windows-x64.zip": [
+      {
+        "name": "LibreSky-windows-x64.zip.01",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.02",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.03",
+        "size": 38870577
+      }
+    ],
+    "LibreSky-mac-x64.zip": [
+      {
+        "name": "LibreSky-mac-x64.zip.01",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.02",
+        "size": 48000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.03",
+        "size": 25524728
+      }
+    ]
+  }
+}

@@ -119,7 +119,7 @@ function featureHtml(slice, features, links, breaks) {
     if (!links) return `<span class="facet ${className}">${html}</span>`;
     if (!href) return html;
     const extra = external ? ' target="_blank" rel="noopener noreferrer"' : '';
-    return `<a class="facet ${className}" href="${escapeHtml(href)}"${extra}>${html}</a>`;
+    return `<a class="facet ${className}" href="${escapeHtml(href)}" draggable="false"${extra}>${html}</a>`;
   };
   if (ai) return wrap('ai', '#/ai', false);
   if (mention?.did) return wrap('mention', profileHash(mention.did), false);

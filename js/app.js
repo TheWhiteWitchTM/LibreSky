@@ -118,7 +118,7 @@ function applyTheme(theme) {
   if (meta) meta.content = next === 'dark' ? '#000000' : '#ffffff';
 }
 
-const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack']);
+const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack', 'downloads']);
 
 function setChrome({ title, back = false, tabs = [], nav = '' }) {
   $('title').textContent = title;
@@ -580,6 +580,10 @@ function sortHtml() {
   return `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
 }
 
+function searchSectionsHtml() {
+  return `<div class="search-sections"><a class="section-entry pack-entry" href="#/packs"><span class="section-mark" aria-hidden="true">+</span><span class="section-copy"><strong>Starter packs</strong><span class="handle">Follow a set of accounts</span></span></a></div>`;
+}
+
 async function showSearch(query, options = {}) {
   const focus = options.focus !== false;
   const token = ++generation;
@@ -589,7 +593,7 @@ async function showSearch(query, options = {}) {
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known), undefined, 'Trending') || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><a class="text-btn pack-entry" href="#/packs">Starter packs</a><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label>${searchSectionsHtml()}<div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -610,28 +614,29 @@ async function paintExplore(token) {
 
 async function paintSearchResults(token, query) {
   try {
-    const [postData, actorData, packData] = await Promise.all([
+    const [postData, actorData, packData, trendList] = await Promise.all([
       api.searchPosts(query, null, null, searchSort),
       api.searchActors(query),
       api.searchStarterPacks(query).catch(() => ({ starterPacks: [] })),
+      loadTrends().catch(() => []),
     ]);
     if (token !== generation) return;
     const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
     const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
+    const trendCards = trendsHtml(preferLive(trendList).slice(0, 5));
     resetPosts();
     const postsHtml = feedHtml((postData.posts || []).map((post) => ({ post })));
     remember();
     const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
     const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
+    const trendSection = trendCards ? `<h2 class="section-label">Trending</h2><div class="trends">${trendCards}</div>` : '';
     let missed = '';
+    let listedTrends = trendSection;
     if (!people && !packs && !postsHtml) {
-      let trends = [];
-      try { trends = await loadTrends(); } catch { trends = []; }
-      if (token !== generation) return;
-      const rows = trendBlock(preferLive(trends), 8);
-      missed = emptyHtml('No results', `Nothing matched "${query}".`) + (rows ? `<h2 class="section-label">What's happening</h2>${rows}` : '');
+      missed = emptyHtml('No results', `Nothing matched "${query}".`) + trendSection;
+      listedTrends = '';
     }
-    $('search-results').innerHTML = `${peopleBlock}${packsBlock}${postsHtml}${missed}`;
+    $('search-results').innerHTML = `${peopleBlock}${packsBlock}${listedTrends}${postsHtml}${missed}`;
     const more = async (cursor) => {
       const page = await api.searchPosts(query, cursor, null, searchSort);
       if (token !== generation) return;
@@ -842,7 +847,7 @@ async function showMessages(convoId) {
     const peerDid = other?.did || '';
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
     const options = chatOptions(messages, peerDid, convoId, false);
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -1638,6 +1643,90 @@ async function startCallToHandle(media) {
   }
 }
 
+const PUBLISHED = 'https://thewhitewitchtm.github.io/LibreSky/';
+const DOWNLOADS = [
+  ['LibreSky-linux-x64.zip', 'Linux', 'Unzip the folder and run the LibreSky file.'],
+  ['LibreSky-windows-x64.zip', 'Windows', 'Unzip the folder and run LibreSky.exe.'],
+  ['LibreSky-mac-x64.zip', 'Mac', 'Unzip the folder, then right-click LibreSky.app and choose Open. The Mac app is not signed.'],
+];
+
+let desktopManifest = null;
+
+function downloadsHtml(compact) {
+  const links = DOWNLOADS.map(([file, label]) => `<button type="button" class="download-btn" data-act="desktop-download" data-file="${escapeHtml(file)}">${escapeHtml(label)}</button>`).join('');
+  const notes = compact
+    ? '<p class="dim download-note">The Mac app is not signed. Right-click it and choose Open the first time.</p>'
+    : `<ul class="download-notes">${DOWNLOADS.map(([, label, note]) => `<li><strong>${escapeHtml(label)}.</strong> ${escapeHtml(note)}</li>`).join('')}</ul>`;
+  return `<div class="app-downloads"><p class="download-label">Desktop app</p><div class="download-row">${links}</div>${notes}</div>`;
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function loadDesktopManifest() {
+  if (desktopManifest) return desktopManifest;
+  const response = await fetch('./download/manifest.json', { cache: 'no-cache' });
+  if (!response.ok) throw new Error('The desktop downloads are not on this page yet.');
+  desktopManifest = await response.json();
+  return desktopManifest;
+}
+
+async function saveDesktopZip(file, button) {
+  if (window.libreskyDesktop) {
+    window.open(`${PUBLISHED}#/downloads/${encodeURIComponent(file)}`, '_blank', 'noopener');
+    toast('The download opened in your browser.');
+    return;
+  }
+  const label = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Starting…';
+  }
+  try {
+    const manifest = await loadDesktopManifest();
+    const parts = manifest.files?.[file];
+    if (!parts?.length) throw new Error('That download is not listed.');
+    const chunks = [];
+    let got = 0;
+    const total = parts.reduce((sum, part) => sum + (part.size || 0), 0);
+    for (const part of parts) {
+      const response = await fetch(`./download/${part.name}`, { cache: 'no-cache' });
+      if (!response.ok) throw new Error('A piece of the download is missing.');
+      const data = await response.arrayBuffer();
+      chunks.push(data);
+      got += data.byteLength;
+      if (button && total) button.textContent = `${Math.min(99, Math.round((got / total) * 100))}%`;
+    }
+    saveBlob(new Blob(chunks, { type: 'application/zip' }), file);
+    toast('Download ready. Unzip it and run LibreSky.');
+  } catch (error) {
+    toast(error?.message || 'The download failed.');
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+}
+
+function showDownloads() {
+  generation += 1;
+  setChrome({ title: 'Download', nav: 'downloads', back: true });
+  $('view').innerHTML = `<div class="download-page"><h2>Desktop app</h2><p class="dim">Linux, Windows, and Mac. Each button saves one zip. Unzip it and run the app. Sign-in still uses your Bluesky account.</p>${downloadsHtml(false)}</div>`;
+  const requested = parseHash()[1] || '';
+  if (!DOWNLOADS.some(([name]) => name === requested)) return;
+  const button = [...document.querySelectorAll('[data-act="desktop-download"]')].find((node) => node.dataset.file === requested);
+  saveDesktopZip(requested, button);
+}
+
 function packList(packs) {
   return (packs || []).map((pack) => packHtml(pack)).join('');
 }
@@ -1794,6 +1883,7 @@ function route() {
   if (a === 'list' && b) return showList(b);
   if (a === 'packs') return showPacks();
   if (a === 'pack' && b) return showPack(b);
+  if (a === 'downloads') return showDownloads();
   if (a === 'settings') return showSettings();
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
@@ -1902,7 +1992,14 @@ function updateCount() {
 
 function paintFieldHighlight(area, pre) {
   if (!area || !pre) return;
-  pre.innerHTML = `${richText(area.value || '', null, { links: false, breaks: false })}\n`;
+  const value = area.value || '';
+  const start = area.selectionStart ?? 0;
+  const end = area.selectionEnd ?? 0;
+  const opts = { links: false, breaks: false };
+  const body = document.activeElement === area && end > start
+    ? `${richText(value.slice(0, start), null, opts)}<mark class="field-selection">${richText(value.slice(start, end), null, opts)}</mark>${richText(value.slice(end), null, opts)}`
+    : richText(value, null, opts);
+  pre.innerHTML = `${body}\n`;
   pre.scrollTop = area.scrollTop;
 }
 
@@ -1922,6 +2019,18 @@ function showFloat(node) {
       if (!node.matches(':popover-open')) node.showPopover();
     } catch { /* the layer stays in the page */ }
   }
+}
+
+function mountFloat(node, area) {
+  const host = area?.closest?.('dialog[open]') || document.body;
+  const plain = node.id === 'suggest' || node.id === 'type-ghost';
+  if (node.parentElement !== host || (plain && node.hasAttribute('popover'))) {
+    hideFloat(node);
+    if (plain) node.removeAttribute('popover');
+    host.append(node);
+  }
+  if (!plain && !node.hasAttribute('popover')) node.setAttribute('popover', 'manual');
+  showFloat(node);
 }
 
 function hideSuggest() {
@@ -1959,7 +2068,7 @@ function paintGhost(area) {
   try { point = caretPoint(area); } catch { return hideGhost(); }
   ghost.style.left = `${point.x}px`;
   ghost.style.top = `${point.top}px`;
-  showFloat(ghost);
+  mountFloat(ghost, area);
 }
 
 function caretPoint(area) {
@@ -2005,16 +2114,7 @@ function showSuggest(box, area) {
   box.style.right = 'auto';
   box.style.bottom = 'auto';
   box.style.transform = 'none';
-  if (typeof box.showPopover !== 'function') {
-    const host = area.closest('dialog') || document.body;
-    if (box.parentElement !== host) host.append(box);
-  }
-  box.hidden = false;
-  if (typeof box.showPopover === 'function') {
-    try {
-      if (!box.matches(':popover-open')) box.showPopover();
-    } catch { /* the list stays in the page */ }
-  }
+  mountFloat(box, area);
   const height = box.offsetHeight || 200;
   const spaceBelow = window.innerHeight - point.y;
   const spaceAbove = point.top;
@@ -2042,7 +2142,7 @@ function aiSuggestRows(query) {
 function paintSuggest(area, rows) {
   const box = $('suggest');
   if (!box || !rows.length) return hideSuggest();
-  box.innerHTML = `<p class="suggest-hint">Tab completes</p>${rows.join('')}`;
+  box.innerHTML = `<p class="suggest-hint">Click a row, or press Tab</p>${rows.join('')}`;
   box.querySelectorAll('button').forEach((button, index) => button.classList.toggle('on', index === 0));
   suggestArea = area;
   showSuggest(box, area);
@@ -2409,6 +2509,7 @@ function openMenu(anchor, items) {
 const MORE_LINKS = [
   { id: 'go-lists', label: 'Lists' },
   { id: 'go-feeds', label: 'Feeds' },
+  { id: 'go-downloads', label: 'Download apps' },
   { id: 'go-settings', label: 'Settings' },
   { id: 'go-about', label: 'About' },
   { id: 'go-privacy', label: 'Privacy' },
@@ -2696,9 +2797,13 @@ function filterLanguageButtons(input) {
   });
 }
 
+function hoverBlocked(node) {
+  return Boolean(node?.closest?.('.left, .tabbar, .account, #account-btn, [data-no-hover]'));
+}
+
 function actorFromLink(node) {
   const link = node?.closest?.('a[href^="#/profile/"]');
-  if (!link || link.closest('#hovercard, #menu, #suggest')) return null;
+  if (!link || hoverBlocked(link) || link.closest('#hovercard, #menu, #suggest')) return null;
   const raw = (link.getAttribute('href') || '').replace(/^#/, '');
   const parts = raw.split('/').filter(Boolean).map((part) => {
     try { return decodeURIComponent(part); } catch { return part; }
@@ -2710,17 +2815,25 @@ function actorFromLink(node) {
 function placeHover(card, anchor) {
   const rect = anchor.getBoundingClientRect();
   const width = Math.min(320, window.innerWidth - 16);
-  let left = rect.left;
-  if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-  left = Math.max(8, left);
   card.style.width = `${width}px`;
-  card.style.left = `${left}px`;
   card.style.right = 'auto';
   showFloat(card);
   const height = card.offsetHeight || 220;
-  let top = rect.bottom + 8;
-  if (top + height > window.innerHeight - 8 && rect.top - height - 8 > 8) top = rect.top - height - 8;
+  let left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  let top = rect.bottom + 10;
+  if (top + height > window.innerHeight - 8) top = rect.top - height - 10;
+  const overlaps = (x, y) => y < rect.bottom + 4 && y + height > rect.top - 4 && x < rect.right && x + width > rect.left;
+  const parkBeside = () => {
+    const beside = rect.right + 10;
+    if (beside + width <= window.innerWidth - 8) left = beside;
+    else left = Math.max(8, rect.left - width - 10);
+    top = Math.max(8, Math.min(rect.top, window.innerHeight - height - 8));
+  };
+  if (overlaps(left, top)) parkBeside();
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
   top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  if (overlaps(left, top)) parkBeside();
+  card.style.left = `${left}px`;
   card.style.top = `${top}px`;
 }
 
@@ -2737,7 +2850,7 @@ function closeHover() {
 
 async function openHover(found) {
   const card = $('hovercard');
-  if (!card || !found) return;
+  if (!card || !found || hoverBlocked(found.link)) return closeHover();
   hoverActor = found.id;
   const cached = hoverProfiles.get(found.id);
   card.innerHTML = cached
@@ -2763,6 +2876,12 @@ async function openHover(found) {
 function scheduleHover(event) {
   if (event.pointerType && event.pointerType !== 'mouse') return;
   if (window.matchMedia('(hover: none)').matches) return;
+  if (hoverBlocked(event.target)) {
+    hoverWait = '';
+    clearTimeout(hoverTimer);
+    if (hoverActor) closeHover();
+    return;
+  }
   const found = actorFromLink(event.target);
   if (!found) return;
   clearTimeout(hoverHideTimer);
@@ -3553,8 +3672,32 @@ async function handleChromeAct(act, event) {
   return false;
 }
 
+function selectedText() {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed) return '';
+  return selection.toString();
+}
+
 async function onClick(event) {
+  const facet = event.target.closest?.('a.facet');
+  if (facet) {
+    if (selectedText().trim()) return;
+    closeHover();
+    const href = facet.getAttribute('href') || '';
+    if (href.startsWith('#')) {
+      event.preventDefault();
+      if (location.hash === href) route();
+      else location.hash = href;
+    }
+    return;
+  }
   const act = event.target.closest('[data-act]')?.dataset.act;
+  if (act === 'desktop-download') {
+    event.preventDefault();
+    const button = event.target.closest('[data-file]');
+    if (button?.dataset.file) saveDesktopZip(button.dataset.file, button);
+    return;
+  }
   if (act && await handleChromeAct(act, event)) return;
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
@@ -3690,7 +3833,13 @@ async function onClick(event) {
   if (act === 'repost') return repostMenu(event.target.closest('.action'), found);
   if (act === 'more') return moreMenu(event.target.closest('.more'), found);
   if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
-  if (!act && event.target.closest('a, button, .quote, .card, .shot, .video')) return;
+  if (!act && event.target.closest('a, button, .card, .shot, .video')) return;
+  const quote = event.target.closest?.('.quote[data-href]');
+  if (quote && !event.target.closest('a, button')) {
+    location.hash = quote.getAttribute('data-href');
+    return;
+  }
+  if (selectedText().trim() && event.target.closest('.text, .bio, .quote-text, .bubble, .snip')) return;
   if (event.target.closest('.post-main') && !event.target.closest('a, button')) {
     const link = found.article.querySelector('.time');
     if (link) location.hash = link.getAttribute('href');
@@ -3849,6 +3998,7 @@ async function onMenu(event) {
   if (id === 'go-feeds') return void (location.hash = '#/feeds');
   if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
   if (id === 'go-calls') return void (location.hash = '#/calls');
+  if (id === 'go-downloads') return void (location.hash = '#/downloads');
   if (id === 'go-settings' || id === 'settings-go') return void (location.hash = '#/settings');
   if (id === 'go-about') return openAbout();
   if (id === 'go-privacy') return openLegal('privacy');
@@ -4370,6 +4520,21 @@ function bind() {
     const ctx = playSound.ctx;
     ctx?.resume?.().catch(() => {});
   }, { once: true });
+  document.addEventListener('selectionchange', () => {
+    const area = document.activeElement;
+    if (area?.id === 'compose-text') paintFieldHighlight(area, $('compose-highlight'));
+    else if (area?.id === 'chat-text') paintFieldHighlight(area, $('chat-highlight'));
+    else if (area?.id === 'ai-text') paintFieldHighlight(area, $('ai-highlight'));
+  });
+  document.addEventListener('pointerdown', (event) => {
+    const button = event.target.closest?.('#suggest [data-insert]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applySuggest(button.dataset.insert || '');
+  }, true);
+  const loginDownloads = $('login-downloads');
+  if (loginDownloads) loginDownloads.innerHTML = downloadsHtml(true);
   document.addEventListener('pointerover', scheduleHover);
   document.addEventListener('pointerout', scheduleHoverHide);
   $('hovercard')?.addEventListener('pointerover', () => clearTimeout(hoverHideTimer));
@@ -4389,12 +4554,6 @@ function bind() {
   $('account-btn').addEventListener('click', () => {
     if (!signedIn()) requireSignIn();
     else openMenu($('account-btn'), accountMenuItems());
-  });
-  $('suggest')?.addEventListener('mousedown', (event) => {
-    const button = event.target.closest('[data-insert]');
-    if (!button) return;
-    event.preventDefault();
-    applySuggest(button.dataset.insert || '');
   });
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('legal-close')?.addEventListener('click', () => $('legal')?.close());
@@ -4933,10 +5092,8 @@ async function boot() {
   await loadMe();
   clearBoot();
   if (!signedIn()) openGate();
-  else {
-    closeGate();
-    route();
-  }
+  else closeGate();
+  if (signedIn() || parseHash()[0] === 'downloads') route();
   document.getElementById('boot-error')?.remove();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshBadge();

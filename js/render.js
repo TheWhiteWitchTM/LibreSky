@@ -158,9 +158,11 @@ function quote(view, linked = true) {
     const text = record.value?.text ?? record.record?.text ?? '';
     const facets = record.value?.facets || record.record?.facets;
     bag.set(record.uri, { post: { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author } });
-    const href = linked ? ` href="${postHash({ uri: record.uri, author })}"` : '';
-    const tag = linked ? 'a' : 'div';
-    return `<${tag} class="quote"${href}>${avatar(author.avatar, author.displayName || author.handle, 'sm')}<span><span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span><span class="quote-text">${richText(text, facets)}</span></span></${tag}>`;
+    const postHref = postHash({ uri: record.uri, author });
+    const headInner = `${avatar(author.avatar, author.displayName || author.handle, 'sm')}<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span>`;
+    const head = linked ? `<a class="quote-head" href="${attr(postHref)}">${headInner}</a>` : `<span class="quote-head">${headInner}</span>`;
+    const data = linked ? ` data-href="${attr(postHref)}"` : '';
+    return `<div class="quote"${data}>${head}<span class="quote-text">${richText(text, facets)}</span></div>`;
   }
   const who = record.creator || record.author;
   if (record.displayName && who) {
@@ -286,15 +288,17 @@ function trendKicker(trend) {
 export function trendHtml(trend, options = {}) {
   const name = String(trend?.displayName || '').trim() || 'Trend';
   const count = compact(trend?.postCount);
-  const faces = (trend?.actors || []).slice(0, 3);
-  const stack = faces.length
-    ? `<span class="avatar-stack">${faces.map((actor) => avatar(actor?.avatar, actor?.displayName || actor?.handle, 'sm')).join('')}</span>`
-    : '';
+  const face = (trend?.actors || [])[0];
+  const mark = face
+    ? avatar(face.avatar, face.displayName || face.handle)
+    : '<span class="trend-badge" aria-hidden="true">#</span>';
   const blurb = !options.compact && trend?.description
     ? `<span class="trend-desc">${escapeHtml(trend.description)}</span>`
     : '';
   const rank = options.rank ? `<span class="trend-rank">${options.rank}.</span>` : '';
-  return `<a class="trend" href="${attr(trendHref(trend))}"><span class="trend-kicker">${escapeHtml(trendKicker(trend))}</span><strong>${rank ? `${rank} ` : ''}${escapeHtml(name)}</strong>${blurb}<span class="trend-meta">${stack}${count ? `<span>${count} posts</span>` : ''}</span></a>`;
+  const meta = [`<span class="trend-kicker">${escapeHtml(trendKicker(trend))}</span>`];
+  if (count) meta.push(`${escapeHtml(count)} posts`);
+  return `<a class="trend" href="${attr(trendHref(trend))}">${mark}<span class="trend-copy"><strong>${rank}${escapeHtml(name)}</strong><span class="handle">${meta.join(' · ')}</span>${blurb}</span></a>`;
 }
 
 export function trendsHtml(trends, options) {

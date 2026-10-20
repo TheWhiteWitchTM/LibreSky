@@ -1,0 +1,15 @@
+{
+  "name": "libresky",
+  "productName": "LibreSky",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LibreSky desktop client for Bluesky.",
+  "main": "main.cjs",
+  "author": "LibreSky",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.9.1",
+    "png2icons": "^2.0.1"
+  }
+}

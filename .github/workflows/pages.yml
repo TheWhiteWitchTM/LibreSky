@@ -24,9 +24,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Stage static site
         run: |
-          mkdir -p _site
+          mkdir -p _site/download
           cp -a index.html 404.html client-metadata.json manifest.webmanifest sw.js LICENSE README.md .nojekyll _site/
           cp -a css js assets _site/
+          cp -a download/manifest.json _site/download/
+          find download -maxdepth 1 -type f -name '*.zip.*' -exec cp -a {} _site/download/ \;
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

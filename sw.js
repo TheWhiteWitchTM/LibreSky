@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-20-lang';
+const CACHE = 'libresky-2026-10-20-desktop';
 
 const SHELL = [
   './',
@@ -46,6 +46,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.search) return;
   if (url.pathname.endsWith('/sw.js')) return;
+  if (url.pathname.includes('/download/')) return;
 
   event.respondWith((async () => {
     try {

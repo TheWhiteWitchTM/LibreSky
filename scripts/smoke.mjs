@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
@@ -141,6 +141,8 @@ const shared = messageHtml({
 }, 'did:me');
 assert.match(shared, /a shared post/);
 assert.match(shared, /class="quote"/);
+assert.match(shared, /data-href=/);
+assert.doesNotMatch(shared, /<a class="quote"/);
 assert.doesNotMatch(shared, /class="post /);
 
 const headed = profileHtml({
@@ -217,6 +219,8 @@ assert.match(madeTrend, /Entertainment · Hot/);
 assert.match(madeTrend, /190K posts/);
 assert.match(madeTrend, /#\/feed\/at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp\.bsky\.feed\.generator%2Fd3c1bec66421/);
 assert.match(madeTrend, /class="trend-desc"/);
+assert.match(madeTrend, /class="trend-copy"/);
+assert.match(madeTrend, /class="avatar /);
 assert.doesNotMatch(madeTrend, /<script/i);
 const coolingTrend = trendsHtml([{
   displayName: 'Alberta',
@@ -226,6 +230,7 @@ const coolingTrend = trendsHtml([{
   category: 'politics',
 }]);
 assert.match(coolingTrend, /trend-kicker">Politics</);
+assert.match(coolingTrend, /class="trend-badge"/);
 assert.doesNotMatch(coolingTrend, /Politics · Trending/);
 const compactTrend = trendsHtml([{
   displayName: 'Cats',
@@ -274,10 +279,10 @@ async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    if (entry.name === 'node_modules' || entry.name === 'vendor' || entry.name === '.git' || entry.name === 'smoke.mjs') continue;
+    if (entry.name === 'node_modules' || entry.name === 'vendor' || entry.name === '.git' || entry.name === 'smoke.mjs' || entry.name === 'desktop' || entry.name === 'download') continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) files.push(...await walk(full));
-    else if (/\.(html|css|js|mjs|md|json|svg)$/.test(entry.name)) files.push(full);
+    else if (entry.name !== 'pack-desktop.mjs' && /\.(html|css|js|mjs|md|json|svg)$/.test(entry.name)) files.push(full);
   }
   return files;
 }
@@ -322,6 +327,20 @@ const sitemap = await readFile(path.join(root, 'sitemap.xml'), 'utf8');
 assert.match(robots, /Sitemap: https:\/\/thewhitewitchtm\.github\.io\/LibreSky\/sitemap\.xml/);
 assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
 const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
+assert.match(appSource, /data-act="desktop-download"/);
+assert.doesNotMatch(appSource, /href="\.\/download\//);
+const desktopManifest = JSON.parse(await readFile(path.join(root, 'download/manifest.json'), 'utf8'));
+const expectedZips = ['LibreSky-linux-x64.zip', 'LibreSky-windows-x64.zip', 'LibreSky-mac-x64.zip'];
+for (const zipName of expectedZips) {
+  const parts = desktopManifest.files?.[zipName];
+  assert.ok(parts?.length, `${zipName} has no download pieces`);
+  for (const part of parts) {
+    assert.match(part.name, /\.zip\.\d+$/);
+    const size = (await stat(path.join(root, 'download', part.name))).size;
+    assert.equal(size, part.size, part.name);
+    assert.ok(size < 50_000_000, `${part.name} is too large to push to GitHub`);
+  }
+}
 assert.match(appSource, /<textarea id="chat-text"/);
 assert.match(appSource, /data-act="follow-back"/);
 assert.match(appSource, /callStartHtml\(\)/);

@@ -93,7 +93,7 @@
       <a class="nav-link" data-nav="notifications" href="#/notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg><span class="label">Notifications</span><span class="badge" id="notif-badge" data-badge="notif" hidden>0</span></a>
       <a class="nav-link" data-nav="messages" href="#/messages" aria-label="Chat"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg><span class="label">Chat</span><span class="badge" id="chat-badge" data-badge="chat" hidden>0</span></a>
       <a class="nav-link" data-nav="bookmarks" href="#/bookmarks" aria-label="Bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
-      <a class="nav-link" data-nav="profile" href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
+      <a class="nav-link" data-nav="profile" data-no-hover href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
       <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
       <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8 13.6 8 19 9.2 13.6 10.8 12 16.2 10.4 10.8 5 9.2 10.4 8 12 2.8zm6.2 9.2.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></svg>
@@ -104,7 +104,7 @@
         <span class="label">More</span>
       </button>
       <button type="button" class="post-btn" data-act="compose" aria-label="Post"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg><span>Post</span></button>
-      <button type="button" class="account" id="account-btn">
+      <button type="button" class="account" id="account-btn" data-no-hover>
         <span class="avatar" id="account-avatar" data-initial="L"></span>
         <span class="account-text"><strong id="account-name">Sign in</strong><span id="account-handle">Bluesky account</span></span>
       </button>
@@ -143,7 +143,7 @@
     <a href="#/search" aria-label="Search"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg></a>
     <a href="#/notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg></a>
     <a href="#/messages" aria-label="Chat"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg><span class="badge" data-badge="chat" hidden>0</span></a>
-    <a href="#/profile" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg></a>
+    <a href="#/profile" data-no-hover aria-label="Profile"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg></a>
   </nav>
   <button type="button" class="fab" data-act="compose" aria-label="Post"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg></button>
 
@@ -169,6 +169,7 @@
         <button class="primary" id="login-password-btn" type="button">Sign in</button>
         <p class="dim"><a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Create one in Bluesky settings</a>. You do not need this for a normal sign-in.</p>
       </div>
+      <div id="login-downloads"></div>
       <p class="dim remember">You stay signed in on this browser until you sign out. LibreSky cannot read the login saved in the Bluesky app, because each site keeps its own session. If this browser is already signed in on Bluesky’s site, the next page asks you to allow LibreSky and usually skips the password. When it does ask, that is your Bluesky password.</p>
     </form>
   </dialog>
