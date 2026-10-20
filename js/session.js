@@ -125,3 +125,24 @@ export function setActiveDid(did) {
   if (did) localStorage.setItem(ACTIVE_KEY, did);
   else localStorage.removeItem(ACTIVE_KEY);
 }
+
+const SOUND_KEY = 'libresky.sounds';
+
+export function soundPrefs() {
+  const saved = readJson(SOUND_KEY);
+  if (!saved || typeof saved !== 'object') return { chat: true, notifications: true };
+  return {
+    chat: saved.chat !== false,
+    notifications: saved.notifications !== false,
+  };
+}
+
+export function setSoundPrefs(next) {
+  const current = soundPrefs();
+  const saved = {
+    chat: typeof next?.chat === 'boolean' ? next.chat : current.chat,
+    notifications: typeof next?.notifications === 'boolean' ? next.notifications : current.notifications,
+  };
+  localStorage.setItem(SOUND_KEY, JSON.stringify(saved));
+  return saved;
+}

@@ -94,6 +94,33 @@ assert.match(notesHtml, /Cara/);
 assert.match(notesHtml, /Eve/);
 assert.match(notesHtml, /class="facet tag"/);
 assert.match(notesHtml, /replied to you/);
+const spoken = notificationsHtml([
+  {
+    reason: 'reply',
+    uri: 'at://did:d/app.bsky.feed.post/reply',
+    author: { did: 'did:d', handle: 'd.bsky.social', displayName: 'Dee' },
+    reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+    record: { text: 'I agree with this' },
+    indexedAt: '2026-10-20T00:03:00.000Z',
+    isRead: false,
+  },
+  {
+    reason: 'mention',
+    uri: 'at://did:d/app.bsky.feed.post/mention',
+    author: { did: 'did:d', handle: 'd.bsky.social', displayName: 'Dee' },
+    reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+    record: { text: 'hey look at this' },
+    indexedAt: '2026-10-20T00:04:00.000Z',
+    isRead: true,
+  },
+], new Map([['at://did:x/app.bsky.feed.post/1', { uri: 'at://did:x/app.bsky.feed.post/1', author: { handle: 'me.bsky.social' }, record: { text: 'hello #team' } }]]));
+assert.match(spoken, /I agree with this/);
+assert.match(spoken, /hey look at this/);
+assert.match(spoken, /class="said"/);
+assert.match(spoken, /Your post/);
+assert.match(spoken, /hello/);
+assert.match(spoken, /class="facet tag"/);
+assert.match(spoken, /note-kicker">Related post/);
 
 const mine = messageHtml({ text: 'hello @jay.bsky.social', sender: { did: 'did:me' } }, 'did:me');
 assert.match(mine, /class="bubble mine"/);
@@ -275,6 +302,8 @@ assert.match(index, /name="twitter:site" content="@TheWhiteWitchTM"/);
 assert.match(index, /rel="canonical"/);
 assert.match(index, /G-13S6Z9KCX9/);
 assert.match(index, /assets\/banner.png/);
+assert.match(index, /id="incoming-call"/);
+assert.match(index, /id="call-title"/);
 assert.match(index, /id="manage-form"/);
 assert.match(index, /class="tip"/);
 assert.match(index, /Buy me a coffee/);
@@ -299,6 +328,8 @@ assert.match(appSource, /callStartHtml\(\)/);
 assert.match(appSource, /listRecords\('app\.bsky\.graph\.follow'/);
 const domainProfile = profileHtml({ handle: 'app.sociallydead.me', displayName: 'sociallydead.me', did: 'did:plc:test' });
 assert.match(domainProfile, /aria-label="Verified domain"/);
+assert.match(domainProfile, /class="verified domain"/);
+assert.doesNotMatch(domainProfile, /verified official/);
 const plainProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' });
 assert.doesNotMatch(plainProfile, /verified/);
 const badgeProfile = profileHtml({
@@ -308,9 +339,21 @@ const badgeProfile = profileHtml({
   verification: { verifiedStatus: 'valid' },
 });
 assert.match(badgeProfile, /aria-label="Verified"/);
+assert.match(badgeProfile, /class="verified official"/);
 assert.doesNotMatch(badgeProfile, /Verified domain/);
+const bothProfile = profileHtml({
+  handle: 'app.sociallydead.me',
+  displayName: 'Both',
+  did: 'did:plc:both',
+  verification: { verifiedStatus: 'valid' },
+});
+assert.match(bothProfile, /class="verified official"/);
+assert.match(bothProfile, /class="verified domain"/);
 const invalidProfile = profileHtml({ handle: 'handle.invalid', displayName: 'Gone', did: 'did:plc:gone' });
 assert.doesNotMatch(invalidProfile, /verified/);
+assert.match(appSource, /data-sound="chat"/);
+assert.match(appSource, /data-sound="notifications"/);
+assert.match(appSource, /playSound\('call'\)/);
 assert.match(appSource, /data-act="chat-read"/);
 assert.match(appSource, /data-act="chat-cleanup"/);
 assert.match(appSource, /'list-delete'/);
@@ -441,8 +484,25 @@ assert.equal(assembleCallSdp([
 const started = messageHtml({ id: 'm1', text: 'Started a voice call https://example.com/#/c/2222222222222', sender: { did: 'did:them' } }, 'did:me');
 assert.match(started, /msg-header/);
 assert.match(started, /Started a voice call/);
+assert.match(started, /msg-header audio/);
 assert.doesNotMatch(started, /class="bubble/);
+assert.doesNotMatch(started, /data-act="call-accept"/);
 assert.doesNotMatch(started, /example\.com/);
+const incoming = messageHtml({ id: 'm9', text: 'new from them', sender: { did: 'did:them' } }, 'did:me', { fresh: true });
+assert.match(incoming, /class="bubble fresh"/);
+assert.doesNotMatch(incoming, /bubble mine/);
+const liveVideo = messageHtml({
+  id: 'm10',
+  text: 'Started a video call https://example.com/#/c/2222222222222',
+  sender: { did: 'did:them' },
+}, 'did:me', { liveRkey: '2222222222222', convoId: 'room', peerDid: 'did:them' });
+assert.match(liveVideo, /msg-header video/);
+assert.match(liveVideo, /Started a video call/);
+assert.match(liveVideo, /data-act="call-accept"/);
+assert.match(liveVideo, /data-act="call-decline"/);
+assert.match(liveVideo, /data-media="video"/);
+assert.match(liveVideo, /data-convo="room"/);
+assert.doesNotMatch(liveVideo, /example\.com/);
 const callRow = callConvoHtml({
   id: 'room',
   unreadCount: 2,

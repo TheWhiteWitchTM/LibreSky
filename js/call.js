@@ -74,8 +74,14 @@ function showStage(media) {
   const dialog = $('call');
   const remote = $('call-remote');
   const local = $('call-local');
-  if (remote) remote.hidden = media !== 'video';
-  if (local) local.hidden = media !== 'video';
+  const voice = $('call-voice');
+  const title = $('call-title');
+  const video = media === 'video';
+  if (remote) remote.hidden = !video;
+  if (local) local.hidden = !video;
+  if (voice) voice.hidden = video;
+  if (title) title.textContent = video ? 'Video call' : 'Voice call';
+  if (dialog) dialog.dataset.media = video ? 'video' : 'audio';
   if (dialog && !dialog.open) dialog.showModal();
 }
 
@@ -361,13 +367,15 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
 }
 
 export async function declineCall(convoId, rkey) {
-  if (!convoId) return;
+  if (!convoId) return false;
   try {
     const text = RKEY.test(rkey || '') ? sentence('decline', '', rkey) : 'Declined the call';
     await api.sendMessage(convoId, text);
     api.markConvoRead(convoId).catch(() => {});
+    return true;
   } catch (error) {
     notify(error.message);
+    return false;
   }
 }
 

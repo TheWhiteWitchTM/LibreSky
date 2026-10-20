@@ -343,7 +343,7 @@ Source is on GitHub.</p>
       <article id="legal-privacy">
         <h3>Privacy</h3>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
-        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. Muted words (libresky.mutedWords), an unsent post draft (libresky.draft), language choices (libresky.languages), and words you finish with Tab (libresky.words) stay in this browser too.</p>
+        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. Muted words (libresky.mutedWords), an unsent post draft (libresky.draft), language choices (libresky.languages), sound choices (libresky.sounds), and words you finish with Tab (libresky.words) stay in this browser too.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
         <p>An AI account (libresky.ai) stays in this browser. The key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, or Check.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>
@@ -360,14 +360,21 @@ Source is on GitHub.</p>
 
   <dialog id="call">
     <div class="call-stage">
+      <h2 id="call-title">Call</h2>
+      <div id="call-voice" class="call-voice" hidden>
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg>
+        <span>Voice</span>
+      </div>
       <video id="call-remote" autoplay playsinline hidden></video>
       <video id="call-local" autoplay playsinline muted hidden></video>
       <audio id="call-audio" autoplay></audio>
       <p id="call-status">Calling…</p>
-      <p class="dim">The other person needs LibreSky open. Hang up ends the call.</p>
+      <p class="dim">The other person needs LibreSky open. Accept or decline an incoming call from the banner. Hang up ends the call.</p>
       <button type="button" class="danger" id="call-hangup">Hang up</button>
     </div>
   </dialog>
+
+  <div id="incoming-call" class="incoming-call" hidden role="status"></div>
 
   <div id="suggest" class="suggest" popover="manual"></div>
   <div id="type-ghost" class="type-ghost" popover="manual" hidden></div>

@@ -53,12 +53,22 @@ function domainVerified(actor) {
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(handle);
 }
 
+function checkMark(label, kind) {
+  return `<svg class="verified ${kind}" viewBox="0 0 16 16" role="img" aria-label="${label}"><title>${label}</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
+}
+
 function verifiedMark(actor) {
   const verification = actor?.verification || {};
-  const official = verification.verifiedStatus === 'valid' || verification.trustedVerifierStatus === 'valid';
-  if (!official && !domainVerified(actor)) return '';
-  const label = official ? 'Verified' : 'Verified domain';
-  return `<svg class="verified" viewBox="0 0 16 16" role="img" aria-label="${label}"><title>${label}</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
+  const bluesky = verification.verifiedStatus === 'valid' || verification.trustedVerifierStatus === 'valid';
+  const domain = domainVerified(actor);
+  if (!bluesky && !domain) return '';
+  const parts = [];
+  if (bluesky) {
+    const label = verification.verifiedStatus === 'valid' ? 'Verified' : 'Trusted verifier';
+    parts.push(checkMark(label, 'official'));
+  }
+  if (domain) parts.push(checkMark('Verified domain', 'domain'));
+  return parts.join('');
 }
 
 function action(name, label, on, count, listAct) {
@@ -388,21 +398,41 @@ export function notificationHtml(note, subject) {
   return notificationGroupHtml([note], subject ? new Map([[note.reasonSubject, subject]]) : new Map());
 }
 
+function textRecord(record) {
+  if (typeof record?.text !== 'string' || !record.text.trim()) return null;
+  return record;
+}
+
+function spokenRecord(note, subjects) {
+  const own = textRecord(note?.record) || textRecord(subjects?.get?.(note?.uri)?.record);
+  if (own) return own;
+  if (note?.record?.embed || subjects?.get?.(note?.uri)?.record?.embed) return { text: 'Sent an attachment', facets: [] };
+  return null;
+}
+
 function notificationGroupHtml(group, subjects) {
   const first = group[0] || {};
   const reason = first.reason || '';
   const authors = group.map((note) => note.author || {});
   const subject = subjects?.get?.(first.reasonSubject);
   const verb = NOTE_VERB[reason] || reason || 'interacted';
-  const href = reason === 'follow' || reason === 'starterpack-joined'
-    ? ''
-    : (subject ? postHash(subject) : '');
+  const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
+  const said = spoken ? spokenRecord(first, subjects) : null;
+  const saidText = said?.text?.trim() || '';
+  const subjectText = typeof subject?.record?.text === 'string' ? subject.record.text.trim() : '';
+  const replyHref = spoken && first.uri ? postHash({ uri: first.uri, author: first.author }) : '';
+  const subjectHref = subject ? postHash(subject) : '';
+  const href = reason === 'follow' || reason === 'starterpack-joined' ? '' : (replyHref || subjectHref);
   const verbHtml = href ? `<a class="verb" href="${href}">${escapeHtml(verb)}</a>` : escapeHtml(verb);
-  const snippet = subject?.record?.text
-    ? `<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
+  const saidHtml = saidText ? `<span class="said">${richText(said.text, said.facets)}</span>` : '';
+  const showContext = Boolean(subjectText) && subjectText !== saidText;
+  const kicker = spoken && saidText && showContext ? (reason === 'mention' ? 'Related post' : 'Your post') : '';
+  const context = showContext
+    ? `${kicker ? `<span class="note-kicker">${kicker}</span>` : ''}<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
     : '';
+  const snippet = context ? `<span class="note-context">${context}</span>` : '';
   const unread = group.some((note) => !note.isRead);
-  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${snippet}</span></article>`;
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${snippet}</span></article>`;
 }
 
 export function notificationsHtml(notes, subjects) {
@@ -444,7 +474,7 @@ function callLine(parsed) {
   return 'Call ended';
 }
 
-export function messageHtml(message, me) {
+export function messageHtml(message, me, options = {}) {
   const type = message?.$type || '';
   if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
   const sender = messageSender(message);
@@ -453,10 +483,19 @@ export function messageHtml(message, me) {
   const call = parseCallMessage(text);
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
   if (call?.kind === 'data') return `<div class="msg-signal"${id} hidden></div>`;
-  if (call) return `<div class="msg-header"${id}>${escapeHtml(callLine(call))}</div>`;
+  if (call) {
+    const video = call.media === 'video';
+    const live = Boolean(!mine && options.liveRkey && call.kind === 'offer' && call.rkey && call.rkey === options.liveRkey);
+    const tone = video ? ' video' : (call.media === 'audio' ? ' audio' : '');
+    const actions = live
+      ? `<span class="call-actions"><button type="button" class="primary small" data-act="call-accept" data-rkey="${attr(call.rkey)}" data-media="${attr(call.media || 'audio')}" data-convo="${attr(options.convoId || '')}" data-peer="${attr(options.peerDid || sender || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(call.rkey)}" data-convo="${attr(options.convoId || '')}">Decline</button></span>`
+      : '';
+    return `<div class="msg-header${tone}"${id}>${icon(video ? 'video' : 'phone')}<span>${escapeHtml(callLine(call))}</span>${actions}</div>`;
+  }
   const embed = message?.embed ? embedHtml(message.embed) : '';
   if (!text && !embed) return '';
-  return `<div class="bubble${mine ? ' mine' : ''}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
+  const fresh = !mine && options.fresh ? ' fresh' : '';
+  return `<div class="bubble${mine ? ' mine' : ''}${fresh}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
 }
 
 export function assistantHtml(text, { id = '', kicker = 'Your account', actions = false } = {}) {
@@ -533,9 +572,14 @@ export function packHtml(pack) {
   return `<a class="pack" href="${href}">${avatar(creator.avatar, creator.displayName || creator.handle, 'sm')}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(meta)}</span>${record.description ? `<span class="snip">${escapeHtml(record.description)}</span>` : ''}</span></a>`;
 }
 
-export function callBannerHtml(offer) {
-  const label = offer?.media === 'video' ? 'Incoming video call' : 'Incoming voice call';
-  return `<div class="call-banner"><span>${label}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}">Accept</button><button type="button" class="text-btn" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}">Decline</button></div>`;
+export function callBannerHtml(offer, extra = {}) {
+  const video = offer?.media === 'video';
+  const label = video ? 'Incoming video call' : 'Incoming voice call';
+  const rkey = attr(offer?.rkey || '');
+  const media = attr(offer?.media || 'audio');
+  const convo = attr(extra.convoId || '');
+  const peer = attr(extra.peerDid || '');
+  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
 }
 
 export function threadList(node) {
