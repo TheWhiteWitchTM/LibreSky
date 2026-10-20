@@ -3,6 +3,7 @@ import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setup
 import {
   actorHtml,
   callBannerHtml,
+  callConvoHtml,
   callToolsHtml,
   chatHeaderHtml,
   convoHtml,
@@ -573,26 +574,6 @@ function otherMember(convo, messages) {
   return null;
 }
 
-function deletedPeer(actor) {
-  const handle = String(actor?.handle || '').trim().toLowerCase();
-  const name = String(actor?.displayName || '').trim().toLowerCase();
-  if (handle === 'invalid.handle' || handle === 'handle.invalid' || handle.endsWith('.invalid')) return true;
-  if (name === 'account deleted' || name === 'deleted account') return true;
-  return false;
-}
-
-function paintCallTools(actor) {
-  const tools = $('title-tools');
-  if (!tools) return;
-  if (!actor?.did || deletedPeer(actor)) {
-    tools.innerHTML = '';
-    delete tools.dataset.peer;
-    return;
-  }
-  tools.dataset.peer = actor.did;
-  tools.innerHTML = callToolsHtml(actor.did);
-}
-
 function paintCallBanner(messages, peerDid) {
   const offer = incomingCall(messages, myDid(), peerDid);
   const current = $('view')?.querySelector('.call-banner');
@@ -666,7 +647,6 @@ async function showMessages(convoId) {
     const messages = (data.messages || []).slice().reverse();
     const other = otherMember(convoWrap?.convo, messages);
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
-    paintCallTools(other);
     $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button></form>`;
     paintCallBanner(messages, other?.did || '');
     const area = $('chat-text');
@@ -1238,15 +1218,26 @@ function showAi() {
   $('view').innerHTML = `<section class="settings"><h2>Coming soon</h2><p class="dim">This is where the LibreSky helper will open. Nothing you type here is sent to a model yet.</p></section>`;
 }
 
-function showCalls() {
-  generation += 1;
-  setChrome({ title: 'Calls', nav: 'messages', back: true });
+async function showCalls() {
+  const token = ++generation;
+  setChrome({ title: 'Calls', nav: 'calls' });
   const ready = canCall();
-  const title = ready ? 'Voice and video' : 'Coming soon';
-  const body = ready
-    ? 'A voice or video call connects two LibreSky windows. Chat messages carry the call setup, so open this conversation in LibreSky on both sides and press Voice or Video.'
-    : 'This page is not a secure context, or this browser has no WebRTC, so a call cannot start here. Open LibreSky over https, or on http://127.0.0.1. Two LibreSky windows still set the call up through chat messages when the browser allows it.';
-  $('view').innerHTML = `<section class="settings"><h2>${title}</h2><p class="dim">${escapeHtml(body)}</p></section>`;
+  const note = ready
+    ? 'Voice and video connect two LibreSky windows. Chat messages only carry the setup, and they show up as headers in the conversation.'
+    : 'This page is not a secure context, or this browser has no WebRTC, so a call cannot start here. Open LibreSky over https, or on http://127.0.0.1.';
+  if (!signedIn()) {
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls', 'Sign in to call someone you chat with.', '<button type="button" class="primary" data-act="signin">Sign in</button>')}`;
+    return;
+  }
+  showSkeletons();
+  try {
+    const data = await api.listConvos();
+    if (token !== generation) return;
+    const rows = (data.convos || []).map((convo) => callConvoHtml(convo, myDid())).join('');
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${rows || emptyHtml('No one to call', 'Start a chat, then come back here to call them.')}`;
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
+  }
 }
 
 function packList(packs) {
@@ -1877,17 +1868,23 @@ function openMenu(anchor, items) {
   menu.style.bottom = 'auto';
 }
 
+const MORE_LINKS = [
+  { id: 'go-lists', label: 'Lists' },
+  { id: 'go-feeds', label: 'Feeds' },
+  { id: 'go-settings', label: 'Settings' },
+  { id: 'go-about', label: 'About' },
+  { id: 'go-privacy', label: 'Privacy' },
+  { id: 'go-terms', label: 'Terms' },
+];
+
 function openMoreMenu(anchor) {
-  openMenu(anchor, [
-    { id: 'go-lists', label: 'Lists' },
-    { id: 'go-feeds', label: 'Feeds' },
+  const sidebarOpen = window.matchMedia('(min-width: 721px)').matches;
+  const overflow = sidebarOpen ? [] : [
     { id: 'go-bookmarks', label: 'Bookmarks' },
-    { id: 'go-settings', label: 'Settings' },
-    { id: 'go-about', label: 'About' },
-    { id: 'go-privacy', label: 'Privacy' },
-    { id: 'go-terms', label: 'Terms' },
+    { id: 'go-calls', label: 'Calls' },
     { id: 'go-ai', label: 'AI' },
-  ]);
+  ];
+  openMenu(anchor, [...overflow, ...MORE_LINKS]);
 }
 
 function accountMenuItems() {
@@ -2848,6 +2845,7 @@ async function onMenu(event) {
   if (id === 'go-lists') return void (location.hash = '#/lists');
   if (id === 'go-feeds') return void (location.hash = '#/feeds');
   if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
+  if (id === 'go-calls') return void (location.hash = '#/calls');
   if (id === 'go-settings' || id === 'settings-go') return void (location.hash = '#/settings');
   if (id === 'go-about') return openAbout();
   if (id === 'go-privacy') return openLegal('privacy');

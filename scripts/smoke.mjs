@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { callConvoHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 
@@ -282,6 +282,14 @@ assert.match(index, /id="more-btn"/);
 assert.match(index, /id="more-head"/);
 assert.match(index, /data-nav="ai"/);
 assert.match(index, /href="#\/ai"/);
+assert.match(index, /data-nav="bookmarks"[\s\S]*data-nav="calls"[\s\S]*data-nav="ai"[\s\S]*id="more-btn"/);
+assert.match(index, /id="more-btn"[\s\S]*?<path fill="currentColor" d="M12 2\.75a9\.25/);
+assert.match(index, /id="more-head"[\s\S]*?<path fill="currentColor" d="M12 2\.75a9\.25/);
+assert.match(appSource, /nav: 'calls'/);
+assert.doesNotMatch(appSource, /paintCallTools/);
+const moreMenu = appSource.slice(appSource.indexOf('const MORE_LINKS'), appSource.indexOf('function openMoreMenu'));
+assert.match(moreMenu, /go-lists/);
+assert.doesNotMatch(moreMenu, /go-bookmarks|go-ai|go-calls/);
 assert.match(appSource, /Coming soon/);
 assert.match(index, /id="about"/);
 assert.match(index, /id="legal-privacy"/);
@@ -341,9 +349,17 @@ assert.equal(assembleCallSdp([
   { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:other'), '');
 const started = messageHtml({ id: 'm1', text: 'Started a voice call https://example.com/#/c/2222222222222', sender: { did: 'did:them' } }, 'did:me');
-assert.match(started, /bubble system/);
+assert.match(started, /msg-header/);
 assert.match(started, /Started a voice call/);
+assert.doesNotMatch(started, /class="bubble/);
 assert.doesNotMatch(started, /example\.com/);
+const callRow = callConvoHtml({
+  id: 'room',
+  members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:you', handle: 'you.bsky.social', displayName: 'You' }],
+}, 'did:me');
+assert.match(callRow, /data-act="call-audio"/);
+assert.match(callRow, /data-act="call-video"/);
+assert.match(callRow, /#\/messages\/room/);
 const chunk = messageHtml({ id: 'm2', text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' } }, 'did:me');
 assert.match(chunk, /hidden/);
 assert.doesNotMatch(chunk, /Call data/);

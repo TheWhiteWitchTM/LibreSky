@@ -437,8 +437,8 @@ export function messageHtml(message, me) {
   const text = message?.text || '';
   const call = parseCallMessage(text);
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-  if (call?.kind === 'data') return `<div class="bubble signal"${id} hidden></div>`;
-  if (call) return `<div class="bubble system"${id}>${escapeHtml(callLine(call))}</div>`;
+  if (call?.kind === 'data') return `<div class="msg-signal"${id} hidden></div>`;
+  if (call) return `<div class="msg-header"${id}>${escapeHtml(callLine(call))}</div>`;
   const embed = message?.embed ? embedHtml(message.embed) : '';
   if (!text && !embed) return '';
   return `<div class="bubble${mine ? ' mine' : ''}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
@@ -460,6 +460,16 @@ function deletedAccount(actor) {
 export function callToolsHtml(peer) {
   if (!peer) return '';
   return `${callButton('call-audio', 'Voice call', 'phone', peer)}${callButton('call-video', 'Video call', 'video', peer)}`;
+}
+
+export function callConvoHtml(convo, me) {
+  const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
+  const gone = accountGone(other);
+  const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');
+  const handle = gone ? 'This account was deleted' : (other.handle ? `@${other.handle}` : '');
+  const tools = !gone && other.did ? callToolsHtml(other.did) : '';
+  const href = convo.id ? `#/messages/${encodeURIComponent(convo.id)}` : '#/messages';
+  return `<div class="person call-row${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></a><span class="row-actions">${tools}</span></div>`;
 }
 
 export function chatHeaderHtml(actor) {

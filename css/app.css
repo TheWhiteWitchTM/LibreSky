@@ -170,7 +170,6 @@ img { max-width: 100%; }
 }
 #title-tools { display: flex; align-items: center; gap: 6px; flex: none; }
 #title-tools:empty { display: none; }
-#title-tools .call-btn { height: 32px; }
 .tip {
   display: inline-flex;
   align-items: center;
@@ -597,14 +596,20 @@ a.facet:hover { text-decoration: underline; }
   background: var(--search);
 }
 .call-banner span { flex: 1; font-weight: 700; }
-.bubble.system {
+.msg-header {
   align-self: center;
-  max-width: none;
-  background: transparent;
+  margin: 6px auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--search);
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  text-align: center;
 }
+.call-note { margin: 0; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); }
+.call-row { padding-inline: 12px; }
+.call-row .row-actions { flex-wrap: wrap; justify-content: flex-end; }
 .messages { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 24px; min-height: 50vh; }
 .bubble { max-width: min(80%, 420px); padding: 8px 12px; border-radius: 16px; background: var(--search); white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble p { margin: 0; }
@@ -946,7 +951,14 @@ button.nav-link { border: 0; background: transparent; color: inherit; font: inhe
   white-space: nowrap;
 }
 .soon:hover .soon-tip, .soon:focus-visible .soon-tip { display: block; }
-#more-head { flex: none; }
+#more-head {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+#more-head:hover { background: var(--hover); }
 .section-label { margin: 14px 16px 4px; font-size: 16px; }
 .packs { display: flex; flex-direction: column; }
 .pack {
@@ -1069,16 +1081,6 @@ kbd { font-family: ui-monospace, monospace; border: 1px solid var(--border); bor
 @media (max-width: 520px) {
   .tip span { display: none; }
   .tip { width: 32px; padding: 0; }
-  #title-tools .call-btn { position: relative; width: 32px; padding: 0; justify-content: center; }
-  #title-tools .call-btn span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
 }
 @media (max-width: 720px) {
   .shell { display: block; }
