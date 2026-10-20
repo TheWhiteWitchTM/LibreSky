@@ -183,6 +183,14 @@ export async function searchActors(q, limit = 20) {
   });
 }
 
+export async function resolveHandle(handle) {
+  const res = await request('com.atproto.identity.resolveHandle', {
+    params: { handle },
+    publicOnly: true,
+  });
+  return res.did;
+}
+
 // ----------------- Notifications -----------------
 
 export async function getNotifications(cursor = null, limit = 30) {
@@ -388,6 +396,19 @@ export async function createPost({ text, replyTo = null, quotePost = null, image
 
   const now = new Date().toISOString();
   const facets = extractFacets(text);
+  for (const facet of facets) {
+    for (const feature of facet.features || []) {
+      if (feature.$type === 'app.bsky.richtext.facet#mention' && feature.did && !String(feature.did).startsWith('did:')) {
+        try {
+          feature.did = await resolveHandle(feature.did);
+        } catch {
+          feature.did = '';
+        }
+      }
+    }
+    facet.features = (facet.features || []).filter((feature) => feature.$type !== 'app.bsky.richtext.facet#mention' || feature.did);
+  }
+  const usableFacets = facets.filter((facet) => facet.features?.length);
 
   const record = {
     $type: 'app.bsky.feed.post',
@@ -395,8 +416,8 @@ export async function createPost({ text, replyTo = null, quotePost = null, image
     createdAt: now,
   };
 
-  if (facets.length > 0) {
-    record.facets = facets;
+  if (usableFacets.length > 0) {
+    record.facets = usableFacets;
   }
 
   if (replyTo) {

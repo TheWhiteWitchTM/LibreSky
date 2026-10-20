@@ -453,6 +453,10 @@ export async function openThreadView(uri) {
   state.view = 'thread';
   state.activeThreadUri = uri;
   window.location.hash = `thread/${encodeURIComponent(uri)}`;
+  const composer = document.getElementById('inline-composer');
+  const tabsBar = document.getElementById('feed-tabs-bar');
+  if (composer) composer.style.display = 'none';
+  if (tabsBar) tabsBar.style.display = 'none';
 
   const container = document.getElementById('feed-container');
   const title = document.getElementById('view-title');
@@ -514,6 +518,10 @@ export async function openProfileView(actor) {
   state.view = 'profile';
   state.activeProfileActor = actor;
   window.location.hash = `profile/${actor}`;
+  const composer = document.getElementById('inline-composer');
+  const tabsBar = document.getElementById('feed-tabs-bar');
+  if (composer) composer.style.display = 'none';
+  if (tabsBar) tabsBar.style.display = 'none';
 
   const container = document.getElementById('feed-container');
   const title = document.getElementById('view-title');
@@ -1007,6 +1015,29 @@ export function openSettingsModal() {
     });
   }
 
+  modal.querySelector('.close-modal').addEventListener('click', () => modal.setAttribute('hidden', ''));
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.setAttribute('hidden', '');
+  });
+}
+
+export function openAboutModal() {
+  const modal = document.getElementById('modal-overlay');
+  modal.removeAttribute('hidden');
+  const office = Boolean(window.office);
+  modal.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="brand-title"><span class="spark small"></span><span>${office ? 'LibreOffice' : 'LibreSky'}</span></div>
+        <button type="button" class="icon-btn close-modal">${ICONS.close}</button>
+      </div>
+      <div class="modal-body">
+        <p>${office ? 'LibreOffice is the Electron Bluesky client inside LibreSky.' : 'LibreSky is a plain GitHub Pages Bluesky client.'}</p>
+        <p class="dim">Mira, The White Witch™. MIT License.</p>
+        <p><a href="https://thewhitewitchtm.github.io/LibreSky/" target="_blank" rel="noopener">GitHub Pages</a> · <a href="https://github.com/TheWhiteWitchTM/LibreSky" target="_blank" rel="noopener">Source</a></p>
+      </div>
+    </div>
+  `;
   modal.querySelector('.close-modal').addEventListener('click', () => modal.setAttribute('hidden', ''));
   modal.addEventListener('click', (e) => {
     if (e.target === modal) modal.setAttribute('hidden', '');

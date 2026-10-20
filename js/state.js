@@ -119,7 +119,8 @@ export function saveAiSettings() {
 }
 
 export function setTheme(name) {
-  state.theme = name;
-  document.documentElement.setAttribute('data-theme', name);
-  localStorage.setItem(STORAGE_PREFIX + 'theme', name);
+  state.theme = name === 'light' ? 'light' : 'black';
+  document.documentElement.setAttribute('data-theme', state.theme);
+  localStorage.setItem(STORAGE_PREFIX + 'theme', state.theme);
+  if (window.office?.setChromeTheme) window.office.setChromeTheme(state.theme);
 }

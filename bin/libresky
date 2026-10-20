@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# LibreSky — Sovereign Bluesky Web Client
-# Launches LibreSky locally and opens it in your default browser.
+# LibreSky — plain GitHub Pages web client
+# Serves the static site locally. LibreOffice is the Electron app: bin/libreoffice
 
 set -euo pipefail
 

@@ -64,6 +64,22 @@ button { cursor: pointer; border: none; background: transparent; }
 input, textarea, select { background: var(--bg-1); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; outline: none; }
 input:focus, textarea:focus, select:focus { border-color: var(--blue); }
 textarea { resize: vertical; }
+.dim { color: var(--text-muted); }
+
+#splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  z-index: 999;
+  letter-spacing: 0.04em;
+}
+#splash[hidden] { display: none; }
+.splash-error { max-width: 70ch; white-space: pre-wrap; color: var(--red); font: 12px/1.4 var(--mono); }
 
 /* The MAGIC Spark */
 .spark {

@@ -1,15 +1,29 @@
 {
-  "name": "libresky",
-  "productName": "LibreSky",
-  "version": "1.0.0",
-  "description": "Sovereign Bluesky client with dark theme and local AI assistant.",
+  "name": "libreoffice",
+  "productName": "LibreOffice",
+  "version": "0.1.0",
+  "description": "Alpha. A dark Bluesky client for LibreSky.",
   "author": {
     "name": "Mira (The White Witch™)",
     "email": "thewhitewitchtm@google.com",
     "url": "https://x.com/TheWhiteWitchTM"
   },
-  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
   "scripts": {
-    "start": "bash bin/libresky"
-  }
+    "start": "electron .",
+    "web": "bash bin/libresky",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:window": "node scripts/window-smoke.mjs",
+    "desktop": "bash scripts/install-desktop.sh",
+    "icon": "node scripts/write-icon.mjs"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
 }

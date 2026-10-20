@@ -24,6 +24,26 @@ export const AI_PERSONAS = {
  * Scans local AI endpoints (Ollama on 11434 and LM Studio on 1234).
  */
 export async function scanLocalAi() {
+  if (window.office?.ollamaStatus) {
+    try {
+      const status = await window.office.ollamaStatus();
+      if (status?.ok && (status.models || []).length) {
+        const models = status.models;
+        state.ai.connected = true;
+        state.ai.endpoint = status.host || 'http://127.0.0.1:11434';
+        state.ai.type = 'ollama';
+        state.ai.models = models;
+        if (!state.ai.activeModel || !models.includes(state.ai.activeModel)) {
+          state.ai.activeModel = status.chatModel || models[0];
+        }
+        saveAiSettings();
+        return { ok: true, endpoint: state.ai.endpoint, type: 'ollama', models, activeModel: state.ai.activeModel };
+      }
+    } catch {
+      /* fall through to browser scan */
+    }
+  }
+
   const endpoints = [
     { url: state.ai.endpoint || 'http://127.0.0.1:11434', type: 'ollama' },
     { url: 'http://localhost:11434', type: 'ollama' },
@@ -108,6 +128,12 @@ export async function streamChat(messages, onChunk, onDone) {
   state.ai.streaming = true;
 
   try {
+    if (window.office?.ollamaStart) {
+      const fullText = await streamViaOffice(fullMessages, onChunk);
+      state.ai.streaming = false;
+      if (onDone) onDone(fullText);
+      return fullText;
+    }
     if (state.ai.type === 'ollama') {
       const res = await fetch(`${state.ai.endpoint}/api/chat`, {
         method: 'POST',
@@ -200,6 +226,37 @@ export async function streamChat(messages, onChunk, onDone) {
 /**
  * One-shot query for post actions (summarize, explain, fact-check, smart reply).
  */
+function streamViaOffice(messages, onChunk) {
+  return new Promise((resolve, reject) => {
+    let fullText = '';
+    const off = window.office.on('ollama:event', (event) => {
+      if (event.type === 'text') {
+        fullText += event.data;
+        if (onChunk) onChunk(fullText, event.data);
+      } else if (event.type === 'error') {
+        off();
+        reject(new Error(event.message || 'The local model failed'));
+      } else if (event.type === 'exit') {
+        off();
+        if (event.cancelled && !fullText) reject(new Error('Cancelled'));
+        else resolve(fullText);
+      }
+    });
+    window.office.ollamaStart({
+      model: state.ai.activeModel,
+      messages,
+    }).then((res) => {
+      if (!res?.ok) {
+        off();
+        reject(new Error(res?.error || 'Ollama is not running on 127.0.0.1:11434.'));
+      }
+    }).catch((error) => {
+      off();
+      reject(error);
+    });
+  });
+}
+
 export async function queryAi(prompt, systemPrompt = null) {
   if (!state.ai.activeModel) {
     throw new Error('No local AI model available. Start Ollama with `ollama run writer` or `coder`.');
@@ -213,6 +270,10 @@ export async function queryAi(prompt, systemPrompt = null) {
     messages.push({ role: 'system', content: persona.prompt });
   }
   messages.push({ role: 'user', content: prompt });
+
+  if (window.office?.ollamaStart) {
+    return streamViaOffice(messages);
+  }
 
   if (state.ai.type === 'ollama') {
     const res = await fetch(`${state.ai.endpoint}/api/chat`, {

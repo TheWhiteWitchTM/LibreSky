@@ -4,37 +4,77 @@ import * as api from './api.js';
 import * as ai from './ai.js';
 import * as ui from './ui.js';
 
-document.addEventListener('DOMContentLoaded', initApp);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 async function initApp() {
-  // Apply Default Theme (Pitch Black)
-  setTheme(state.theme || 'black');
-
-  // Init UI Components
-  ui.initLightbox();
-  setupNavigation();
-  setupGrokPanel();
-  setupInlineComposer();
-  setupEventListeners();
-
-  // Route URL Hash
-  handleRoute();
-  window.addEventListener('hashchange', handleRoute);
-
-  // Background Local AI Scan
-  scanAndConnectAi();
-
-  // Background Notifications Check
-  if (state.session?.accessJwt) {
-    checkNotifications();
+  try {
+    await applyShell();
+    setTheme(state.theme || 'black');
+    ui.initLightbox();
+    setupNavigation();
+    setupGrokPanel();
+    setupInlineComposer();
+    setupEventListeners();
+    setupOfficeMenu();
+    handleRoute();
+    window.addEventListener('hashchange', handleRoute);
+    scanAndConnectAi();
+    if (state.session?.accessJwt) checkNotifications();
+  } catch (error) {
+    const splash = document.getElementById('splash');
+    if (splash) {
+      splash.hidden = false;
+      splash.innerHTML = `<pre class="splash-error">${String(error && error.stack || error)}</pre>`;
+    }
+    throw error;
   }
-  // Dismiss splash screen
+
   const splash = document.getElementById('splash');
-  if (splash) {
-    splash.style.opacity = '0';
-    splash.style.transition = 'opacity 0.25s ease';
-    setTimeout(() => splash.setAttribute('hidden', ''), 250);
+  if (splash) splash.hidden = true;
+  if (location.search.includes('smoke=1') && window.office) {
+    const started = Date.now();
+    while (Date.now() - started < 8000 && document.querySelectorAll('.post-card').length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    window.office.smokeReady();
   }
+}
+
+async function applyShell() {
+  if (!window.office) return;
+  document.documentElement.dataset.shell = 'office';
+  const info = await window.office.getInfo();
+  document.title = 'LibreOffice';
+  const splashTitle = document.getElementById('splash-title');
+  if (splashTitle) splashTitle.innerHTML = 'Libre<span style="color:var(--blue);">Office</span>';
+  document.querySelectorAll('.brand-title').forEach((el) => {
+    el.innerHTML = 'Libre<span class="accent">Office</span>';
+  });
+  document.querySelectorAll('.brand-sub').forEach((el) => {
+    el.textContent = 'Bluesky Client';
+  });
+  if (info?.settings?.theme) setTheme(info.settings.theme);
+  if (info?.settings?.grokOpen === false) state.grokOpen = false;
+  window.office.on('app:requestClose', () => window.office.closeResult(true));
+}
+
+function setupOfficeMenu() {
+  if (!window.office) return;
+  window.office.on('menu:command', (id) => {
+    if (id === 'auth.login') ui.openLoginModal();
+    else if (id === 'compose.open') ui.openComposerModal();
+    else if (id === 'view.timeline') window.location.hash = 'timeline';
+    else if (id === 'view.discover') window.location.hash = 'discover';
+    else if (id === 'view.search') window.location.hash = 'search';
+    else if (id === 'grok.toggle') document.getElementById('grok-sidebar')?.classList.toggle('collapsed');
+    else if (id === 'view.theme') setTheme(state.theme === 'light' ? 'black' : 'light');
+    else if (id === 'help.local') ui.openSettingsModal();
+    else if (id === 'help.about') ui.openAboutModal();
+  });
 }
 
 // ----------------- Route Handling -----------------
@@ -462,6 +502,7 @@ function setupGrokPanel() {
   const toggleBtn = document.getElementById('nav-ai-btn');
   const sidebar = document.getElementById('grok-sidebar');
   const closeBtn = document.getElementById('grok-close-btn');
+  if (sidebar && !state.grokOpen) sidebar.classList.add('collapsed');
   const modelSelect = document.getElementById('grok-model-select');
   const personaSelect = document.getElementById('grok-persona-select');
   const input = document.getElementById('grok-prompt-input');
@@ -471,6 +512,7 @@ function setupGrokPanel() {
   toggleBtn.addEventListener('click', () => {
     sidebar.classList.toggle('collapsed');
     state.grokOpen = !sidebar.classList.contains('collapsed');
+    if (window.office?.settingsSet) window.office.settingsSet({ grokOpen: state.grokOpen });
   });
 
   if (closeBtn) {

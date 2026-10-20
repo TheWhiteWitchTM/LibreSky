@@ -6,13 +6,12 @@
   <title>LibreSky — Sovereign Bluesky Client</title>
   <meta name="description" content="Sovereign Bluesky client with dark theme and local AI assistant.">
   <link rel="stylesheet" href="./css/styles.css">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e7c98a' d='M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg">
 </head>
 <body>
-  <!-- Splash Screen -->
-  <div id="splash" style="position:fixed;inset:0;display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;background:var(--bg);z-index:999;">
+  <div id="splash">
     <div class="spark large pulse"></div>
-    <strong style="font-size:20px;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
+    <strong id="splash-title" style="font-size:20px;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
       Libre<span style="color:var(--blue);">Sky</span>
     </strong>
     <span class="dim" style="font-size:12px;font-family:var(--mono);">Initializing sovereign ATProto client...</span>
