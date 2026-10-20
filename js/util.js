@@ -94,8 +94,15 @@ function textHtml(value, breaks) {
   return breaks === false ? html : html.replace(/\n/g, '<br>');
 }
 
+const AI_TAG_SOURCE = '(^|\\s)@(ai|si)(?![A-Za-z0-9_-])(?!\\.[A-Za-z0-9])';
+
+export function aiTag(text) {
+  return new RegExp(AI_TAG_SOURCE, 'i').test(String(text || ''));
+}
+
 function facetKind(feature) {
   const type = String(feature?.$type || '');
+  if (type.endsWith('#ai')) return 'ai';
   if (type.endsWith('#mention')) return 'mention';
   if (type.endsWith('#tag')) return 'tag';
   if (type.endsWith('#link')) return 'link';
@@ -104,6 +111,7 @@ function facetKind(feature) {
 
 function featureHtml(slice, features, links, breaks) {
   const html = textHtml(slice, breaks);
+  const ai = features.find((feature) => facetKind(feature) === 'ai');
   const mention = features.find((feature) => facetKind(feature) === 'mention');
   const tag = features.find((feature) => facetKind(feature) === 'tag');
   const link = features.find((feature) => facetKind(feature) === 'link');
@@ -113,6 +121,7 @@ function featureHtml(slice, features, links, breaks) {
     const extra = external ? ' target="_blank" rel="noopener noreferrer"' : '';
     return `<a class="facet ${className}" href="${escapeHtml(href)}"${extra}>${html}</a>`;
   };
+  if (ai) return wrap('ai', '#/ai', false);
   if (mention?.did) return wrap('mention', profileHash(mention.did), false);
   if (tag?.tag) return wrap('tag', `#/search/${encodeURIComponent(`#${tag.tag}`)}`, false);
   const href = link?.uri ? safeUrl(link.uri) : '';
@@ -134,8 +143,16 @@ function syntheticMarks(source) {
     if (end <= start || overlaps(marks, start, end)) return;
     marks.push({ start, end, features });
   };
+  const aiRe = new RegExp(AI_TAG_SOURCE, 'gi');
+  let match = aiRe.exec(source);
+  while (match) {
+    const at = match.index + match[1].length;
+    const start = byteAt(source, at);
+    take(start, start + encoder.encode(`@${match[2]}`).length, [{ $type: 'libresky.richtext#ai' }]);
+    match = aiRe.exec(source);
+  }
   const linkRe = /https?:\/\/[^\s<>"']+/g;
-  let match = linkRe.exec(source);
+  match = linkRe.exec(source);
   while (match) {
     const raw = trimLink(match[0]);
     const start = byteAt(source, match.index);
@@ -146,7 +163,7 @@ function syntheticMarks(source) {
   match = mentionRe.exec(source);
   while (match) {
     const handle = match[2].replace(/[._-]+$/g, '');
-    if (handle) {
+    if (handle && !/^(ai|si)$/i.test(handle)) {
       const at = match.index + match[1].length;
       const start = byteAt(source, at);
       take(start, start + encoder.encode(`@${handle}`).length, [{ $type: 'app.bsky.richtext.facet#mention', did: handle }]);

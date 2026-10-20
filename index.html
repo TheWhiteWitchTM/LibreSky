@@ -95,10 +95,9 @@
       <a class="nav-link" data-nav="bookmarks" href="#/bookmarks" aria-label="Bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
       <a class="nav-link" data-nav="profile" href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
       <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
-      <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI" data-tip="Coming soon">
+      <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8 13.6 8 19 9.2 13.6 10.8 12 16.2 10.4 10.8 5 9.2 10.4 8 12 2.8zm6.2 9.2.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></svg>
         <span class="label">AI</span>
-        <span class="nav-pill">Soon</span>
       </a>
       <button type="button" class="nav-link" id="more-btn" data-nav="more" data-act="nav-more" aria-label="More">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.75a9.25 9.25 0 1 0 0 18.5 9.25 9.25 0 0 0 0-18.5zm0 2.15a7.1 7.1 0 1 1 0 14.2 7.1 7.1 0 0 1 0-14.2z"/><circle cx="8.15" cy="12" r="1.35" fill="currentColor"/><circle cx="12" cy="12" r="1.35" fill="currentColor"/><circle cx="15.85" cy="12" r="1.35" fill="currentColor"/></svg>
@@ -314,6 +313,7 @@
       </ul>
       <p class="about-facts">Talks to the Bluesky API.
 Sign in with Bluesky happens on Bluesky’s page.
+An AI account you save is asked from this browser.
 Source is on GitHub.</p>
     </form>
   </dialog>
@@ -329,6 +329,7 @@ Source is on GitHub.</p>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
         <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. Muted words (libresky.mutedWords) and an unsent post draft (libresky.draft) stay in this browser too.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
+        <p>An AI account (libresky.ai) stays in this browser. The key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, or Check.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>
       </article>
       <article id="legal-terms" hidden>
@@ -336,6 +337,7 @@ Source is on GitHub.</p>
         <p>LibreSky is an independent client for Bluesky and the AT Protocol. It is not the official Bluesky app. You need a Bluesky account, and Bluesky’s own rules still apply to that account.</p>
         <p>The app is provided as is, under the MIT License. Do not use it to break the law or Bluesky’s rules.</p>
         <p>Voice and video calls connect two LibreSky browsers. Both people need this app open. A strict network can block the call.</p>
+        <p>If you add an AI account, questions you ask with @ai, @si, or the AI page are sent to that provider. LibreSky is not the provider.</p>
       </article>
     </form>
   </dialog>

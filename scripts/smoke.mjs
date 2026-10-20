@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callConvoHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { prepareAi, replyText } from '../js/ai.js';
+import { assistantHtml, callConvoHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
+import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -28,6 +29,50 @@ assert.match(plain, /href="#\/search\/%23Bluesky"/);
 const composer = richText('Hey @jay.bsky.team', null, { links: false, breaks: false });
 assert.match(composer, /<span class="facet mention">/);
 assert.doesNotMatch(composer, /<a /);
+const composerAi = richText('Hey @ai.', null, { links: false, breaks: false });
+assert.match(composerAi, /<span class="facet ai">@ai</);
+assert.doesNotMatch(composerAi, /<a /);
+const taggedLine = richText('Ask @AI and @jay.bsky.team');
+assert.match(taggedLine, /class="facet ai"/);
+assert.match(taggedLine, /href="#\/ai"/);
+assert.match(taggedLine, /class="facet mention"/);
+assert.doesNotMatch(richText('@aim and @ai.bsky.social'), /facet ai/);
+assert.match(richText('@ai.bsky.social'), /facet mention/);
+assert.equal(aiTag('hey @si'), true);
+assert.equal(aiTag('@AI please'), true);
+assert.equal(aiTag('a@ai.com'), false);
+assert.equal(aiTag('@aim'), false);
+const grokAccount = prepareAi({ provider: 'grok', base: 'https://evil.example/v1', apiKey: 'xai-test-key-123' });
+assert.equal(grokAccount.model, 'grok-4.7');
+assert.equal(grokAccount.base, 'https://api.x.ai/v1');
+assert.equal(grokAccount.kind, 'responses');
+const localAccount = prepareAi({ provider: 'custom', model: 'llama', base: 'http://127.0.0.1:11434/v1/chat/completions', apiKey: 'local-key-1234' });
+assert.equal(localAccount.base, 'http://127.0.0.1:11434/v1');
+try {
+  prepareAi({ provider: 'custom', model: 'm', base: 'http://evil.example/v1', apiKey: 'super-secret-key' });
+  assert.fail('plain http should be refused');
+} catch (error) {
+  assert.match(error.message, /https/);
+  assert.equal(error.message.includes('super-secret-key'), false);
+}
+assert.equal(replyText({ output_text: ' hello ' }), 'hello');
+assert.equal(replyText({
+  output: [
+    { type: 'reasoning', content: [{ type: 'output_text', text: 'think' }] },
+    { type: 'message', content: [{ type: 'output_text', text: 'done' }] },
+  ],
+}), 'done');
+assert.equal(replyText({ choices: [{ message: { content: 'ok' } }] }), 'ok');
+assert.equal(replyText({ candidates: [{ content: { parts: [{ thought: true, text: 'hmm' }, { text: 'yes' }] } }] }), 'yes');
+assert.throws(() => replyText({ error: { message: 'bad key' } }), /bad key/);
+const assist = assistantHtml('Hello @ai', { id: '1', actions: true, kicker: 'Not sent · your account' });
+assert.match(assist, /Not sent/);
+assert.match(assist, /data-act="send-ai"/);
+assert.match(assist, /facet ai/);
+assert.doesNotMatch(assist, /<script/i);
+const taggedChat = messageHtml({ text: 'ping @ai', sender: { did: 'did:me' } }, 'did:me');
+assert.match(taggedChat, /href="#\/ai"/);
+assert.doesNotMatch(taggedChat, /profile\/ai/);
 
 const notes = [
   { reason: 'follow', author: { did: 'did:a', handle: 'a.bsky.social', displayName: 'Ada' }, indexedAt: '2026-10-20T00:00:00.000Z', isRead: false },
@@ -184,7 +229,8 @@ assert.match(metadata.scope, /atproto/);
 assert.match(metadata.scope, /transition:generic/);
 assert.ok(metadata.redirect_uris.every((uri) => uri.startsWith('https://')));
 
-const banned = [/grok/i, /ollama/i, /\belectron\b/i, /emoji-engine/i, /white witch/i, /modelfile/i, /\bretro\b/i];
+const banned = [/ollama/i, /\belectron\b/i, /emoji-engine/i, /white witch/i, /modelfile/i, /\bretro\b/i];
+const grokAllowed = new Set(['js/ai.js', 'js/app.js', 'README.md']);
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -198,9 +244,11 @@ async function walk(dir) {
 }
 for (const file of await walk(root)) {
   const body = await readFile(file, 'utf8');
+  const name = path.relative(root, file);
   for (const pattern of banned) {
-    assert.doesNotMatch(body, pattern, `${path.relative(root, file)} matches ${pattern}`);
+    assert.doesNotMatch(body, pattern, `${name} matches ${pattern}`);
   }
+  if (!grokAllowed.has(name)) assert.doesNotMatch(body, /grok/i, `${name} matches /grok/i`);
 }
 
 const index = await readFile(path.join(root, 'index.html'), 'utf8');
@@ -290,7 +338,13 @@ assert.doesNotMatch(appSource, /paintCallTools/);
 const moreMenu = appSource.slice(appSource.indexOf('const MORE_LINKS'), appSource.indexOf('function openMoreMenu'));
 assert.match(moreMenu, /go-lists/);
 assert.doesNotMatch(moreMenu, /go-bookmarks|go-ai|go-calls/);
-assert.match(appSource, /Coming soon/);
+assert.doesNotMatch(appSource, /Coming soon/);
+assert.match(appSource, /@ai and @si/);
+assert.match(appSource, /id="ai-form"/);
+assert.match(appSource, /rows="3"/);
+assert.match(index, /libresky\.ai/);
+assert.match(await readFile(path.join(root, 'js/ai.js'), 'utf8'), /libresky\.ai/);
+assert.doesNotMatch(index, /nav-pill/);
 assert.match(index, /id="about"/);
 assert.match(index, /id="legal-privacy"/);
 assert.match(index, /id="legal-terms"/);

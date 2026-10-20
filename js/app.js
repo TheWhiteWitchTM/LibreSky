@@ -11,6 +11,7 @@ import {
   emptyHtml,
   feedHtml,
   linkPreviewHtml,
+  assistantHtml,
   messageHtml,
   notificationsHtml,
   packHtml,
@@ -41,7 +42,8 @@ import {
   setPassword,
   signedIn,
 } from './session.js';
-import { accountGone, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseHash, profileHash, richText } from './util.js';
+import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, providerById, saveAi } from './ai.js';
+import { accountGone, aiTag, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseHash, profileHash, richText } from './util.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -647,7 +649,7 @@ async function showMessages(convoId) {
     const messages = (data.messages || []).slice().reverse();
     const other = otherMember(convoWrap?.convo, messages);
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
     paintCallBanner(messages, other?.did || '');
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -1105,6 +1107,101 @@ function accountListHtml() {
   }).join('');
 }
 
+const aiDrafts = new Map();
+let aiThread = [];
+let aiSeq = 0;
+
+function aiSettingsHtml() {
+  const saved = loadAi();
+  const provider = saved?.provider || 'grok';
+  const known = providerById(provider);
+  const model = saved?.model || known.model || '';
+  const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
+  const keyHint = saved ? 'Saved on this browser. Type a new key to replace it.' : 'Paste the key from that account';
+  const status = saved
+    ? `${known.label} is saved on this browser${saved.model ? ` · ${saved.model}` : ''}.`
+    : 'No AI account on this browser yet.';
+  const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
+  return `<p class="dim">Bring your own account. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
+    <form id="ai-form" class="ai-form">
+      <label>Provider
+        <select id="ai-provider">${options}</select>
+      </label>
+      <label>Model
+        <input id="ai-model" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="80" spellcheck="false" autocapitalize="off" autocomplete="off">
+      </label>
+      <label id="ai-base-label"${provider === 'custom' ? '' : ' hidden'}>API address
+        <input id="ai-base" value="${escapeHtml(provider === 'custom' ? (saved?.base || '') : '')}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://example.com/v1">
+      </label>
+      <label>API key
+        <input id="ai-key" type="password" maxlength="2000" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(keyHint)}">
+      </label>
+      <div class="toolbar">
+        <button class="primary small" type="submit">Save</button>
+        <button type="button" class="text-btn" id="ai-check" data-act="ai-check">Check</button>
+        ${remove}
+      </div>
+      <p class="dim" id="ai-status">${escapeHtml(status)}</p>
+    </form>
+    <p class="dim">Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. Gemini uses a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+}
+
+function readAiForm() {
+  const saved = loadAi();
+  const typed = $('ai-key')?.value || '';
+  return prepareAi({
+    provider: $('ai-provider')?.value || 'grok',
+    model: $('ai-model')?.value || '',
+    base: $('ai-base')?.value || '',
+    apiKey: typed.trim() || saved?.apiKey || '',
+  });
+}
+
+function syncAiFields() {
+  const select = $('ai-provider');
+  const model = $('ai-model');
+  if (!select || !model) return;
+  const item = providerById(select.value);
+  const baseLabel = $('ai-base-label');
+  if (baseLabel) baseLabel.hidden = item.id !== 'custom';
+  const current = model.value.trim();
+  const known = AI_PROVIDERS.some((provider) => provider.model && provider.model === current);
+  if (model.dataset.auto === '1' || !current || known) {
+    model.value = item.model || '';
+    model.dataset.auto = '1';
+  }
+}
+
+function saveAiForm(event) {
+  event.preventDefault();
+  try {
+    const next = saveAi(readAiForm());
+    toast(`${providerById(next.provider).label} saved on this browser`);
+    if (parseHash()[0] === 'settings') showSettings();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function checkAiForm() {
+  const button = $('ai-check');
+  let account;
+  try { account = readAiForm(); } catch (error) { toast(error.message); return; }
+  if (button) button.disabled = true;
+  try {
+    await askAi(account, [
+      { role: 'system', content: AI_SYSTEM },
+      { role: 'user', content: 'Reply with ok.' },
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
+    toast(`${providerById(account.provider).label} replied.`);
+  } catch (error) {
+    if (error?.name === 'AbortError') toast('The account took too long.');
+    else toast(error.message || 'The account did not answer.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
 function showSettings() {
   generation += 1;
   const token = generation;
@@ -1134,6 +1231,8 @@ function showSettings() {
       <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
       <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
     </div>
+    <h2>AI</h2>
+    ${aiSettingsHtml()}
     <h2>Muted words</h2>
     <p class="dim">Posts containing these words are collapsed in your feeds on this browser.</p>
     <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
@@ -1215,7 +1314,69 @@ async function loadBlockedAccounts(token = generation) {
 function showAi() {
   generation += 1;
   setChrome({ title: 'AI', nav: 'ai', back: true });
-  $('view').innerHTML = `<section class="settings"><h2>Coming soon</h2><p class="dim">This is where the LibreSky helper will open. Nothing you type here is sent to a model yet.</p></section>`;
+  const saved = loadAi();
+  const ready = aiReady(saved);
+  const known = providerById(saved?.provider);
+  const status = ready
+    ? `${known.label} is ready${saved.model ? ` · ${saved.model}` : ''}. A question goes from this browser to that account.`
+    : 'No account yet. Add one in Settings. Nothing is sent until you do.';
+  const turns = aiThread.map((turn) => (turn.role === 'assistant'
+    ? assistantHtml(turn.content, { kicker: 'Your account' })
+    : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
+  $('view').innerHTML = `<section class="settings ai-doc">
+    <h2>Your account</h2>
+    <p>${escapeHtml(status)}</p>
+    <p><a class="text-link" href="#/settings">Open AI in Settings</a></p>
+    <h2>@ai and @si</h2>
+    <p>@ai and @si are the same tag. They are not Bluesky accounts, and they do not mention a person.</p>
+    <p>In a chat, a message that contains @ai or @si asks the account you saved. That message is not sent to the other person. The question stays in the box. The answer stays on this screen until you press Send, which posts it into the chat as you. Edit puts the answer in the box. Dismiss drops it.</p>
+    <p>On this page the tag is optional. Ask sends the box to the same account. Those replies stay here until you reload.</p>
+    <p>A tag in a post is only a highlight. Posting does not call the model.</p>
+    <p>Grok, Gemini, OpenAI, or another OpenAI-style account all use the same tags. LibreSky does not keep a copy of the key. A question is sent only when you ask, and only to the provider you chose.</p>
+    <h2>Ask</h2>
+    <div class="messages ai-thread">${turns}</div>
+    <form class="reply-bar ai-ask" id="ai-ask">
+      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask @ai or @si"></textarea></div>
+      <button class="primary small" type="submit">Ask</button>
+      <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
+    </form>
+  </section>`;
+  const area = $('ai-text');
+  paintFieldHighlight(area, $('ai-highlight'));
+  fitChatInput(area);
+}
+
+async function askOnPage(text) {
+  const saved = loadAi();
+  if (!aiReady(saved)) {
+    toast('Add an AI account in Settings to use @ai and @si.');
+    return;
+  }
+  const area = $('ai-text');
+  const button = area?.form?.querySelector('button[type="submit"]');
+  if (area) area.disabled = true;
+  if (button) button.disabled = true;
+  const seq = ++aiSeq;
+  try {
+    const prior = aiThread.slice(-8).map((turn) => ({ role: turn.role, content: turn.content }));
+    const answer = await askAi(saved, [
+      { role: 'system', content: AI_SYSTEM },
+      ...prior,
+      { role: 'user', content: text },
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
+    if (seq !== aiSeq) return;
+    aiThread = [...aiThread, { role: 'user', content: text }, { role: 'assistant', content: answer }].slice(-40);
+    if (parseHash()[0] === 'ai') showAi();
+  } catch (error) {
+    if (seq !== aiSeq) return;
+    if (error?.name === 'AbortError') toast('The account took too long.');
+    else toast(error.message || 'The account did not answer.');
+    if (area?.isConnected) {
+      area.disabled = false;
+      area.focus();
+    }
+    if (button?.isConnected) button.disabled = false;
+  }
 }
 
 async function showCalls() {
@@ -1542,10 +1703,29 @@ function scheduleSuggest(area) {
   suggestTimer = setTimeout(() => refreshSuggest(area), 180);
 }
 
+function aiSuggestRows(query) {
+  const q = String(query || '').toLowerCase();
+  const rows = [];
+  if ('ai'.startsWith(q)) rows.push(suggestRow(rows.length, '@ai', `AI<span class="handle">@ai · your account</span>`));
+  if ('si'.startsWith(q)) rows.push(suggestRow(rows.length, '@si', `AI<span class="handle">@si · your account</span>`));
+  return rows;
+}
+
+function paintSuggest(area, rows) {
+  const box = $('suggest');
+  if (!box || !rows.length) return hideSuggest();
+  box.innerHTML = rows.join('');
+  box.querySelectorAll('button').forEach((button, index) => button.classList.toggle('on', index === 0));
+  suggestArea = area;
+  showSuggest(box, area);
+}
+
 async function refreshSuggest(area) {
   if (!area?.isConnected) return hideSuggest();
   const token = caretToken(area.value, area.selectionStart);
-  if (!token || token.query.length < 1) return hideSuggest();
+  if (!token) return hideSuggest();
+  const leads = token.sigil === '@' ? aiSuggestRows(token.query) : [];
+  if (token.query.length < 1) return paintSuggest(area, leads);
   const seq = ++suggestSeq;
   const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
   try {
@@ -1557,13 +1737,11 @@ async function refreshSuggest(area) {
     const rows = token.sigil === '@'
       ? items.slice(0, 6).map((actor, index) => suggestRow(index, `@${actor.handle}`, `${escapeHtml(actor.displayName || actor.handle)}<span class="handle">@${escapeHtml(actor.handle || '')}</span>`))
       : items.slice(0, 6).map((tag, index) => suggestRow(index, `#${tag}`, `#${escapeHtml(tag)}`));
-    const box = $('suggest');
-    if (!box || !rows.length) return hideSuggest();
-    box.innerHTML = rows.join('');
-    suggestArea = area;
-    showSuggest(box, area);
+    paintSuggest(area, [...leads, ...rows].slice(0, 8));
   } catch {
-    if (seq === suggestSeq) hideSuggest();
+    if (seq !== suggestSeq) return;
+    if (leads.length && document.activeElement === area) paintSuggest(area, leads);
+    else hideSuggest();
   }
 }
 
@@ -2051,8 +2229,110 @@ function fitChatInput(box) {
   if (!box) return;
   box.style.height = 'auto';
   const full = box.scrollHeight;
-  box.style.height = `${Math.min(full, 160)}px`;
-  box.style.overflowY = full > 160 ? 'auto' : 'hidden';
+  const next = Math.min(Math.max(full, 96), 280);
+  box.style.height = `${next}px`;
+  box.style.overflowY = full > 280 ? 'auto' : 'hidden';
+}
+
+function chatLines() {
+  return [...document.querySelectorAll('#view .messages .bubble')].slice(-8).map((node) => {
+    const who = node.classList.contains('assistant') ? 'Assistant' : (node.classList.contains('mine') ? 'You' : 'Them');
+    const text = node.querySelector('p')?.textContent || '';
+    return text ? `${who}: ${text}` : '';
+  }).filter(Boolean).join('\n').slice(0, 4000);
+}
+
+async function deliverChat(convoId, text) {
+  const sent = await api.sendMessage(convoId, text);
+  const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
+  if (!message.sender) message.sender = { did: myDid() };
+  if (!message.text) message.text = text;
+  const list = $('view').querySelector('.messages');
+  list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
+  if (list) list.scrollTop = list.scrollHeight;
+  api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
+}
+
+function appendAssistant(text) {
+  const id = `ai-${Date.now()}`;
+  aiDrafts.set(id, text);
+  const list = $('view').querySelector('.messages');
+  list?.insertAdjacentHTML('beforeend', assistantHtml(text, { id, kicker: 'Not sent · your account', actions: true }));
+  if (list) list.scrollTop = list.scrollHeight;
+}
+
+async function askInChat(input, text) {
+  const saved = loadAi();
+  if (!aiReady(saved)) {
+    toast('Add an AI account in Settings to use @ai and @si.');
+    return;
+  }
+  const button = input.form?.querySelector('button[type="submit"]');
+  input.disabled = true;
+  if (button) button.disabled = true;
+  const recent = chatLines();
+  try {
+    const answer = await askAi(saved, [
+      { role: 'system', content: AI_SYSTEM },
+      { role: 'user', content: recent ? `Recent chat:\n${recent}\n\nQuestion:\n${text}` : text },
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
+    if (parseHash()[0] !== 'messages') return;
+    appendAssistant(answer);
+  } catch (error) {
+    if (error?.name === 'AbortError') toast('The account took too long.');
+    else toast(error.message || 'The account did not answer.');
+  } finally {
+    if (input.isConnected) {
+      input.disabled = false;
+      input.focus();
+    }
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+function chatSized(text) {
+  const value = String(text || '').trim();
+  if (value.length <= 1000) return { text: value, trimmed: false };
+  const cut = value.slice(0, 1000);
+  const line = cut.lastIndexOf('\n');
+  return { text: (line > 700 ? cut.slice(0, line) : cut).trim(), trimmed: true };
+}
+
+function onAiDraft(act, id) {
+  const text = aiDrafts.get(id) || '';
+  const bubble = [...document.querySelectorAll('.bubble.assistant')].find((node) => node.dataset.ai === id);
+  if (act === 'dismiss-ai') {
+    aiDrafts.delete(id);
+    bubble?.remove();
+    return;
+  }
+  if (!text) return;
+  if (act === 'insert-ai') {
+    const area = $('chat-text');
+    if (!area) return;
+    const sized = chatSized(text);
+    area.value = sized.text;
+    paintFieldHighlight(area, $('chat-highlight'));
+    fitChatInput(area);
+    area.focus();
+    if (sized.trimmed) toast('The reply is longer than a chat message, so the box has the first part.');
+    return;
+  }
+  if (act !== 'send-ai') return;
+  const [page, convoId] = parseHash();
+  if (page !== 'messages' || !convoId) return;
+  const sized = chatSized(text);
+  if (!sized.text) return;
+  const button = bubble?.querySelector('[data-act="send-ai"]');
+  if (button) button.disabled = true;
+  deliverChat(convoId, sized.text).then(() => {
+    aiDrafts.delete(id);
+    bubble?.remove();
+    if (sized.trimmed) toast('Sent the first part. A chat message stops at 1000 characters.');
+  }).catch((error) => {
+    toast(error.message);
+    if (button?.isConnected) button.disabled = false;
+  });
 }
 
 function openManage({ mode, uri = '', title, name = '', description = '', purpose = '' }) {
@@ -2663,6 +2943,23 @@ async function onClick(event) {
     return;
   }
   if (act === 'new-chat') return newChat();
+  if (act === 'send-ai' || act === 'insert-ai' || act === 'dismiss-ai') {
+    event.preventDefault();
+    onAiDraft(act, event.target.closest('[data-ai]')?.dataset.ai || '');
+    return;
+  }
+  if (act === 'ai-clear') {
+    event.preventDefault();
+    clearAi();
+    toast('AI account removed from this browser');
+    if (parseHash()[0] === 'settings') showSettings();
+    return;
+  }
+  if (act === 'ai-check') {
+    event.preventDefault();
+    checkAiForm();
+    return;
+  }
   if (act === 'thread-reply') {
     const item = posts.get(event.target.closest('[data-uri]')?.dataset.uri);
     if (item?.post) openComposer({ reply: item.post });
@@ -3486,21 +3783,31 @@ function bind() {
       const input = $('chat-text');
       const text = input.value.trim();
       const id = parseHash()[1];
-      if (!text || !id) return;
+      if (!text || !id || input.disabled) return;
+      if (aiTag(text)) {
+        askInChat(input, text);
+        return;
+      }
       input.disabled = true;
-      api.sendMessage(id, text).then((sent) => {
+      deliverChat(id, text).then(() => {
         input.value = '';
         paintFieldHighlight(input, $('chat-highlight'));
         fitChatInput(input);
-        const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
-        if (!message.sender) message.sender = { did: myDid() };
-        if (!message.text) message.text = text;
-        const list = $('view').querySelector('.messages');
-        list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
-        if (list) list.scrollTop = list.scrollHeight;
-        api.markConvoRead(id).then(refreshBadge).catch(() => {});
-      }).catch((error) => toast(error.message)).finally(() => { input.disabled = false; input.focus(); });
+      }).catch((error) => toast(error.message)).finally(() => {
+        if (input.isConnected) {
+          input.disabled = false;
+          input.focus();
+        }
+      });
     }
+    if (event.target.id === 'ai-ask') {
+      event.preventDefault();
+      const input = $('ai-text');
+      const text = input?.value.trim();
+      if (!text || input.disabled) return;
+      askOnPage(text);
+    }
+    if (event.target.id === 'ai-form') saveAiForm(event);
     if (event.target.id === 'pack-form') {
       event.preventDefault();
       const q = $('pack-q')?.value.trim();
@@ -3544,13 +3851,16 @@ function bind() {
     }
   });
   $('view').addEventListener('keyup', (event) => {
-    if (event.target.id === 'chat-text') scheduleSuggest(event.target);
+    if (event.target.id === 'chat-text' || event.target.id === 'ai-text') scheduleSuggest(event.target);
   });
   $('view').addEventListener('click', (event) => {
-    if (event.target.id === 'chat-text') scheduleSuggest(event.target);
+    if (event.target.id === 'chat-text' || event.target.id === 'ai-text') scheduleSuggest(event.target);
+  });
+  $('view').addEventListener('change', (event) => {
+    if (event.target.id === 'ai-provider') syncAiFields();
   });
   $('view').addEventListener('keydown', (event) => {
-    if (event.target.id !== 'chat-text') return;
+    if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     if (onSuggestKey(event)) return;
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     if (matchMedia('(pointer: coarse)').matches) return;
@@ -3558,14 +3868,18 @@ function bind() {
     if (!event.target.disabled) event.target.form?.requestSubmit();
   });
   $('view').addEventListener('input', (event) => {
-    if (event.target.id !== 'chat-text') return;
+    if (event.target.id === 'ai-model') {
+      event.target.dataset.auto = '0';
+      return;
+    }
+    if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     fitChatInput(event.target);
-    paintFieldHighlight(event.target, $('chat-highlight'));
+    paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
     scheduleSuggest(event.target);
   });
   $('view').addEventListener('scroll', (event) => {
-    if (event.target.id !== 'chat-text') return;
-    paintFieldHighlight(event.target, $('chat-highlight'));
+    if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
+    paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
     const box = $('suggest');
     if (box && !box.hidden && suggestArea === event.target) showSuggest(box, event.target);
   }, true);
@@ -3616,7 +3930,7 @@ function bind() {
   });
   window.addEventListener('scroll', (event) => {
     const target = event.target;
-    if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text') return;
+    if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text' || target?.id === 'ai-text') return;
     hideSuggest();
   }, true);
   bindTips();

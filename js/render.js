@@ -444,6 +444,14 @@ export function messageHtml(message, me) {
   return `<div class="bubble${mine ? ' mine' : ''}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
 }
 
+export function assistantHtml(text, { id = '', kicker = 'Your account', actions = false } = {}) {
+  const marker = id ? ` data-ai="${attr(id)}"` : '';
+  const buttons = actions
+    ? `<div class="ai-actions"><button type="button" class="primary small" data-act="send-ai" data-ai="${attr(id)}">Send</button><button type="button" class="text-btn mini" data-act="insert-ai" data-ai="${attr(id)}">Edit</button><button type="button" class="text-btn mini" data-act="dismiss-ai" data-ai="${attr(id)}">Dismiss</button></div>`
+    : '';
+  return `<div class="bubble assistant"${marker}><span class="ai-kicker">${escapeHtml(kicker)}</span><p>${richText(text)}</p>${buttons}</div>`;
+}
+
 function callButton(act, label, glyph, peer) {
   const prominent = label.startsWith('Video');
   return `<button type="button" class="call-btn${prominent ? ' video' : ''}" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
