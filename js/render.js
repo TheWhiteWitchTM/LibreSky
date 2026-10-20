@@ -146,6 +146,61 @@ function recordNode(node) {
   return node;
 }
 
+export function collectionKind(record) {
+  const type = String(record?.$type || '');
+  const uri = String(record?.uri || '');
+  if (type.includes('starterPack') || uri.includes('/app.bsky.graph.starterpack/')) return 'pack';
+  if (type.includes('generatorView') || uri.includes('/app.bsky.feed.generator/')) return 'feed';
+  if (type.includes('labelerView') || uri.includes('/app.bsky.labeler.service/')) return 'labeler';
+  if (type.endsWith('listView') || type.endsWith('listViewBasic') || uri.includes('/app.bsky.graph.list/')) return 'list';
+  return '';
+}
+
+function collectionLabel(kind, record) {
+  if (kind === 'feed') return 'Feed';
+  if (kind === 'pack') return 'Starter pack';
+  if (kind === 'labeler') return 'Labeler';
+  const purpose = String(record?.purpose || '');
+  if (purpose.includes('modlist')) return 'Mute list';
+  if (purpose.includes('referencelist')) return 'Reference list';
+  return 'List';
+}
+
+export function collectionCardHtml(record, options = {}) {
+  const kind = options.kind || collectionKind(record);
+  if (!kind || !record?.uri) return '';
+  const creator = record.creator || record.author || {};
+  const inner = record.record && record.record.text == null ? record.record : null;
+  const name = kind === 'pack'
+    ? (inner?.name || record.name || 'Starter pack')
+    : kind === 'list'
+      ? (record.name || 'List')
+      : kind === 'labeler'
+        ? (creator.displayName || creator.handle || 'Labeler')
+        : (record.displayName || record.name || 'Feed');
+  const description = String(record.description || inner?.description || '').replace(/\s+/g, ' ').trim();
+  const handle = creator.handle ? `@${creator.handle}` : '';
+  const bits = [collectionLabel(kind, record), handle];
+  const people = record.listItemCount ?? record.list?.listItemCount;
+  if ((kind === 'list' || kind === 'pack') && people != null) bits.push(`${fullCount(people)} people`);
+  if (kind === 'feed' && record.likeCount) bits.push(`${fullCount(record.likeCount)} likes`);
+  const href = kind === 'feed'
+    ? `#/feed/${encodeURIComponent(record.uri)}`
+    : kind === 'list'
+      ? `#/list/${encodeURIComponent(record.uri)}`
+      : kind === 'pack'
+        ? `#/pack/${encodeURIComponent(record.uri)}`
+        : profileHash(creator);
+  const body = `<span class="collection-copy"><span class="domain">${escapeHtml(bits.filter(Boolean).join(' · '))}</span><strong>${escapeHtml(name)}</strong>${description ? `<span class="desc">${escapeHtml(description)}</span>` : ''}</span>`;
+  const face = avatar(record.avatar || creator.avatar, name);
+  if (options.button) {
+    return `<button type="button" class="collection" data-act="attach-pick" data-uri="${attr(record.uri)}" data-cid="${attr(record.cid || '')}">${face}${body}</button>`;
+  }
+  const card = `<a class="collection" href="${attr(href)}">${face}${body}</a>`;
+  if (!options.remove) return card;
+  return `<div class="collection-wrap">${card}<button type="button" class="card-dismiss" data-act="dismiss-attach" aria-label="Remove">×</button></div>`;
+}
+
 function quote(view, linked = true) {
   const record = recordNode(view);
   if (!record) return '';
@@ -153,6 +208,8 @@ function quote(view, linked = true) {
   if (type.endsWith('NotFound') || type.endsWith('Blocked') || type.endsWith('Detached')) {
     return '<div class="quote unavailable">Post unavailable</div>';
   }
+  const attached = collectionCardHtml(record);
+  if (attached) return attached;
   if (type.endsWith('viewRecord') || record.value?.text != null || record.record?.text != null || record.author) {
     const author = record.author || {};
     const text = record.value?.text ?? record.record?.text ?? '';

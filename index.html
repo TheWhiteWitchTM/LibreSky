@@ -124,6 +124,7 @@
         </div>
         <div class="tabs" id="tabs" hidden></div>
       </header>
+      <button type="button" id="fresh" class="fresh" data-act="fresh-update" hidden aria-live="polite"></button>
       <div id="view" aria-live="polite"></div>
     </main>
 
@@ -192,6 +193,7 @@
             <textarea id="compose-text" rows="8" placeholder="What's up?" maxlength="2000" spellcheck="true"></textarea>
           </div>
           <div id="compose-link" hidden></div>
+          <div id="compose-attach" hidden></div>
           <div id="compose-previews"></div>
           <div id="compose-video" hidden></div>
         </div>
@@ -224,9 +226,29 @@
           <button type="button" class="icon-btn" data-act="gif" aria-label="GIF" data-tip="GIF">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M6.2 9.1h2.3v1.15H7.35v.7h1.05v1H7.35V15H6.2V9.1zm3.35 0h2.55v1.15h-1.4V15H9.55V9.1zm3.7 0h2.7v1.15h-1.55v.85h1.4v1.05h-1.4V15h-1.15V9.1z"/></svg>
           </button>
+          <button type="button" class="icon-btn" data-act="attach" aria-label="Attach a feed, list, or starter pack" data-tip="Feed, list, or pack">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5.2h16v2.1H4V5.2zm0 5.7h16v2.1H4v-2.1zm0 5.8h10.2v2.1H4V16.7z"/></svg>
+          </button>
         </div>
         <span id="compose-count" class="count-ring" style="--p:0"><b>300</b></span>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="attach">
+    <form id="attach-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="attach-cancel">Cancel</button>
+        <strong id="attach-title">Attach</strong>
+      </div>
+      <p class="dim" id="attach-note"></p>
+      <div class="segmented attach-kinds" id="attach-kinds">
+        <button type="button" data-attach-kind="feed" aria-pressed="true">Feeds</button>
+        <button type="button" data-attach-kind="list" aria-pressed="false">Lists</button>
+        <button type="button" data-attach-kind="pack" aria-pressed="false">Starter packs</button>
+      </div>
+      <input id="attach-q" placeholder="Search or paste a Bluesky link" autocomplete="off" spellcheck="false">
+      <div id="attach-results" class="attach-results"></div>
     </form>
   </dialog>
 

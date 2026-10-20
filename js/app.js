@@ -2,7 +2,9 @@ import * as api from './api.js';
 import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
 import {
   actorHtml,
+  avatar,
   callBannerHtml,
+  collectionCardHtml,
   callConvoHtml,
   callStartHtml,
   callToolsHtml,
@@ -320,7 +322,9 @@ function paintBadge(id, count) {
 
 function soundsEnabled(kind) {
   const prefs = soundPrefs();
-  return kind === 'notifications' ? prefs.notifications : prefs.chat;
+  if (kind === 'posts') return prefs.posts === true;
+  if (kind === 'notifications') return prefs.notifications !== false;
+  return prefs.chat !== false;
 }
 
 function playSound(kind) {
@@ -339,7 +343,9 @@ function playSound(kind) {
       ? [[880, 0, 0.16, 0.07], [1175, 0.18, 0.2, 0.06]]
       : kind === 'notifications'
         ? [[784, 0, 0.14, 0.05], [1046, 0.1, 0.18, 0.045]]
-        : [[523, 0, 0.1, 0.045], [659, 0.09, 0.14, 0.04]];
+        : kind === 'posts'
+          ? [[660, 0, 0.08, 0.04], [880, 0.07, 0.12, 0.035]]
+          : [[523, 0, 0.1, 0.045], [659, 0.09, 0.14, 0.04]];
     notes.forEach(([freq, delay, duration, gain]) => {
       const osc = ctx.createOscillator();
       const amp = ctx.createGain();
@@ -525,6 +531,121 @@ async function loadRail() {
   }
 }
 
+const homeWatch = { timer: 0, token: 0, uris: new Set(), pending: [] };
+
+function stopHomeWatch() {
+  clearInterval(homeWatch.timer);
+  homeWatch.timer = 0;
+  homeWatch.token = 0;
+  homeWatch.pending = [];
+  hideFresh();
+}
+
+function noteHome(items) {
+  (items || []).forEach((item) => {
+    const uri = item?.post?.uri;
+    if (uri) homeWatch.uris.add(uri);
+  });
+}
+
+function placeFresh() {
+  const pill = $('fresh');
+  if (!pill || pill.hidden) return;
+  const column = document.querySelector('.center');
+  const head = document.querySelector('.sticky-head');
+  if (!column) return;
+  const rect = column.getBoundingClientRect();
+  const below = head ? head.getBoundingClientRect().bottom : 64;
+  pill.style.left = `${rect.left + rect.width / 2}px`;
+  pill.style.top = `${Math.max(8, below + 10)}px`;
+}
+
+function hideFresh() {
+  const pill = $('fresh');
+  if (!pill) return;
+  pill.hidden = true;
+  pill.innerHTML = '';
+}
+
+function paintFresh() {
+  const pill = $('fresh');
+  if (!pill) return;
+  const items = homeWatch.pending;
+  if (!items.length || parseHash()[0]) {
+    hideFresh();
+    return;
+  }
+  const seen = new Set();
+  const actors = [];
+  items.forEach((item) => {
+    const reason = item?.reason;
+    const actor = String(reason?.$type || '').includes('reasonRepost') && reason.by ? reason.by : item?.post?.author;
+    const id = actor?.did || actor?.handle;
+    if (!actor || !id || seen.has(id)) return;
+    seen.add(id);
+    actors.push(actor);
+  });
+  const faces = actors.slice(0, 3).map((actor) => avatar(actor.avatar, actor.displayName || actor.handle)).join('');
+  const count = items.length;
+  const label = count === 1 ? 'New post' : `${count} new posts`;
+  const next = `<span class="fresh-faces">${faces}</span><span class="fresh-label">${escapeHtml(label)}</span><span class="fresh-link">Update</span>`;
+  pill.hidden = false;
+  if (pill.innerHTML !== next) pill.innerHTML = next;
+  placeFresh();
+}
+
+function applyFresh() {
+  const items = homeWatch.pending.splice(0);
+  hideFresh();
+  if (!items.length || parseHash()[0]) return;
+  noteHome(items);
+  const prepared = items.map((item) => (muted(item.post || item) ? { ...item, muted: true } : item));
+  resetPosts();
+  const html = feedHtml(prepared);
+  remember();
+  const view = $('view');
+  view?.querySelector('.empty')?.remove();
+  view?.querySelector('.lang-wait')?.remove();
+  const prompt = view?.querySelector('.prompt');
+  if (prompt) prompt.insertAdjacentHTML('afterend', html);
+  else view?.insertAdjacentHTML('afterbegin', html);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function armHomeWatch(token, items) {
+  clearInterval(homeWatch.timer);
+  homeWatch.token = token;
+  homeWatch.uris = new Set();
+  homeWatch.pending = [];
+  noteHome(items);
+  hideFresh();
+  homeWatch.timer = setInterval(() => { pollHome(token); }, 15000);
+}
+
+async function pollHome(token) {
+  if (token !== generation || token !== homeWatch.token || document.hidden) return;
+  if (parseHash()[0]) return;
+  try {
+    const data = await api.getTimeline(null);
+    if (token !== generation || token !== homeWatch.token) return;
+    const fresh = [];
+    for (const item of data.feed || []) {
+      const uri = item?.post?.uri;
+      if (!uri) continue;
+      if (homeWatch.uris.has(uri)) break;
+      fresh.push(item);
+    }
+    if (!fresh.length) return;
+    const known = new Set(homeWatch.pending.map((item) => item?.post?.uri).filter(Boolean));
+    const added = fresh.filter((item) => item?.post?.uri && !known.has(item.post.uri));
+    homeWatch.pending = fresh;
+    paintFresh();
+    if (added.length) playSound('posts');
+  } catch {
+    /* the pill waits for the next check */
+  }
+}
+
 async function showHome(mode) {
   const token = ++generation;
   const following = mode !== 'discover';
@@ -553,10 +674,12 @@ async function showHome(mode) {
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
     remember();
     document.documentElement.dataset.ready = '1';
+    if (following) armHomeWatch(token, items);
     const more = async (cursor) => {
       const page = following ? await api.getTimeline(cursor) : await api.getFeed(api.WHATS_HOT, cursor);
       if (token !== generation) return;
       const nextItems = following ? page.feed : filterDiscover(page.feed);
+      if (following) noteHome(nextItems);
       if (!(nextItems || []).length && !page.cursor && !$('view')?.querySelector('.post')) {
         $('view').innerHTML = empty;
         pagerFor(null, more);
@@ -1202,10 +1325,12 @@ async function showProfile(actor, tab) {
     const pinHtml = split.pinned.map((item) => postHtml(item, { pinned: true })).join('');
     const postsHtml = feedHtml(split.feed);
     const blank = pinHtml || postsHtml ? postsHtml : emptyHtml('No posts', 'Nothing in this tab yet.');
-    $('view').innerHTML = profileHtml(profile) + pinHtml + blank;
+    const mine = signedIn() && profile.did === myDid();
+    $('view').innerHTML = profileHtml(profile) + profileShelfHtml(mine) + pinHtml + blank;
     $('profile-action').innerHTML = action;
     remember();
     document.documentElement.dataset.ready = '1';
+    loadProfileShelf(profile, token);
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Profile unavailable', error.message);
   }
@@ -1230,6 +1355,93 @@ async function pinnedSplit(profile, items) {
   }
   const seen = new Set(pinned.map((item) => item.post?.uri).filter(Boolean));
   return { pinned, feed: rest.filter((item) => !seen.has(item.post?.uri)) };
+}
+
+function profileShelfHtml(mine) {
+  const action = mine ? '<button type="button" class="text-btn" data-act="profile-attach">Attach</button>' : '';
+  return `<section class="shelf" id="profile-shelf"><div class="shelf-head"><h3>Feeds, lists, and starter packs</h3>${action}</div><div id="shelf-body"><p class="dim">Loading…</p></div></section>`;
+}
+
+function shelfCards(items, featured, mine) {
+  const pinned = new Set((featured || []).map((item) => item.uri));
+  return items.map((view) => {
+    const card = collectionCardHtml(view);
+    if (!card) return '';
+    if (!mine || !pinned.has(view.uri)) return card;
+    return `<div class="shelf-item">${card}<button type="button" class="text-btn mini" data-act="shelf-unpin" data-uri="${escapeHtml(view.uri)}">Unpin</button></div>`;
+  }).join('');
+}
+
+async function resolveFeatured(ref) {
+  const uri = ref?.uri || '';
+  try {
+    if (uri.includes('/app.bsky.feed.generator/')) return (await api.getFeedGenerator(uri))?.view || null;
+    if (uri.includes('/app.bsky.graph.starterpack/')) return (await api.getStarterPack(uri))?.starterPack || null;
+    if (uri.includes('/app.bsky.graph.list/')) return (await api.getList(uri, null, null, 1))?.list || null;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function loadProfileShelf(profile, token) {
+  const did = profile?.did;
+  const body = $('shelf-body');
+  if (!did || !body) return;
+  const mine = signedIn() && did === myDid();
+  try {
+    const [feeds, lists, packs, featured] = await Promise.all([
+      api.getActorFeeds(did).catch(() => ({ feeds: [] })),
+      api.getLists(did).catch(() => ({ lists: [] })),
+      api.getActorStarterPacks(did).catch(() => ({ starterPacks: [] })),
+      api.readFeatured(did).catch(() => []),
+    ]);
+    if (token !== generation || !$('shelf-body')) return;
+    const byUri = new Map();
+    const add = (item) => { if (item?.uri && item?.cid) byUri.set(item.uri, item); };
+    const packLists = new Set((packs.starterPacks || []).flatMap((pack) => [pack?.record?.list, pack?.list?.uri]).filter(Boolean));
+    (feeds.feeds || []).forEach(add);
+    (lists.lists || []).forEach((list) => {
+      if (packLists.has(list.uri) && String(list.purpose || '').includes('referencelist')) return;
+      add(list);
+    });
+    (packs.starterPacks || []).forEach(add);
+    const missing = featured.filter((item) => item?.uri && !byUri.has(item.uri));
+    if (missing.length) {
+      const resolved = await Promise.all(missing.map((item) => resolveFeatured(item)));
+      if (token !== generation || !$('shelf-body')) return;
+      resolved.forEach(add);
+    }
+    const ordered = [];
+    const seen = new Set();
+    featured.forEach((item) => {
+      const view = byUri.get(item.uri);
+      if (!view || seen.has(view.uri)) return;
+      seen.add(view.uri);
+      ordered.push(view);
+    });
+    byUri.forEach((view) => {
+      if (seen.has(view.uri)) return;
+      seen.add(view.uri);
+      ordered.push(view);
+    });
+    if (!ordered.length && !mine) {
+      $('profile-shelf')?.remove();
+      return;
+    }
+    const visible = ordered.slice(0, 12);
+    const rest = ordered.slice(12);
+    const more = rest.length
+      ? `<button type="button" class="text-btn" data-act="shelf-more">Show ${rest.length} more</button><div class="shelf-more" hidden>${shelfCards(rest, featured, mine)}</div>`
+      : '';
+    const note = mine
+      ? '<p class="dim shelf-note">Pins are saved on your Bluesky profile record, so anyone opening your profile in LibreSky can see them. Feeds, lists, and starter packs you create also show in other Bluesky apps.</p>'
+      : '';
+    const cards = shelfCards(visible, featured, mine);
+    $('shelf-body').innerHTML = `${cards ? `<div class="shelf-list">${cards}</div>` : '<p class="dim">Nothing here yet. Attach a feed, list, or starter pack.</p>'}${more}${note}`;
+  } catch (error) {
+    if (token === generation && $('shelf-body')) $('shelf-body').innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load these.')}</p>`;
+  }
 }
 
 function profileAction(profile) {
@@ -1434,10 +1646,11 @@ function showSettings() {
       <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
     </div>
     <h2>Sounds</h2>
-    <p class="dim">A short sound plays for a new chat message or a new notification. Incoming calls use the chat sound. Turn either one off here. The browser may stay quiet until you click the page.</p>
+    <p class="dim">A short sound plays for a new chat message or a new notification. Incoming calls use the chat sound. New posts on Home can play one too, and that one starts off. The browser may stay quiet until you click the page.</p>
     <div class="sound-list">
       <div class="sound-row"><span>New chat messages</span><button type="button" data-sound="chat" aria-pressed="${sounds.chat ? 'true' : 'false'}">${sounds.chat ? 'On' : 'Off'}</button></div>
       <div class="sound-row"><span>New notifications</span><button type="button" data-sound="notifications" aria-pressed="${sounds.notifications ? 'true' : 'false'}">${sounds.notifications ? 'On' : 'Off'}</button></div>
+      <div class="sound-row"><span>New posts on Home</span><button type="button" data-sound="posts" aria-pressed="${sounds.posts ? 'true' : 'false'}">${sounds.posts ? 'On' : 'Off'}</button></div>
     </div>
     <h2>Languages</h2>
     <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type.</p>
@@ -1866,6 +2079,7 @@ function route() {
   closeMenu();
   hideSuggest();
   closeHover();
+  stopHomeWatch();
   stopChatTimer();
   pager?.disconnect();
   selected = -1;
@@ -1918,10 +2132,12 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
   dialog._card = null;
   dialog._gif = null;
   dialog._video = null;
+  dialog._attach = null;
   dialog._langs = languagePrefs().posts.slice();
   dialog._dismissedUrl = '';
   closePicker();
   $('compose-previews').innerHTML = '';
+  paintAttach();
   const videoBox = $('compose-video');
   if (videoBox) {
     videoBox.hidden = true;
@@ -1978,6 +2194,7 @@ function updateCount() {
   const card = $('compose')._card;
   const gif = $('compose')._gif;
   const video = $('compose')._video;
+  const attached = Boolean($('compose')?._attach?.uri);
   const count = $('compose-count');
   const used = Math.min(300, Math.max(0, 300 - left));
   if (count) {
@@ -1987,7 +2204,7 @@ function updateCount() {
     else count.textContent = String(left);
   }
   count?.classList.toggle('over', left < 0);
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video);
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video && !attached);
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -2262,7 +2479,7 @@ async function refreshLinkPreview() {
   if (!dialog?.open || !box) return;
   if (dialog._gif || dialog._video) return;
   const url = firstUrl($('compose-text').value);
-  if (!url || dialog.dataset.quote || dialog._dismissedUrl === url) {
+  if (!url || dialog.dataset.quote || dialog._attach || dialog._dismissedUrl === url) {
     dialog._card = null;
     box.hidden = true;
     box.innerHTML = '';
@@ -2396,8 +2613,8 @@ async function publish(event) {
     toast('Use images, a video, or a GIF, not more than one.');
     return;
   }
-  if (gif && dialog.dataset.quote) {
-    toast('Remove the quote to attach a GIF.');
+  if (gif && (dialog.dataset.quote || dialog._attach)) {
+    toast('Remove the quote or attachment before adding a GIF.');
     return;
   }
   $('compose-send').disabled = true;
@@ -2423,6 +2640,9 @@ async function publish(event) {
       reply = { root: raw.root, parent: { uri: raw.uri, cid: raw.cid } };
     }
     let quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
+    if (dialog._attach?.uri && dialog._attach?.cid) {
+      quote = { uri: dialog._attach.uri, cid: dialog._attach.cid };
+    }
     let link = null;
     const url = firstUrl(text);
     let card = dialog._card;
@@ -2572,6 +2792,212 @@ function closePicker() {
   if (!box) return;
   box.hidden = true;
   box.innerHTML = '';
+}
+
+const attachBag = new Map();
+let attachKind = 'feed';
+let attachMode = 'post';
+let attachSeq = 0;
+let attachTimer = 0;
+let attachBusy = false;
+
+function paintAttach() {
+  const box = $('compose-attach');
+  const view = $('compose')?._attach?.view;
+  if (!box) return;
+  if (!view) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = collectionCardHtml(view, { remove: true });
+}
+
+function attachTargetFromText(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (text.startsWith('at://')) {
+    const uri = text.split(/[\s?#]/)[0];
+    if (uri.includes('/app.bsky.feed.generator/')) return { kind: 'feed', uri };
+    if (uri.includes('/app.bsky.graph.starterpack/')) return { kind: 'pack', uri };
+    if (uri.includes('/app.bsky.graph.list/')) return { kind: 'list', uri };
+    return null;
+  }
+  try {
+    const url = new URL(text);
+    const host = url.hostname.replace(/^www\./, '');
+    if (host !== 'bsky.app' && !host.endsWith('.bsky.app')) return null;
+    const parts = url.pathname.split('/').filter(Boolean).map((part) => {
+      try { return decodeURIComponent(part); } catch { return part; }
+    });
+    if (parts[0] === 'profile' && parts[2] === 'feed' && parts[3]) return { kind: 'feed', actor: parts[1], rkey: parts[3] };
+    if (parts[0] === 'profile' && parts[2] === 'lists' && parts[3]) return { kind: 'list', actor: parts[1], rkey: parts[3] };
+    if (parts[0] === 'starter-pack' && parts[1] && parts[2]) return { kind: 'pack', actor: parts[1], rkey: parts[2] };
+    if (parts[0] === 'profile' && parts[2] === 'starter-pack' && parts[3]) return { kind: 'pack', actor: parts[1], rkey: parts[3] };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function resolveAttachRef(target) {
+  let uri = target.uri || '';
+  if (!uri && target.actor && target.rkey) {
+    const did = target.actor.startsWith('did:') ? target.actor : await api.resolveHandle(target.actor);
+    const collection = target.kind === 'feed'
+      ? 'app.bsky.feed.generator'
+      : target.kind === 'list'
+        ? 'app.bsky.graph.list'
+        : 'app.bsky.graph.starterpack';
+    uri = `at://${did}/${collection}/${target.rkey}`;
+  }
+  if (target.kind === 'feed') return (await api.getFeedGenerator(uri))?.view || null;
+  if (target.kind === 'list') return (await api.getList(uri, null, null, 1))?.list || null;
+  return (await api.getStarterPack(uri))?.starterPack || null;
+}
+
+async function loadListChoices(query) {
+  const q = query.trim().replace(/^@/, '');
+  if (q.includes('.') || q.startsWith('did:')) {
+    const data = await api.getLists(q);
+    return data.lists || [];
+  }
+  if (!signedIn()) return [];
+  const data = await api.getLists(myDid());
+  const lists = data.lists || [];
+  const needle = q.toLowerCase();
+  if (!needle) return lists;
+  return lists.filter((list) => `${list.name || ''} ${list.description || ''}`.toLowerCase().includes(needle));
+}
+
+function paintAttachKinds() {
+  document.querySelectorAll('[data-attach-kind]').forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.attachKind === attachKind ? 'true' : 'false');
+  });
+  const title = $('attach-title');
+  const note = $('attach-note');
+  if (title) title.textContent = attachMode === 'profile' ? 'Attach to your profile' : 'Attach to this post';
+  if (note) {
+    note.textContent = attachMode === 'profile'
+      ? 'This is saved on your profile record. People who open your profile can see it.'
+      : 'This is embedded in the post, so other Bluesky apps show it too.';
+  }
+}
+
+function openAttachPicker(mode) {
+  if (mode === 'post') {
+    const dialog = $('compose');
+    if (!dialog?.open) return openComposer();
+    if (dialog.dataset.quote) {
+      toast('Remove the quote before attaching a feed, list, or starter pack.');
+      return;
+    }
+  } else if (!signedIn()) return requireSignIn();
+  attachMode = mode;
+  attachKind = 'feed';
+  paintAttachKinds();
+  const input = $('attach-q');
+  if (input) input.value = '';
+  const dialog = $('attach');
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  input?.focus();
+  refreshAttach('');
+}
+
+async function refreshAttach(query) {
+  const seq = ++attachSeq;
+  const box = $('attach-results');
+  if (!box) return;
+  box.innerHTML = '<p class="dim">Loading…</p>';
+  const q = String(query || '').trim();
+  try {
+    const direct = attachTargetFromText(q);
+    let items = [];
+    if (direct) {
+      const view = await resolveAttachRef(direct);
+      if (view?.uri) items = [view];
+    } else if (attachKind === 'feed') {
+      const data = await api.searchFeedGenerators(q);
+      items = data.feeds || [];
+    } else if (attachKind === 'pack') {
+      const data = q
+        ? await api.searchStarterPacks(q)
+        : await api.getSuggestedStarterPacks().catch(() => ({ starterPacks: [] }));
+      items = data.starterPacks || [];
+    } else items = await loadListChoices(q);
+    if (seq !== attachSeq || !$('attach-results')) return;
+    items.forEach((item) => { if (item?.uri) attachBag.set(item.uri, item); });
+    const rows = items.map((item) => collectionCardHtml(item, { button: true })).filter(Boolean).join('');
+    const hint = attachKind === 'list'
+      ? 'Nothing matched. Search a handle, or paste a list link.'
+      : 'Nothing matched. Try another search, or paste a Bluesky link.';
+    $('attach-results').innerHTML = rows || `<p class="dim">${hint}</p>`;
+  } catch (error) {
+    if (seq === attachSeq && $('attach-results')) $('attach-results').innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not search.')}</p>`;
+  }
+}
+
+async function pinFeatured(view) {
+  if (attachBusy) return;
+  attachBusy = true;
+  try {
+    const current = await api.readFeatured(myDid());
+    if (current.some((item) => item.uri === view.uri)) {
+      toast('That is already attached to your profile.');
+      $('attach')?.close();
+      return;
+    }
+    const next = [{ uri: view.uri, cid: view.cid }, ...current].slice(0, 8);
+    await api.writeFeatured(next);
+    $('attach')?.close();
+    toast(current.length >= 8 ? 'Attached. The oldest pin was dropped.' : 'Attached to your profile.');
+    if (parseHash()[0] === 'profile') loadProfileShelf({ did: myDid() }, generation);
+  } catch (error) {
+    toast(error.message || 'Could not attach that.');
+  } finally {
+    attachBusy = false;
+  }
+}
+
+async function unpinFeatured(uri) {
+  if (!uri || attachBusy) return;
+  attachBusy = true;
+  try {
+    const current = await api.readFeatured(myDid());
+    await api.writeFeatured(current.filter((item) => item.uri !== uri));
+    toast('Unpinned.');
+    loadProfileShelf({ did: myDid() }, generation);
+  } catch (error) {
+    toast(error.message || 'Could not unpin that.');
+  } finally {
+    attachBusy = false;
+  }
+}
+
+function chooseAttach(uri) {
+  const view = attachBag.get(uri);
+  if (!view?.uri || !view?.cid) {
+    toast('That record has no id yet. Try another.');
+    return;
+  }
+  if (attachMode === 'profile') {
+    pinFeatured(view);
+    return;
+  }
+  const dialog = $('compose');
+  if (!dialog) return;
+  dialog._attach = { uri: view.uri, cid: view.cid, view };
+  dialog._card = null;
+  const linkBox = $('compose-link');
+  if (linkBox) {
+    linkBox.hidden = true;
+    linkBox.innerHTML = '';
+  }
+  $('attach')?.close();
+  paintAttach();
+  updateCount();
 }
 
 function openEmojiPicker() {
@@ -2939,8 +3365,8 @@ function chooseGif(gif) {
     toast('Remove the images or video to attach a GIF.');
     return;
   }
-  if (dialog.dataset.quote) {
-    toast('Remove the quote to attach a GIF.');
+  if (dialog.dataset.quote || dialog._attach) {
+    toast('Remove the quote or attachment before adding a GIF.');
     return;
   }
   dialog._gif = gif;
@@ -3764,6 +4190,48 @@ async function onClick(event) {
   }
   if (act === 'signin') return requireSignIn();
   if (act === 'compose') return openComposer();
+  if (act === 'fresh-update') {
+    event.preventDefault();
+    applyFresh();
+    return;
+  }
+  if (act === 'attach') {
+    event.preventDefault();
+    openAttachPicker('post');
+    return;
+  }
+  if (act === 'profile-attach') {
+    event.preventDefault();
+    openAttachPicker('profile');
+    return;
+  }
+  if (act === 'attach-pick') {
+    event.preventDefault();
+    const uri = event.target.closest('[data-uri]')?.dataset.uri;
+    if (uri) chooseAttach(uri);
+    return;
+  }
+  if (act === 'dismiss-attach') {
+    event.preventDefault();
+    const dialog = $('compose');
+    if (dialog) dialog._attach = null;
+    paintAttach();
+    updateCount();
+    scheduleLinkPreview();
+    return;
+  }
+  if (act === 'shelf-unpin') {
+    event.preventDefault();
+    unpinFeatured(event.target.closest('[data-uri]')?.dataset.uri || '');
+    return;
+  }
+  if (act === 'shelf-more') {
+    event.preventDefault();
+    const more = event.target.nextElementSibling;
+    if (more) more.hidden = false;
+    event.target.remove();
+    return;
+  }
   if (act === 'retry') return route();
   if (act === 'signout') return signOut();
   if (act === 'show-warn') {
@@ -4487,7 +4955,8 @@ function onKey(event) {
   const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
   if (typing || document.querySelector('dialog[open]')) {
     if (event.key === 'Escape') {
-      const dialog = document.querySelector('dialog[open]');
+      const open = [...document.querySelectorAll('dialog[open]')];
+      const dialog = open[open.length - 1];
       if (dialog?.id === 'login' && !signedIn()) return;
       if (dialog?.id === 'call') return;
       dialog?.close();
@@ -4543,7 +5012,14 @@ function bind() {
   document.addEventListener('pointerout', scheduleHoverHide);
   $('hovercard')?.addEventListener('pointerover', () => clearTimeout(hoverHideTimer));
   $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
-  document.addEventListener('scroll', () => closeHover(), true);
+  document.addEventListener('scroll', () => {
+    closeHover();
+    placeFresh();
+  }, true);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && homeWatch.timer) pollHome(homeWatch.token);
+  });
+  window.addEventListener('resize', placeFresh);
   $('menu').addEventListener('click', onMenu);
   document.addEventListener('click', (event) => {
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
@@ -4626,6 +5102,22 @@ function bind() {
     const video = $('compose')._video;
     if (video?.url) URL.revokeObjectURL(video.url);
     $('compose')._video = null;
+    $('compose')._attach = null;
+    paintAttach();
+  });
+  $('attach-cancel')?.addEventListener('click', () => $('attach')?.close());
+  $('attach-form')?.addEventListener('submit', (event) => event.preventDefault());
+  $('attach')?.addEventListener('click', (event) => {
+    const kind = event.target.closest('[data-attach-kind]')?.dataset.attachKind;
+    if (!kind) return;
+    event.preventDefault();
+    attachKind = kind;
+    paintAttachKinds();
+    refreshAttach($('attach-q')?.value || '');
+  });
+  $('attach-q')?.addEventListener('input', () => {
+    clearTimeout(attachTimer);
+    attachTimer = setTimeout(() => refreshAttach($('attach-q').value), 250);
   });
   $('compose-picker')?.addEventListener('input', (event) => {
     if (event.target.id === 'post-lang-find') filterLanguageButtons(event.target);
@@ -4804,13 +5296,13 @@ function bind() {
       });
     }
     const soundButton = event.target.closest('[data-sound]');
-    if (soundButton?.dataset.sound === 'chat' || soundButton?.dataset.sound === 'notifications') {
+    if (soundButton?.dataset.sound === 'chat' || soundButton?.dataset.sound === 'notifications' || soundButton?.dataset.sound === 'posts') {
       const key = soundButton.dataset.sound;
       const next = !soundPrefs()[key];
       setSoundPrefs({ [key]: next });
       soundButton.setAttribute('aria-pressed', next ? 'true' : 'false');
       soundButton.textContent = next ? 'On' : 'Off';
-      if (next) playSound(key === 'notifications' ? 'notifications' : 'chat');
+      if (next) playSound(key);
     }
     const word = event.target.dataset?.unmute;
     if (word) {

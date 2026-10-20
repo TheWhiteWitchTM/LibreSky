@@ -130,10 +130,11 @@ const SOUND_KEY = 'libresky.sounds';
 
 export function soundPrefs() {
   const saved = readJson(SOUND_KEY);
-  if (!saved || typeof saved !== 'object') return { chat: true, notifications: true };
+  if (!saved || typeof saved !== 'object') return { chat: true, notifications: true, posts: false };
   return {
     chat: saved.chat !== false,
     notifications: saved.notifications !== false,
+    posts: saved.posts === true,
   };
 }
 
@@ -142,6 +143,7 @@ export function setSoundPrefs(next) {
   const saved = {
     chat: typeof next?.chat === 'boolean' ? next.chat : current.chat,
     notifications: typeof next?.notifications === 'boolean' ? next.notifications : current.notifications,
+    posts: typeof next?.posts === 'boolean' ? next.posts : current.posts,
   };
   localStorage.setItem(SOUND_KEY, JSON.stringify(saved));
   return saved;

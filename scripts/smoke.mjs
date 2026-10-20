@@ -3,10 +3,11 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
+import { setSoundPrefs, soundPrefs } from '../js/session.js';
 import { completeWord } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -143,6 +144,65 @@ assert.match(shared, /a shared post/);
 assert.match(shared, /class="quote"/);
 assert.match(shared, /data-href=/);
 assert.doesNotMatch(shared, /<a class="quote"/);
+const attachedPost = postHtml({
+  post: {
+    uri: 'at://did:plc:abc/app.bsky.feed.post/2',
+    cid: 'cid',
+    author: { did: 'did:plc:abc', handle: 'ada.bsky.social', displayName: 'Ada' },
+    record: { text: 'Look', createdAt: '2026-10-20T00:00:00.000Z' },
+    indexedAt: '2026-10-20T00:00:00.000Z',
+    embed: {
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        $type: 'app.bsky.feed.defs#generatorView',
+        uri: 'at://did:plc:abc/app.bsky.feed.generator/science',
+        cid: 'bafyfeed',
+        displayName: 'Science',
+        description: 'Papers and notes',
+        likeCount: 12,
+        creator: { did: 'did:plc:abc', handle: 'ada.bsky.social', displayName: 'Ada' },
+      },
+    },
+  },
+});
+assert.match(attachedPost, /class="collection"/);
+assert.match(attachedPost, /href="#\/feed\//);
+assert.match(attachedPost, /Science/);
+assert.match(attachedPost, /Feed · @ada.bsky.social/);
+assert.doesNotMatch(attachedPost, /class="quote"/);
+const listCard = collectionCardHtml({
+  uri: 'at://did:plc:abc/app.bsky.graph.list/one',
+  cid: 'bafylist',
+  name: 'Reporters',
+  purpose: 'app.bsky.graph.defs#curatelist',
+  listItemCount: 4,
+  creator: { handle: 'ada.bsky.social' },
+}, { button: true });
+assert.match(listCard, /data-act="attach-pick"/);
+assert.match(listCard, /Reporters/);
+assert.match(listCard, /List · @ada.bsky.social · 4 people/);
+const packCard = collectionCardHtml({
+  $type: 'app.bsky.graph.defs#starterPackViewBasic',
+  uri: 'at://did:plc:abc/app.bsky.graph.starterpack/one',
+  cid: 'bafypack',
+  record: { name: 'Newsroom', description: 'People to follow' },
+  listItemCount: 9,
+  creator: { handle: 'ada.bsky.social', displayName: 'Ada' },
+});
+assert.match(packCard, /href="#\/pack\//);
+assert.match(packCard, /Newsroom/);
+assert.match(packCard, /Starter pack/);
+const memory = new Map();
+globalThis.localStorage = {
+  getItem(key) { return memory.has(key) ? memory.get(key) : null; },
+  setItem(key, value) { memory.set(key, String(value)); },
+  removeItem(key) { memory.delete(key); },
+};
+assert.equal(soundPrefs().posts, false);
+assert.equal(soundPrefs().chat, true);
+setSoundPrefs({ posts: true });
+assert.equal(soundPrefs().posts, true);
+assert.equal(soundPrefs().notifications, true);
 assert.doesNotMatch(shared, /class="post /);
 
 const headed = profileHtml({

@@ -241,6 +241,17 @@ export function getFeedGenerators(feeds) {
   return xrpc('app.bsky.feed.getFeedGenerators', { params: { feeds } });
 }
 
+export function getActorFeeds(actor, cursor, signal) {
+  return xrpc('app.bsky.feed.getActorFeeds', { params: { actor, limit: 30, cursor }, signal });
+}
+
+export function searchFeedGenerators(query, signal) {
+  return xrpc('app.bsky.unspecced.getPopularFeedGenerators', {
+    params: { query: query || undefined, limit: 12 },
+    signal,
+  });
+}
+
 export function getPostThread(uri, signal) {
   return xrpc('app.bsky.feed.getPostThread', { params: { uri, depth: 6, parentHeight: 20 }, signal });
 }
@@ -713,6 +724,72 @@ async function profileRecord() {
   }
 }
 
+const FEATURED_KEY = 'app.libresky.featured';
+
+function featuredList(value) {
+  const list = value?.[FEATURED_KEY];
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item) => item?.uri && item?.cid)
+    .slice(0, 8)
+    .map((item) => ({ uri: String(item.uri), cid: String(item.cid) }));
+}
+
+export async function readFeatured(repo) {
+  try {
+    const data = await getPublicRecord(repo, 'app.bsky.actor.profile', 'self');
+    return featuredList(data?.value);
+  } catch {
+    return [];
+  }
+}
+
+async function featuredKept(record) {
+  try {
+    const got = await xrpc('com.atproto.repo.getRecord', {
+      params: { repo: currentDid(), collection: 'app.bsky.actor.profile', rkey: 'self' },
+      auth: 'required',
+    });
+    const saved = featuredList(got?.value);
+    const wanted = featuredList(record);
+    return saved.length === wanted.length && saved.every((item, index) => item.uri === wanted[index].uri && item.cid === wanted[index].cid);
+  } catch {
+    return true;
+  }
+}
+
+async function putProfile(record) {
+  const body = {
+    repo: currentDid(),
+    collection: 'app.bsky.actor.profile',
+    rkey: 'self',
+    record,
+  };
+  const loose = () => xrpc('com.atproto.repo.putRecord', {
+    body: { ...body, validate: false },
+    auth: 'required',
+  });
+  try {
+    const wrote = await xrpc('com.atproto.repo.putRecord', { body, auth: 'required' });
+    if (await featuredKept(record)) return wrote;
+    return loose();
+  } catch (error) {
+    if (error.status !== 400) throw error;
+    return loose();
+  }
+}
+
+export async function writeFeatured(items) {
+  const record = await profileRecord();
+  const next = (items || [])
+    .filter((item) => item?.uri && item?.cid)
+    .slice(0, 8)
+    .map((item) => ({ uri: String(item.uri), cid: String(item.cid) }));
+  if (next.length) record[FEATURED_KEY] = next;
+  else delete record[FEATURED_KEY];
+  return putProfile(record);
+}
+
 export async function updateProfile({ displayName, description, avatar, banner, pinnedPost } = {}) {
   const record = await profileRecord();
   if (displayName != null) {
@@ -735,15 +812,7 @@ export async function updateProfile({ displayName, description, avatar, banner, 
   else if (banner === null) delete record.banner;
   if (pinnedPost === null) delete record.pinnedPost;
   else if (pinnedPost?.uri && pinnedPost?.cid) record.pinnedPost = { uri: pinnedPost.uri, cid: pinnedPost.cid };
-  return xrpc('com.atproto.repo.putRecord', {
-    body: {
-      repo: currentDid(),
-      collection: 'app.bsky.actor.profile',
-      rkey: 'self',
-      record,
-    },
-    auth: 'required',
-  });
+  return putProfile(record);
 }
 
 export async function uploadBlob(file) {
