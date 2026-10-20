@@ -487,11 +487,16 @@ function visibleTrends(trends) {
   return preferLive((trends || []).filter(tab.match));
 }
 
-function trendBlock(trends, limit, title) {
+function trendBlock(trends, limit) {
   const rows = trendsHtml((trends || []).slice(0, limit));
-  if (!rows) return '';
-  const heading = title ? `<h2 class="section-label">${escapeHtml(title)}</h2>` : '';
-  return `${heading}<div class="trends">${rows}</div>`;
+  return rows ? `<div class="trends">${rows}</div>` : '';
+}
+
+function matchingTrends(trends, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  const list = preferLive(trends);
+  if (!needle) return list;
+  return list.filter((trend) => String(trend?.displayName || '').toLowerCase().includes(needle));
 }
 
 async function loadRail() {
@@ -580,10 +585,6 @@ function sortHtml() {
   return `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
 }
 
-function searchSectionsHtml() {
-  return `<div class="search-sections"><a class="section-entry pack-entry" href="#/packs"><span class="section-mark" aria-hidden="true">+</span><span class="section-copy"><strong>Starter packs</strong><span class="handle">Follow a set of accounts</span></span></a></div>`;
-}
-
 async function showSearch(query, options = {}) {
   const focus = options.focus !== false;
   const token = ++generation;
@@ -592,8 +593,8 @@ async function showSearch(query, options = {}) {
   const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
   const placeholder = query
     ? skeletons(4)
-    : (known ? (trendBlock(visibleTrends(known), undefined, 'Trending') || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label>${searchSectionsHtml()}<div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+    : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -605,7 +606,7 @@ async function paintExplore(token) {
     if (token !== generation) return;
     const controls = $('search-controls');
     if (controls) controls.innerHTML = exploreTabsHtml(trends);
-    const rows = trendBlock(visibleTrends(trends), undefined, 'Trending');
+    const rows = trendBlock(visibleTrends(trends));
     $('search-results').innerHTML = rows || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.');
   } catch (error) {
     if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Trends are unavailable', error.message || 'Could not load what is happening.');
@@ -623,17 +624,18 @@ async function paintSearchResults(token, query) {
     if (token !== generation) return;
     const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
     const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
-    const trendCards = trendsHtml(preferLive(trendList).slice(0, 5));
+    const matched = matchingTrends(trendList, query).slice(0, 5);
+    const trendCards = trendsHtml(matched);
     resetPosts();
     const postsHtml = feedHtml((postData.posts || []).map((post) => ({ post })));
     remember();
     const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
     const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
-    const trendSection = trendCards ? `<h2 class="section-label">Trending</h2><div class="trends">${trendCards}</div>` : '';
+    const trendSection = trendCards ? `<div class="trends">${trendCards}</div>` : '';
     let missed = '';
     let listedTrends = trendSection;
     if (!people && !packs && !postsHtml) {
-      missed = emptyHtml('No results', `Nothing matched "${query}".`) + trendSection;
+      missed = emptyHtml('No results', `Nothing matched "${query}".`) + (trendSection || trendBlock(preferLive(trendList).slice(0, 5)));
       listedTrends = '';
     }
     $('search-results').innerHTML = `${peopleBlock}${packsBlock}${listedTrends}${postsHtml}${missed}`;
@@ -2509,6 +2511,7 @@ function openMenu(anchor, items) {
 const MORE_LINKS = [
   { id: 'go-lists', label: 'Lists' },
   { id: 'go-feeds', label: 'Feeds' },
+  { id: 'go-packs', label: 'Starter packs' },
   { id: 'go-downloads', label: 'Download apps' },
   { id: 'go-settings', label: 'Settings' },
   { id: 'go-about', label: 'About' },
@@ -3996,6 +3999,7 @@ async function onMenu(event) {
   if (!id) return;
   if (id === 'go-lists') return void (location.hash = '#/lists');
   if (id === 'go-feeds') return void (location.hash = '#/feeds');
+  if (id === 'go-packs') return void (location.hash = '#/packs');
   if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
   if (id === 'go-calls') return void (location.hash = '#/calls');
   if (id === 'go-downloads') return void (location.hash = '#/downloads');

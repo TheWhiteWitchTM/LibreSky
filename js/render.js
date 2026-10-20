@@ -265,44 +265,31 @@ const TREND_CATEGORY = {
 };
 
 function trendHref(trend) {
-  const link = String(trend?.link || '');
-  const match = link.match(/\/profile\/([^/]+)\/feed\/([^/?#]+)/);
   const name = String(trend?.displayName || '').trim();
-  if (match) {
-    let did = match[1];
-    try { did = decodeURIComponent(did); } catch { /* keep the raw segment */ }
-    if (did.startsWith('did:')) {
-      return `#/feed/${encodeURIComponent(`at://${did}/app.bsky.feed.generator/${match[2]}`)}`;
-    }
-  }
   return `#/search/${encodeURIComponent(name || 'Bluesky')}`;
 }
 
-function trendKicker(trend) {
-  const category = TREND_CATEGORY[trend?.category] || 'Trending';
-  if (trend?.status === 'hot') return `${category} · Hot`;
-  if (trend?.status === 'cooling' || trend?.status === 'stale') return category;
-  return `${category} · Trending`;
+function trendMeta(trend) {
+  const bits = [];
+  const count = compact(trend?.postCount);
+  if (count) bits.push(`${count} posts`);
+  const category = TREND_CATEGORY[trend?.category];
+  if (category) bits.push(category);
+  if (trend?.status === 'hot') bits.push('Hot');
+  return bits.join(' · ');
 }
 
 export function trendHtml(trend, options = {}) {
   const name = String(trend?.displayName || '').trim() || 'Trend';
-  const count = compact(trend?.postCount);
-  const face = (trend?.actors || [])[0];
-  const mark = face
-    ? avatar(face.avatar, face.displayName || face.handle)
-    : '<span class="trend-badge" aria-hidden="true">#</span>';
   const blurb = !options.compact && trend?.description
     ? `<span class="trend-desc">${escapeHtml(trend.description)}</span>`
     : '';
-  const rank = options.rank ? `<span class="trend-rank">${options.rank}.</span>` : '';
-  const meta = [`<span class="trend-kicker">${escapeHtml(trendKicker(trend))}</span>`];
-  if (count) meta.push(`${escapeHtml(count)} posts`);
-  return `<a class="trend" href="${attr(trendHref(trend))}">${mark}<span class="trend-copy"><strong>${rank}${escapeHtml(name)}</strong><span class="handle">${meta.join(' · ')}</span>${blurb}</span></a>`;
+  const meta = trendMeta(trend);
+  return `<a class="trend" href="${attr(trendHref(trend))}"><span class="section-mark" aria-hidden="true">${icon('search')}</span><span class="trend-copy"><strong>${escapeHtml(name)}</strong>${meta ? `<span class="handle">${escapeHtml(meta)}</span>` : ''}${blurb}</span></a>`;
 }
 
 export function trendsHtml(trends, options) {
-  return (trends || []).map((trend, index) => trendHtml(trend, { ...options, rank: index + 1 })).join('');
+  return (trends || []).map((trend) => trendHtml(trend, options)).join('');
 }
 
 export function profileHtml(profile) {

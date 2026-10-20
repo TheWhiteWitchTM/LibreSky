@@ -214,13 +214,14 @@ const madeTrend = trendsHtml([{
   actors: [{ displayName: 'Ada', handle: 'ada.bsky.social', avatar: 'https://cdn.example/a.jpg' }],
 }]);
 assert.match(madeTrend, /Steam &lt;Next&gt;/);
-assert.match(madeTrend, /class="trend-rank">1\.</);
-assert.match(madeTrend, /Entertainment · Hot/);
-assert.match(madeTrend, /190K posts/);
-assert.match(madeTrend, /#\/feed\/at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp\.bsky\.feed\.generator%2Fd3c1bec66421/);
+assert.match(madeTrend, /#\/search\/Steam%20%3CNext%3E/);
+assert.match(madeTrend, /190K posts · Entertainment · Hot/);
+assert.match(madeTrend, /class="section-mark"/);
 assert.match(madeTrend, /class="trend-desc"/);
 assert.match(madeTrend, /class="trend-copy"/);
-assert.match(madeTrend, /class="avatar /);
+assert.doesNotMatch(madeTrend, /class="trend-rank"/);
+assert.doesNotMatch(madeTrend, /Trending/);
+assert.doesNotMatch(madeTrend, /#\/feed\//);
 assert.doesNotMatch(madeTrend, /<script/i);
 const coolingTrend = trendsHtml([{
   displayName: 'Alberta',
@@ -229,9 +230,10 @@ const coolingTrend = trendsHtml([{
   status: 'cooling',
   category: 'politics',
 }]);
-assert.match(coolingTrend, /trend-kicker">Politics</);
-assert.match(coolingTrend, /class="trend-badge"/);
-assert.doesNotMatch(coolingTrend, /Politics · Trending/);
+assert.match(coolingTrend, /#\/search\/Alberta/);
+assert.match(coolingTrend, /40 posts · Politics/);
+assert.match(coolingTrend, /class="section-mark"/);
+assert.doesNotMatch(coolingTrend, /Trending/);
 const compactTrend = trendsHtml([{
   displayName: 'Cats',
   description: 'Should stay off the rail.',
@@ -240,9 +242,10 @@ const compactTrend = trendsHtml([{
   category: 'culture',
 }], { compact: true });
 assert.match(compactTrend, /#\/search\/Cats/);
-assert.match(compactTrend, /Culture · Trending/);
+assert.match(compactTrend, /12 posts · Culture/);
 assert.doesNotMatch(compactTrend, /trend-desc/);
 assert.doesNotMatch(compactTrend, /Should stay/);
+assert.doesNotMatch(compactTrend, /Trending/);
 assert.doesNotMatch(rendered, /<script/i);
 const handle = payload.feed[0].post.author.handle;
 assert.match(rendered, new RegExp(handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -320,7 +323,9 @@ const trendPayload = await fetch('https://public.api.bsky.app/xrpc/app.bsky.unsp
 assert.ok(trendPayload.trends?.length, 'Trends returned nothing');
 const liveTrends = trendsHtml(trendPayload.trends);
 assert.match(liveTrends, /class="trend"/);
-assert.match(liveTrends, /#\/feed\//);
+assert.match(liveTrends, /#\/search\//);
+assert.match(liveTrends, /class="section-mark"/);
+assert.doesNotMatch(liveTrends, / · Trending/);
 assert.doesNotMatch(liveTrends, /<script/i);
 const robots = await readFile(path.join(root, 'robots.txt'), 'utf8');
 const sitemap = await readFile(path.join(root, 'sitemap.xml'), 'utf8');
@@ -446,9 +451,9 @@ assert.match(index, /libresky\.mutedWords/);
 assert.match(index, /libresky\.draft/);
 assert.match(appSource, /#\/packs/);
 assert.match(appSource, /Starter packs/);
-assert.match(appSource, /pack-entry/);
+assert.match(moreMenu, /go-packs/);
+assert.doesNotMatch(appSource, /pack-entry/);
 assert.match(appSource, /data-act="message-profile"/);
-assert.doesNotMatch(appSource, /go-packs/);
 assert.match(appSource, /ownUnread/);
 const partial = richText('@jay #town');
 assert.match(partial, /class="facet mention"/);

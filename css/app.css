@@ -229,21 +229,18 @@ img { max-width: 100%; }
 }
 .search-page { padding: 12px 16px 0; }
 .search-page .search { margin: 0; }
-.search-sections { display: flex; flex-direction: column; margin-top: 4px; }
-.section-entry, .trend {
+.trend {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  padding: 12px 0;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
-.section-entry:hover, .trend:hover { background: var(--hover); }
-.trend { padding-inline: 16px; }
-.section-entry { padding-inline: 0; }
-.trend-copy, .section-entry span { min-width: 0; }
-.trend-copy strong, .trend-copy .handle, .trend-desc, .section-copy strong, .section-copy .handle { display: block; }
-.trend-badge, .section-mark {
+.trend:hover { background: var(--hover); }
+.trend-copy { min-width: 0; }
+.trend-copy strong, .trend-copy .handle, .trend-desc { display: block; }
+.section-mark {
   display: grid;
   place-items: center;
   width: 42px;
@@ -252,9 +249,8 @@ img { max-width: 100%; }
   border-radius: 12px;
   background: color-mix(in srgb, var(--blue) 16%, var(--search));
   color: var(--blue);
-  font-size: 20px;
-  font-weight: 800;
 }
+.section-mark .ico { width: 20px; height: 20px; }
 .explore-tabs {
   display: flex;
   margin: 8px -16px 0;
@@ -276,9 +272,7 @@ img { max-width: 100%; }
 .explore-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--blue); font-weight: 800; }
 .explore-tabs button:hover { background: var(--hover); }
 .trends { display: flex; flex-direction: column; }
-.trend-kicker { font-weight: 600; }
 .trend strong { font-size: 15px; letter-spacing: -0.01em; }
-.trend-rank { color: var(--text-2); font-weight: 800; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .trend-desc {
   color: var(--text-2);
   display: -webkit-box;
