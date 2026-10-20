@@ -23,6 +23,7 @@ import {
   profileHtml,
   resetPosts,
   skeletons,
+  speechText,
   threadList,
   trendsHtml,
 } from './render.js';
@@ -41,7 +42,6 @@ import {
   saveDraft,
   setActiveDid,
   setLastHandle,
-  setMutedWords,
   setOauth,
   setPassword,
   setSoundPrefs,
@@ -52,6 +52,25 @@ import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, pr
 import { accountGone, aiTag, caretToken, caretWord, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords } from './words.js';
+import { icon } from './icons.js';
+import { emojiGroups } from './emoji.js';
+import {
+  feedView,
+  homeAllows,
+  pullAccountPrefs,
+  saveFeedView,
+  saveSearchPrefs,
+  saveThreadPrefs,
+  saveVoicePrefs,
+  searchAllows,
+  searchPrefs,
+  setPrefsError,
+  sortThreadReplies,
+  syncClientPrefs,
+  syncMutedWords,
+  threadPrefs,
+  voicePrefs,
+} from './prefs.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -112,23 +131,24 @@ function account() {
   return me.profile || getPassword() || null;
 }
 
-function applyTheme(theme) {
+function applyTheme(theme, options = {}) {
   const next = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('libresky.theme', next);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = next === 'dark' ? '#000000' : '#ffffff';
+  if (!options.quiet) syncClientPrefs();
 }
 
 const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack', 'downloads']);
 
-function setChrome({ title, back = false, tabs = [], nav = '' }) {
+function setChrome({ title, back = false, tabs = [], nav = '', tools = '' }) {
   $('title').textContent = title;
   $('back').hidden = !back;
-  const tools = $('title-tools');
-  if (tools) {
-    tools.innerHTML = '';
-    delete tools.dataset.peer;
+  const toolBox = $('title-tools');
+  if (toolBox) {
+    toolBox.innerHTML = tools || '';
+    delete toolBox.dataset.peer;
   }
   const bar = $('tabs');
   if (!tabs.length) {
@@ -261,6 +281,12 @@ async function loadMe() {
   } catch {
     me.profile = getPassword();
   }
+  try {
+    const pulled = await pullAccountPrefs();
+    if (pulled?.theme) applyTheme(pulled.theme, { quiet: true });
+  } catch {
+    /* this browser keeps the last saved settings */
+  }
   updateAccount();
   rememberCurrent();
   refreshBadge();
@@ -327,11 +353,20 @@ function soundsEnabled(kind) {
   return prefs.chat !== false;
 }
 
-function playSound(kind) {
-  if (!soundsEnabled(kind)) return;
+function soundLevel(kind) {
+  const key = kind === 'call' ? 'chat' : kind;
+  const level = Number(soundPrefs().volume?.[key]);
+  return Number.isFinite(level) ? Math.max(0, Math.min(1, level / 100)) : 0.7;
+}
+
+function playSound(kind, options = {}) {
+  const preview = options.preview === true;
+  if (!preview && !soundsEnabled(kind)) return;
+  const level = soundLevel(kind);
+  if (level <= 0) return;
   const nowMs = Date.now();
-  if (nowMs - (playSound.at[kind] || 0) < 2500) return;
-  playSound.at[kind] = nowMs;
+  if (!preview && nowMs - (playSound.at[kind] || 0) < 2500) return;
+  if (!preview) playSound.at[kind] = nowMs;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -352,8 +387,9 @@ function playSound(kind) {
       osc.type = 'sine';
       osc.frequency.value = freq;
       const start = startAt + delay;
+      const peak = Math.max(0.0008, gain * level);
       amp.gain.setValueAtTime(0.0001, start);
-      amp.gain.exponentialRampToValueAtTime(gain, start + 0.02);
+      amp.gain.exponentialRampToValueAtTime(peak, start + 0.02);
       amp.gain.exponentialRampToValueAtTime(0.0001, start + duration);
       osc.connect(amp);
       amp.connect(ctx.destination);
@@ -548,6 +584,12 @@ function noteHome(items) {
   });
 }
 
+function visibleHome(items) {
+  const prefs = feedView('home');
+  const did = myDid();
+  return (items || []).filter((item) => homeAllows(item, prefs, did));
+}
+
 function placeFresh() {
   const pill = $('fresh');
   if (!pill || pill.hidden) return;
@@ -629,11 +671,14 @@ async function pollHome(token) {
     const data = await api.getTimeline(null);
     if (token !== generation || token !== homeWatch.token) return;
     const fresh = [];
+    const prefs = feedView('home');
+    const did = myDid();
     for (const item of data.feed || []) {
       const uri = item?.post?.uri;
       if (!uri) continue;
       if (homeWatch.uris.has(uri)) break;
-      fresh.push(item);
+      if (homeAllows(item, prefs, did)) fresh.push(item);
+      else homeWatch.uris.add(uri);
     }
     if (!fresh.length) return;
     const known = new Set(homeWatch.pending.map((item) => item?.post?.uri).filter(Boolean));
@@ -646,12 +691,18 @@ async function pollHome(token) {
   }
 }
 
+function gearButton(act, label, feed) {
+  const attr = feed ? ` data-feed="${escapeHtml(feed)}"` : '';
+  return `<button type="button" class="icon-btn" data-act="${act}"${attr} aria-label="${escapeHtml(label)}">${icon('gear')}</button>`;
+}
+
 async function showHome(mode) {
   const token = ++generation;
   const following = mode !== 'discover';
   setChrome({
     title: following ? 'Home' : 'Discover',
     nav: 'home',
+    tools: following ? gearButton('home-settings', 'Home settings') : '',
     tabs: [
       { href: '#/', label: 'Following', on: following },
       { href: '#/discover', label: 'Discover', on: !following },
@@ -666,20 +717,22 @@ async function showHome(mode) {
     const data = following ? await api.getTimeline(null) : await api.getFeed(api.WHATS_HOT);
     if (token !== generation) return;
     const banner = following ? homePrompt() : '';
-    const items = following ? data.feed : filterDiscover(data.feed);
+    const raw = data.feed || [];
+    const items = following ? visibleHome(raw) : filterDiscover(raw);
     resetPosts();
     const posted = feedHtml(items);
-    const empty = emptyHtml('No posts yet', following ? 'Follow a few people and they will show up here.' : 'Nothing in your content languages yet. Settings can show every language.');
+    const empty = emptyHtml('No posts yet', following ? 'Follow a few people, or change Home settings with the gear.' : 'Nothing in your content languages yet. Settings can show every language.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
     remember();
     document.documentElement.dataset.ready = '1';
-    if (following) armHomeWatch(token, items);
+    if (following) armHomeWatch(token, raw);
     const more = async (cursor) => {
       const page = following ? await api.getTimeline(cursor) : await api.getFeed(api.WHATS_HOT, cursor);
       if (token !== generation) return;
-      const nextItems = following ? page.feed : filterDiscover(page.feed);
-      if (following) noteHome(nextItems);
+      const nextRaw = page.feed || [];
+      const nextItems = following ? visibleHome(nextRaw) : filterDiscover(nextRaw);
+      if (following) noteHome(nextRaw);
       if (!(nextItems || []).length && !page.cursor && !$('view')?.querySelector('.post')) {
         $('view').innerHTML = empty;
         pagerFor(null, more);
@@ -705,19 +758,31 @@ function homePrompt() {
 }
 
 function sortHtml() {
+  searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
   return `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
+}
+
+function searchContext() {
+  return { languages: languagePrefs().content, did: myDid() };
+}
+
+function visibleSearchPosts(posts) {
+  const prefs = searchPrefs();
+  const context = searchContext();
+  return (posts || []).filter((post) => searchAllows(post, prefs, context));
 }
 
 async function showSearch(query, options = {}) {
   const focus = options.focus !== false;
   const token = ++generation;
-  setChrome({ title: 'Search', nav: 'search' });
+  searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
+  setChrome({ title: 'Search', nav: 'search', tools: gearButton('search-settings', 'Search settings') });
   const known = Array.isArray(trendCache.list) ? trendCache.list : null;
   const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><button type="button" class="icon-btn search-gear" data-act="search-settings" aria-label="Search settings">${icon('gear')}</button></div><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -750,7 +815,9 @@ async function paintSearchResults(token, query) {
     const matched = matchingTrends(trendList, query).slice(0, 5);
     const trendCards = trendsHtml(matched);
     resetPosts();
-    const postsHtml = feedHtml((postData.posts || []).map((post) => ({ post })));
+    const matchedPosts = visibleSearchPosts(postData.posts);
+    const postsHtml = feedHtml(matchedPosts.map((post) => ({ post })));
+    const hiddenNote = !postsHtml && (postData.posts || []).length ? '<p class="dim search-note">Posts are hidden by search settings. The gear can show more.</p>' : '';
     remember();
     const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
     const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
@@ -761,12 +828,12 @@ async function paintSearchResults(token, query) {
       missed = emptyHtml('No results', `Nothing matched "${query}".`) + (trendSection || trendBlock(preferLive(trendList).slice(0, 5)));
       listedTrends = '';
     }
-    $('search-results').innerHTML = `${peopleBlock}${packsBlock}${listedTrends}${postsHtml}${missed}`;
+    $('search-results').innerHTML = `${peopleBlock}${packsBlock}${listedTrends}${hiddenNote}${postsHtml}${missed}`;
     const more = async (cursor) => {
       const page = await api.searchPosts(query, cursor, null, searchSort);
       if (token !== generation) return;
       resetPosts();
-      const html = feedHtml((page.posts || []).map((post) => ({ post })));
+      const html = feedHtml(visibleSearchPosts(page.posts).map((post) => ({ post })));
       remember();
       if (html) $('search-results')?.insertAdjacentHTML('beforeend', html);
       pagerFor(page.cursor, more);
@@ -1146,9 +1213,15 @@ async function showFeeds() {
   }
 }
 
+function visibleFeed(items, feedId) {
+  const prefs = feedView(feedId);
+  const did = myDid();
+  return (items || []).filter((item) => homeAllows(item, prefs, did));
+}
+
 async function showCustomFeed(uri) {
   const token = ++generation;
-  setChrome({ title: 'Feed', nav: 'feeds', back: true });
+  setChrome({ title: 'Feed', nav: 'feeds', back: true, tools: gearButton('feed-settings', 'Feed settings', uri) });
   showSkeletons();
   try {
     const jobs = [api.getFeedGenerator(uri).catch(() => null), api.getFeed(uri)];
@@ -1174,12 +1247,13 @@ async function showCustomFeed(uri) {
       tools = `<div class="toolbar">${buttons.join('')}</div>`;
     }
     $('view').innerHTML = tools;
-    if ((data.feed || []).length) paintFeed(data.feed, { append: true });
-    else $('view').insertAdjacentHTML('beforeend', emptyHtml('Nothing here', 'There are no posts to show.'));
+    const first = visibleFeed(data.feed, uri);
+    if (first.length) paintFeed(first, { append: true });
+    else $('view').insertAdjacentHTML('beforeend', emptyHtml('Nothing here', (data.feed || []).length ? 'Posts are hidden by this feed’s settings.' : 'There are no posts to show.'));
     const more = async (cursor) => {
       const page = await api.getFeed(uri, cursor);
       if (token !== generation) return;
-      paintFeed(page.feed, { append: true });
+      paintFeed(visibleFeed(page.feed, uri), { append: true });
       pagerFor(page.cursor, more);
     };
     pagerFor(data.cursor, more);
@@ -1476,7 +1550,7 @@ async function showPeople(actor, kind) {
 
 async function showThread(actor, rkey) {
   const token = ++generation;
-  setChrome({ title: 'Post', nav: 'home', back: true });
+  setChrome({ title: 'Post', nav: 'home', back: true, tools: gearButton('thread-settings', 'Thread settings') });
   showSkeletons();
   try {
     const did = actor.startsWith('did:') ? actor : await api.resolveHandle(actor);
@@ -1492,7 +1566,7 @@ async function showThread(actor, rkey) {
     const above = ancestors.map((node, index) => (node.missing
       ? '<div class="missing">Post unavailable</div>'
       : postHtml(node, { connected: true, feed: true }))).join('');
-    const replies = (thread.replies || []).map((node) => (node.post ? postHtml(node) : '<div class="missing">Reply unavailable</div>')).join('');
+    const replies = sortThreadReplies(thread.replies || [], threadPrefs(), myDid()).map((node) => (node.post ? postHtml(node) : '<div class="missing">Reply unavailable</div>')).join('');
     const replyBox = signedIn()
       ? `<button type="button" class="prompt" data-act="thread-reply" data-uri="${escapeHtml(thread.post.uri)}"><span>Write a reply</span></button>`
       : '';
@@ -1615,6 +1689,233 @@ async function checkAiForm() {
   }
 }
 
+function soundRow(key, label, sounds) {
+  const on = Boolean(sounds[key]);
+  const volume = sounds.volume?.[key] ?? 70;
+  return `<div class="sound-row"><span>${label}</span><label class="vol"><span class="dim">Volume</span> <b>${volume}%</b><input type="range" min="0" max="100" step="1" value="${volume}" data-volume="${key}" aria-label="${escapeHtml(label)} volume"></label><button type="button" data-sound="${key}" aria-pressed="${on ? 'true' : 'false'}">${on ? 'On' : 'Off'}</button></div>`;
+}
+
+function switchRow(name, label, on, hint = '') {
+  return `<label class="switch-row"><span><strong>${escapeHtml(label)}</strong>${hint ? `<span class="dim">${escapeHtml(hint)}</span>` : ''}</span><input type="checkbox" data-pref="${escapeHtml(name)}" ${on ? 'checked' : ''}></label>`;
+}
+
+function feedSettingsBody(feedId, { heading = true, title = 'Home' } = {}) {
+  const prefs = feedView(feedId);
+  const prefix = feedId === 'home' ? 'home' : 'feed';
+  const head = heading ? `<h2>${escapeHtml(title)}</h2>` : '';
+  const note = feedId === 'home'
+    ? 'Saved as Bluesky home preferences, so the official app can use the same choices.'
+    : 'Saved as this feed’s Bluesky preferences.';
+  return `${head}<p class="dim">${note}</p>
+    ${switchRow(`${prefix}.showReplies`, 'Show replies', !prefs.hideReplies, 'Off hides every reply.')}
+    ${switchRow(`${prefix}.showOutside`, 'Replies outside people you follow', !prefs.hideRepliesByUnfollowed, 'Off keeps a reply when you follow the person being replied to.')}
+    ${switchRow(`${prefix}.showReposts`, 'Show reposts', !prefs.hideReposts)}
+    ${switchRow(`${prefix}.showQuotes`, 'Show quote posts', !prefs.hideQuotePosts)}`;
+}
+
+function homeSettingsHtml() {
+  return feedSettingsBody('home');
+}
+
+function threadSettingsHtml({ heading = true } = {}) {
+  const prefs = threadPrefs();
+  const sorts = [['oldest', 'Oldest'], ['newest', 'Newest'], ['most-likes', 'Most likes']];
+  if (!sorts.some(([id]) => id === prefs.sort)) sorts.push([prefs.sort, prefs.sort === 'hotness' ? 'Hot' : 'Random']);
+  const head = heading ? '<h2>Threads</h2>' : '';
+  return `${head}<p class="dim">Saved as Bluesky thread preferences. The official app uses this reply order.</p>
+    <div class="segmented">${sorts.map(([id, label]) => `<button type="button" data-thread-sort="${id}" aria-pressed="${prefs.sort === id ? 'true' : 'false'}">${label}</button>`).join('')}</div>
+    ${switchRow('thread.followed', 'Prioritize people you follow', prefs.prioritizeFollowedUsers)}`;
+}
+
+function searchSettingsHtml({ heading = true } = {}) {
+  const prefs = searchPrefs();
+  const head = heading ? '<h2>Search</h2>' : '';
+  return `${head}<p class="dim">The gear on Search stores these on your account with AT Protocol, in app.libresky.settings. Bluesky has no shared search-settings record.</p>
+    <div class="segmented"><button type="button" data-sort="latest" aria-pressed="${prefs.sort !== 'top'}">Latest</button><button type="button" data-sort="top" aria-pressed="${prefs.sort === 'top'}">Top</button></div>
+    ${switchRow('search.following', 'People you follow', prefs.following)}
+    ${switchRow('search.hideReplies', 'Hide replies', prefs.hideReplies)}
+    ${switchRow('search.languagesOnly', 'Only content languages', prefs.languagesOnly)}
+    ${switchRow('search.hideSensitive', 'Hide sensitive content', prefs.hideSensitive)}`;
+}
+
+function voiceOptions(selected) {
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  const rows = [`<option value="">Device default</option>`];
+  voices.forEach((voice) => {
+    const value = voice.voiceURI || voice.name;
+    rows.push(`<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(voice.name)} · ${escapeHtml(voice.lang)}</option>`);
+  });
+  if (selected && !voices.some((voice) => (voice.voiceURI || voice.name) === selected)) {
+    rows.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`);
+  }
+  return rows.join('');
+}
+
+function voiceSettingsHtml() {
+  const prefs = voicePrefs();
+  const ready = typeof window.speechSynthesis?.speak === 'function';
+  if (!ready) return '<h2>Read aloud</h2><p class="dim">This browser cannot read posts aloud.</p>';
+  return `<h2>Read aloud</h2>
+    <p class="dim">The speaker on a post reads the text and the image description. Voice, speed, and volume are saved on your account.</p>
+    <label class="voice-label">Voice <select id="voice-pick">${voiceOptions(prefs.voiceURI)}</select></label>
+    <label class="vol voice-vol"><span>Volume</span> <b>${prefs.volume}%</b><input id="voice-volume" type="range" min="0" max="100" step="1" value="${prefs.volume}" aria-label="Read aloud volume"></label>
+    <label class="vol voice-vol"><span>Speed</span> <b>${prefs.rate}%</b><input id="voice-rate" type="range" min="50" max="200" step="5" value="${prefs.rate}" aria-label="Read aloud speed"></label>
+    <button type="button" class="text-btn" data-act="voice-sample">Play a sample</button>`;
+}
+
+function profileSettingsHtml() {
+  const edit = signedIn()
+    ? '<button type="button" class="primary small" data-act="edit-profile">Edit profile</button>'
+    : '<button type="button" class="primary small" data-act="signin">Sign in</button>';
+  return `<h2>Profile</h2>
+    <p class="dim">Your name, bio, avatar, banner, and pinned post are stored on the Bluesky profile record. Other Bluesky apps read that same record. Feeds, lists, and starter packs you pin on your profile are stored on it too.</p>
+    ${edit}`;
+}
+
+let tuneFeed = 'home';
+
+function openTune(kind, feedId) {
+  const dialog = $('tune');
+  const title = $('tune-title');
+  const body = $('tune-body');
+  if (!dialog || !body || !title) return;
+  if (kind === 'search') {
+    title.textContent = 'Search settings';
+    body.innerHTML = searchSettingsHtml({ heading: false });
+  } else if (kind === 'thread') {
+    title.textContent = 'Threads';
+    body.innerHTML = threadSettingsHtml({ heading: false });
+  } else if (kind === 'feed') {
+    tuneFeed = feedId || 'home';
+    title.textContent = 'Feed settings';
+    body.innerHTML = feedSettingsBody(tuneFeed, { heading: false, title: 'Feed' });
+  } else {
+    tuneFeed = 'home';
+    title.textContent = 'Home';
+    body.innerHTML = feedSettingsBody('home', { heading: false });
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+function chooseSearchSort(sort) {
+  if (sort !== 'latest' && sort !== 'top') return;
+  searchSort = sort;
+  saveSearchPrefs({ sort });
+  document.querySelectorAll('[data-sort]').forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.sort === sort ? 'true' : 'false');
+  });
+  const query = $('search-q')?.value.trim() || (parseHash()[0] === 'search' ? (parseHash()[1] || '') : '');
+  if (parseHash()[0] === 'search' && query) showSearch(query, { focus: false });
+}
+
+function chooseThreadSort(sort) {
+  const allowed = new Set(['oldest', 'newest', 'most-likes', 'random', 'hotness']);
+  if (!allowed.has(sort)) return;
+  saveThreadPrefs({ sort });
+  document.querySelectorAll('[data-thread-sort]').forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.threadSort === sort ? 'true' : 'false');
+  });
+  if (parseHash()[2] === 'post') route();
+}
+
+function onPrefToggle(name, checked) {
+  if (name === 'home.showReplies' || name === 'feed.showReplies') {
+    saveFeedView(name.startsWith('feed.') ? tuneFeed : 'home', { hideReplies: !checked });
+  } else if (name === 'home.showOutside' || name === 'feed.showOutside') {
+    saveFeedView(name.startsWith('feed.') ? tuneFeed : 'home', { hideRepliesByUnfollowed: !checked });
+  } else if (name === 'home.showReposts' || name === 'feed.showReposts') {
+    saveFeedView(name.startsWith('feed.') ? tuneFeed : 'home', { hideReposts: !checked });
+  } else if (name === 'home.showQuotes' || name === 'feed.showQuotes') {
+    saveFeedView(name.startsWith('feed.') ? tuneFeed : 'home', { hideQuotePosts: !checked });
+  } else if (name === 'thread.followed') {
+    saveThreadPrefs({ prioritizeFollowedUsers: checked });
+    if (parseHash()[2] === 'post') route();
+    return;
+  } else if (name === 'search.following' || name === 'search.hideReplies' || name === 'search.languagesOnly' || name === 'search.hideSensitive') {
+    saveSearchPrefs({ [name.slice('search.'.length)]: checked });
+    const query = parseHash()[0] === 'search' ? (parseHash()[1] || '') : '';
+    if (query) showSearch(query, { focus: false });
+    return;
+  } else return;
+  const feedId = name.startsWith('feed.') ? tuneFeed : 'home';
+  if (feedId === 'home' && !parseHash()[0]) route();
+  else if (feedId !== 'home' && parseHash()[0] === 'feed' && parseHash()[1] === feedId) route();
+}
+
+let speakingUri = '';
+
+function stopSpeech() {
+  window.speechSynthesis?.cancel();
+  speakingUri = '';
+  paintSpeaking();
+}
+
+function paintSpeaking() {
+  document.querySelectorAll('[data-act="speak"]').forEach((button) => {
+    const uri = button.closest('.post')?.dataset.uri || '';
+    const on = Boolean(uri && uri === speakingUri);
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function chosenVoice() {
+  const prefs = voicePrefs();
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  return voices.find((voice) => (voice.voiceURI || voice.name) === prefs.voiceURI) || null;
+}
+
+function speakAloud(text, uri = '') {
+  const synth = window.speechSynthesis;
+  if (!synth?.speak) {
+    toast('This browser cannot read aloud.');
+    return;
+  }
+  const prefs = voicePrefs();
+  if (prefs.volume <= 0) {
+    toast('Read-aloud volume is off. Change it in Settings.');
+    return;
+  }
+  const clean = String(text || '').trim();
+  if (!clean) {
+    toast('Nothing to read.');
+    return;
+  }
+  synth.cancel();
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.volume = Math.max(0, Math.min(1, prefs.volume / 100));
+  utter.rate = Math.max(0.5, Math.min(2, prefs.rate / 100));
+  const voice = chosenVoice();
+  if (voice) utter.voice = voice;
+  speakingUri = uri;
+  paintSpeaking();
+  utter.onend = () => {
+    if (speakingUri === uri) speakingUri = '';
+    paintSpeaking();
+  };
+  utter.onerror = () => {
+    speakingUri = '';
+    paintSpeaking();
+  };
+  synth.speak(utter);
+}
+
+function speakPost(found) {
+  const uri = found?.post?.uri || '';
+  if (uri && speakingUri === uri) {
+    stopSpeech();
+    return;
+  }
+  speakAloud(speechText(found?.post), uri);
+}
+
+function fillVoiceSelect() {
+  const select = $('voice-pick');
+  if (!select) return;
+  const current = select.value || voicePrefs().voiceURI;
+  select.innerHTML = voiceOptions(current);
+}
+
 function showSettings() {
   generation += 1;
   const token = generation;
@@ -1646,14 +1947,19 @@ function showSettings() {
       <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
     </div>
     <h2>Sounds</h2>
-    <p class="dim">A short sound plays for a new chat message or a new notification. Incoming calls use the chat sound. New posts on Home can play one too, and that one starts off. The browser may stay quiet until you click the page.</p>
+    <p class="dim">Each notice has its own volume. Incoming calls use the chat sound. New posts on Home start off. The browser may stay quiet until you click the page. Signed-in choices are saved on your account.</p>
     <div class="sound-list">
-      <div class="sound-row"><span>New chat messages</span><button type="button" data-sound="chat" aria-pressed="${sounds.chat ? 'true' : 'false'}">${sounds.chat ? 'On' : 'Off'}</button></div>
-      <div class="sound-row"><span>New notifications</span><button type="button" data-sound="notifications" aria-pressed="${sounds.notifications ? 'true' : 'false'}">${sounds.notifications ? 'On' : 'Off'}</button></div>
-      <div class="sound-row"><span>New posts on Home</span><button type="button" data-sound="posts" aria-pressed="${sounds.posts ? 'true' : 'false'}">${sounds.posts ? 'On' : 'Off'}</button></div>
+      ${soundRow('chat', 'New chat messages', sounds)}
+      ${soundRow('notifications', 'New notifications', sounds)}
+      ${soundRow('posts', 'New posts on Home', sounds)}
     </div>
+    ${voiceSettingsHtml()}
+    ${homeSettingsHtml()}
+    ${threadSettingsHtml()}
+    ${searchSettingsHtml()}
+    ${profileSettingsHtml()}
     <h2>Languages</h2>
-    <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type.</p>
+    <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type. Bluesky has no shared language preference, so these are saved on your account as LibreSky settings and kept in this browser too.</p>
     <input id="lang-find" class="lang-find" placeholder="Find a language" autocomplete="off">
     <h3>Content</h3>
     <div class="lang-grid" id="content-langs">${languageButtons('content', languagePrefs().content)}</div>
@@ -1662,12 +1968,13 @@ function showSettings() {
     <h2>AI</h2>
     ${aiSettingsHtml()}
     <h2>Muted words</h2>
-    <p class="dim">Posts containing these words are collapsed in your feeds on this browser.</p>
+    <p class="dim">Posts containing these words are collapsed in your feeds. Signed in, they are saved as Bluesky muted words, so the official app hides them too.</p>
     <form id="mute-form" class="mute-form"><input id="mute-input" placeholder="Add a word" maxlength="40"><button class="primary small" type="submit">Add</button></form>
     <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}" aria-label="Remove ${escapeHtml(word)}"><span>${escapeHtml(word)}</span><span class="chip-x" aria-hidden="true">×</span></button>`).join('')}</div>
     <h2>Keyboard</h2>
     <ul class="keys">
       <li><kbd>n</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>a</kbd> Read the selected post aloud</li>
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
       <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
     </ul>
@@ -2079,6 +2386,7 @@ function route() {
   closeMenu();
   hideSuggest();
   closeHover();
+  stopSpeech();
   stopHomeWatch();
   stopChatTimer();
   pager?.disconnect();
@@ -2763,27 +3071,19 @@ function accountMenuItems() {
   ];
 }
 
-const EMOJI = {
-  Smileys: ['😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😎', '🤔', '😅', '😢', '😭', '😡', '😴', '🤗', '😇'],
-  Gestures: ['👍', '👎', '👏', '🙏', '💪', '👋', '🤝', '👀', '🤷', '✌️', '🤞', '🔥'],
-  Hearts: ['❤️', '💙', '💚', '💛', '💜', '🖤', '🤍', '💖', '💯', '✨', '🌟', '🎉'],
-  Nature: ['🌞', '🌙', '⭐', '🌈', '🌸', '🍀', '🐶', '🐱', '🦋', '🌊'],
-  Food: ['☕', '🍕', '🍔', '🍣', '🍰', '🍓', '🍩', '🥑'],
-  Activities: ['⚽', '🏀', '🎮', '🎵', '📚', '✈️', '🎬', '🏆'],
-};
-
 function recentEmoji() {
   try {
     const list = JSON.parse(localStorage.getItem('libresky.emoji') || '[]');
-    return Array.isArray(list) ? list.filter((item) => typeof item === 'string').slice(0, 16) : [];
+    return Array.isArray(list) ? list.filter((item) => typeof item === 'string').slice(0, 24) : [];
   } catch {
     return [];
   }
 }
 
 function rememberEmoji(char) {
-  const next = [char, ...recentEmoji().filter((item) => item !== char)].slice(0, 16);
+  const next = [char, ...recentEmoji().filter((item) => item !== char)].slice(0, 24);
   localStorage.setItem('libresky.emoji', JSON.stringify(next));
+  syncClientPrefs();
 }
 
 function closePicker() {
@@ -3000,16 +3300,31 @@ function chooseAttach(uri) {
   updateCount();
 }
 
-function openEmojiPicker() {
-  pickerMode = 'emoji';
-  const box = $('compose-picker');
+function emojiButtons(list) {
+  return `<div class="emoji-grid">${list.map(([char, name]) => `<button type="button" data-emoji="${escapeHtml(char)}" aria-label="${escapeHtml(name || char)}">${char}</button>`).join('')}</div>`;
+}
+
+function paintEmojiList(query) {
+  const box = $('emoji-groups');
   if (!box) return;
   const groups = [];
   const recent = recentEmoji();
-  if (recent.length) groups.push(['Recent', recent]);
-  Object.entries(EMOJI).forEach(([name, list]) => groups.push([name, list]));
+  const needle = String(query || '').trim().toLowerCase();
+  if (recent.length && !needle) groups.push(['Recent', recent.map((char) => [char, char])]);
+  emojiGroups(query).forEach(([name, list]) => groups.push([name, list]));
+  box.innerHTML = groups.length
+    ? groups.map(([name, list]) => `<p class="picker-label">${escapeHtml(name)}</p>${emojiButtons(list)}`).join('')
+    : '<p class="picker-note">No emoji matched.</p>';
+}
+
+function openEmojiPicker(query = '') {
+  pickerMode = 'emoji';
+  const box = $('compose-picker');
+  if (!box) return;
   box.hidden = false;
-  box.innerHTML = `<div class="picker">${groups.map(([name, list]) => `<p class="picker-label">${escapeHtml(name)}</p><div class="emoji-grid">${list.map((char) => `<button type="button" data-emoji="${escapeHtml(char)}" aria-label="${escapeHtml(char)}">${char}</button>`).join('')}</div>`).join('')}</div>`;
+  box.innerHTML = `<div class="picker"><input id="emoji-find" placeholder="Search emoji" autocomplete="off" value="${escapeHtml(query)}"><div id="emoji-groups"></div></div>`;
+  paintEmojiList(query);
+  if (query) $('emoji-find')?.focus();
 }
 
 function insertEmoji(char) {
@@ -3022,8 +3337,9 @@ function insertEmoji(char) {
   area.setSelectionRange(caret, caret);
   rememberEmoji(char);
   area.dispatchEvent(new Event('input', { bubbles: true }));
+  const query = $('emoji-find')?.value || '';
+  if ($('emoji-groups')) paintEmojiList(query);
   area.focus();
-  openEmojiPicker();
 }
 
 function gifMedia(item, names) {
@@ -3206,6 +3522,7 @@ function toggleLanguage(kind, code) {
     return;
   } else list.push(code);
   const next = saveLanguagePrefs({ ...prefs, [kind]: list });
+  syncClientPrefs();
   document.querySelectorAll(`[data-lang-kind="${kind}"][data-lang="${code}"]`).forEach((button) => {
     button.setAttribute('aria-pressed', next[kind].includes(code) ? 'true' : 'false');
   });
@@ -4108,6 +4425,15 @@ function selectedText() {
 }
 
 async function onClick(event) {
+  const note = event.target.closest?.('.note[data-href]');
+  if (note && !event.target.closest('a, button')) {
+    if (selectedText().trim()) return;
+    const href = note.getAttribute('data-href');
+    if (!href) return;
+    if (location.hash === href) route();
+    else location.hash = href;
+    return;
+  }
   const facet = event.target.closest?.('a.facet');
   if (facet) {
     if (selectedText().trim()) return;
@@ -4190,6 +4516,31 @@ async function onClick(event) {
   }
   if (act === 'signin') return requireSignIn();
   if (act === 'compose') return openComposer();
+  if (act === 'search-settings') {
+    event.preventDefault();
+    openTune('search');
+    return;
+  }
+  if (act === 'home-settings') {
+    event.preventDefault();
+    openTune('home');
+    return;
+  }
+  if (act === 'thread-settings') {
+    event.preventDefault();
+    openTune('thread');
+    return;
+  }
+  if (act === 'feed-settings') {
+    event.preventDefault();
+    openTune('feed', event.target.closest('[data-feed]')?.dataset.feed || '');
+    return;
+  }
+  if (act === 'voice-sample') {
+    event.preventDefault();
+    speakAloud('This is how LibreSky reads a post.');
+    return;
+  }
   if (act === 'fresh-update') {
     event.preventDefault();
     applyFresh();
@@ -4293,6 +4644,7 @@ async function onClick(event) {
     if (act === 'edit-profile') return openProfileEditor();
     return;
   }
+  if (act === 'speak') return speakPost(found);
   if (act === 'reply') return openComposer({ reply: found.post });
   if (act === 'like') return toggleLike(found);
   if (act === 'bookmark') return toggleBookmark(found);
@@ -4310,10 +4662,13 @@ async function onClick(event) {
     location.hash = quote.getAttribute('data-href');
     return;
   }
-  if (selectedText().trim() && event.target.closest('.text, .bio, .quote-text, .bubble, .snip')) return;
-  if (event.target.closest('.post-main') && !event.target.closest('a, button')) {
+  if (selectedText().trim() && event.target.closest('.text, .bio, .quote-text, .bubble, .snip, .said')) return;
+  if (event.target.closest('.post') && !event.target.closest('a, button')) {
     const link = found.article.querySelector('.time');
-    if (link) location.hash = link.getAttribute('href');
+    const href = link?.getAttribute('href');
+    if (!href || !found.article.classList.contains('feed-post')) return;
+    if (location.hash === href) route();
+    else location.hash = href;
   }
 }
 
@@ -4977,6 +5332,24 @@ function onKey(event) {
     list.forEach((post, index) => post.classList.toggle('selected', index === selected));
     list[selected].scrollIntoView({ block: 'nearest' });
   }
+  if (event.key === 'Enter') {
+    const note = document.activeElement?.closest?.('.note[data-href]');
+    if (note) {
+      const href = note.getAttribute('data-href');
+      if (href) location.hash = href;
+      return;
+    }
+  }
+  if (event.key === 'a' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const article = postsOnPage()[selected];
+    if (!article) {
+      toast('Press j to select a post, then a to read it.');
+      return;
+    }
+    const found = postFrom(article);
+    if (found?.post) speakPost(found);
+    return;
+  }
   const current = postsOnPage()[selected];
   if (!current) return;
   if (event.key === 'l') current.querySelector('.action.like')?.click();
@@ -4988,6 +5361,12 @@ function onKey(event) {
 }
 
 function bind() {
+  setPrefsError((error) => toast(error?.message || 'Could not save settings to your account'));
+  const synth = window.speechSynthesis;
+  if (synth) {
+    synth.addEventListener?.('voiceschanged', fillVoiceSelect);
+    synth.onvoiceschanged = fillVoiceSelect;
+  }
   document.body.addEventListener('click', onClick);
   document.addEventListener('pointerdown', () => {
     const ctx = playSound.ctx;
@@ -5121,6 +5500,7 @@ function bind() {
   });
   $('compose-picker')?.addEventListener('input', (event) => {
     if (event.target.id === 'post-lang-find') filterLanguageButtons(event.target);
+    if (event.target.id === 'emoji-find') paintEmojiList(event.target.value);
   });
   $('compose-picker')?.addEventListener('keydown', (event) => {
     if (event.target.id === 'link-url' && event.key === 'Enter') {
@@ -5237,7 +5617,7 @@ function bind() {
       const word = $('mute-input').value.trim();
       if (!word) return;
       const list = [...new Set([...mutedWords(), word])];
-      setMutedWords(list);
+      syncMutedWords(list);
       showSettings();
     }
     if (event.target.id === 'app-pass-form') {
@@ -5253,7 +5633,22 @@ function bind() {
   });
   $('view').addEventListener('change', (event) => {
     if (event.target.id === 'ai-provider') syncAiFields();
+    if (event.target.id === 'voice-pick') saveVoicePrefs({ voiceURI: event.target.value || '' });
+    if (event.target.dataset?.volume) playSound(event.target.dataset.volume, { preview: true });
+    const pref = event.target?.dataset?.pref;
+    if (pref) onPrefToggle(pref, event.target.checked);
   });
+  document.addEventListener('change', (event) => {
+    if (event.target?.closest?.('#tune') && event.target.dataset?.pref) onPrefToggle(event.target.dataset.pref, event.target.checked);
+    if (event.target?.id === 'voice-pick' && event.target.closest('#tune')) saveVoicePrefs({ voiceURI: event.target.value || '' });
+  });
+  $('tune')?.addEventListener('click', (event) => {
+    const sort = event.target.closest('[data-sort]')?.dataset.sort;
+    if (sort === 'latest' || sort === 'top') chooseSearchSort(sort);
+    const threadSort = event.target.closest('[data-thread-sort]')?.dataset.threadSort;
+    if (threadSort) chooseThreadSort(threadSort);
+  });
+  $('tune-close')?.addEventListener('click', () => $('tune')?.close());
   $('view').addEventListener('keydown', (event) => {
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     if (onSuggestKey(event)) return;
@@ -5270,6 +5665,25 @@ function bind() {
     if (event.target.id === 'lang-find') {
       filterLanguageButtons(event.target);
       return;
+    }
+    if (event.target.id === 'emoji-find') {
+      paintEmojiList(event.target.value);
+      return;
+    }
+    const volumeKey = event.target.dataset?.volume;
+    if (volumeKey === 'chat' || volumeKey === 'notifications' || volumeKey === 'posts') {
+      const value = Number(event.target.value);
+      setSoundPrefs({ volume: { [volumeKey]: value } });
+      syncClientPrefs();
+      const label = event.target.closest('.vol')?.querySelector('b');
+      if (label) label.textContent = `${Math.round(value)}%`;
+      return;
+    }
+    if (event.target.id === 'voice-volume' || event.target.id === 'voice-rate') {
+      const value = Number(event.target.value);
+      saveVoicePrefs(event.target.id === 'voice-volume' ? { volume: value } : { rate: value });
+      const label = event.target.closest('.vol')?.querySelector('b');
+      if (label) label.textContent = `${Math.round(value)}%`;
     }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     fitChatInput(event.target);
@@ -5300,20 +5714,20 @@ function bind() {
       const key = soundButton.dataset.sound;
       const next = !soundPrefs()[key];
       setSoundPrefs({ [key]: next });
+      syncClientPrefs();
       soundButton.setAttribute('aria-pressed', next ? 'true' : 'false');
       soundButton.textContent = next ? 'On' : 'Off';
       if (next) playSound(key);
     }
+    const threadSort = event.target.closest('[data-thread-sort]')?.dataset.threadSort;
+    if (threadSort) chooseThreadSort(threadSort);
     const word = event.target.dataset?.unmute;
     if (word) {
-      setMutedWords(mutedWords().filter((item) => item !== word));
+      syncMutedWords(mutedWords().filter((item) => item !== word));
       showSettings();
     }
-    const sort = event.target.dataset?.sort;
-    if (sort === 'latest' || sort === 'top') {
-      searchSort = sort;
-      showSearch($('search-q')?.value.trim() || parseHash()[1] || '', { focus: false });
-    }
+    const sort = event.target.closest('[data-sort]')?.dataset.sort;
+    if (sort === 'latest' || sort === 'top') chooseSearchSort(sort);
     const explore = event.target.closest('[data-explore]')?.dataset.explore;
     if (explore && EXPLORE_TABS.some((tab) => tab.id === explore)) {
       exploreTab = explore;

@@ -128,22 +128,44 @@ export function setActiveDid(did) {
 
 const SOUND_KEY = 'libresky.sounds';
 
+function soundLevel(saved, key) {
+  const num = Number(saved?.volume?.[key]);
+  if (!Number.isFinite(num)) return 70;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
 export function soundPrefs() {
   const saved = readJson(SOUND_KEY);
-  if (!saved || typeof saved !== 'object') return { chat: true, notifications: true, posts: false };
+  if (!saved || typeof saved !== 'object') {
+    return { chat: true, notifications: true, posts: false, volume: { chat: 70, notifications: 70, posts: 70 } };
+  }
   return {
     chat: saved.chat !== false,
     notifications: saved.notifications !== false,
     posts: saved.posts === true,
+    volume: {
+      chat: soundLevel(saved, 'chat'),
+      notifications: soundLevel(saved, 'notifications'),
+      posts: soundLevel(saved, 'posts'),
+    },
   };
 }
 
 export function setSoundPrefs(next) {
   const current = soundPrefs();
+  const volume = { ...current.volume };
+  if (next?.volume && typeof next.volume === 'object') {
+    ['chat', 'notifications', 'posts'].forEach((key) => {
+      if (next.volume[key] == null) return;
+      const num = Number(next.volume[key]);
+      if (Number.isFinite(num)) volume[key] = Math.max(0, Math.min(100, Math.round(num)));
+    });
+  }
   const saved = {
     chat: typeof next?.chat === 'boolean' ? next.chat : current.chat,
     notifications: typeof next?.notifications === 'boolean' ? next.notifications : current.notifications,
     posts: typeof next?.posts === 'boolean' ? next.posts : current.posts,
+    volume,
   };
   localStorage.setItem(SOUND_KEY, JSON.stringify(saved));
   return saved;

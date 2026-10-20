@@ -279,7 +279,7 @@ export function postHtml(item, options = {}) {
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
-          <button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button>
+          <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read this post aloud">${icon('speaker')}</button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button></span>
         </div>
         ${parentHandle ? `<a class="replying" href="${profileHash(parentHandle)}">Replying to @${escapeHtml(parentHandle)}</a>` : ''}
         <div class="content${blur}">
@@ -470,7 +470,8 @@ function notificationGroupHtml(group, subjects) {
   const subjectText = typeof subject?.record?.text === 'string' ? subject.record.text.trim() : '';
   const replyHref = spoken && first.uri ? postHash({ uri: first.uri, author: first.author }) : '';
   const subjectHref = subject ? postHash(subject) : '';
-  const href = reason === 'follow' || reason === 'starterpack-joined' ? '' : (replyHref || subjectHref);
+  const profileHref = first.author?.handle || first.author?.did ? profileHash(first.author) : '';
+  const href = reason === 'follow' || reason === 'starterpack-joined' ? profileHref : (replyHref || subjectHref);
   const verbHtml = href ? `<a class="verb" href="${href}">${escapeHtml(verb)}</a>` : escapeHtml(verb);
   const saidHtml = saidText ? `<span class="said">${richText(said.text, said.facets)}</span>` : '';
   const showContext = Boolean(subjectText) && subjectText !== saidText;
@@ -480,7 +481,57 @@ function notificationGroupHtml(group, subjects) {
     : '';
   const snippet = context ? `<span class="note-context">${context}</span>` : '';
   const unread = group.some((note) => !note.isRead);
-  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${snippet}</span></article>`;
+  const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${snippet}</span></article>`;
+}
+
+export function speechText(post) {
+  if (!post) return '';
+  const bits = [];
+  const name = post.author?.displayName || post.author?.handle || '';
+  if (name) bits.push(name);
+  const text = String(post.record?.text || '').trim();
+  if (text) bits.push(text);
+  const alts = [];
+  const quotes = [];
+  const walk = (embed) => {
+    if (!embed || typeof embed !== 'object') return;
+    const type = String(embed.$type || '');
+    if (type.endsWith('images#view')) {
+      (embed.images || []).forEach((image) => {
+        const alt = String(image?.alt || '').trim();
+        alts.push(alt ? `Image. ${alt}` : 'Image.');
+      });
+      return;
+    }
+    if (type.endsWith('video#view')) {
+      const alt = String(embed.alt || '').trim();
+      alts.push(alt ? `Video. ${alt}` : 'Video.');
+      return;
+    }
+    if (type.endsWith('external#view')) {
+      const line = [embed.external?.title, embed.external?.description].map((part) => String(part || '').trim()).filter(Boolean).join('. ');
+      if (line) alts.push(`Link. ${line}`);
+      return;
+    }
+    if (type.endsWith('recordWithMedia#view')) {
+      walk(embed.media);
+      walk(embed.record);
+      return;
+    }
+    if (type.endsWith('record#view') || type.endsWith('viewRecord')) {
+      const record = embed.record || embed;
+      const value = record.value || record.record || {};
+      const quote = String(value.text || '').trim();
+      if (quote) quotes.push(quote);
+      (record.embeds || []).forEach(walk);
+      if (value.embed) walk(value.embed);
+    }
+  };
+  walk(post.embed);
+  if (quotes.length) bits.push(`Quote. ${quotes.join('. ')}`);
+  if (alts.length) bits.push(alts.join('. '));
+  return bits.join('. ');
 }
 
 export function notificationsHtml(notes, subjects) {

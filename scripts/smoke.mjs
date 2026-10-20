@@ -3,10 +3,11 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
+import { homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { setSoundPrefs, soundPrefs } from '../js/session.js';
 import { completeWord } from '../js/words.js';
 
@@ -122,6 +123,8 @@ assert.match(spoken, /Your post/);
 assert.match(spoken, /hello/);
 assert.match(spoken, /class="facet tag"/);
 assert.match(spoken, /note-kicker">Related post/);
+assert.match(spoken, /data-href="#\/profile\/d\.bsky\.social\/post\/reply"/);
+assert.match(notesHtml, /data-href=/);
 
 const mine = messageHtml({ text: 'hello @jay.bsky.social', sender: { did: 'did:me' } }, 'did:me');
 assert.match(mine, /class="bubble mine"/);
@@ -200,9 +203,33 @@ globalThis.localStorage = {
 };
 assert.equal(soundPrefs().posts, false);
 assert.equal(soundPrefs().chat, true);
-setSoundPrefs({ posts: true });
+assert.equal(soundPrefs().volume.chat, 70);
+setSoundPrefs({ posts: true, volume: { notifications: 25 } });
 assert.equal(soundPrefs().posts, true);
 assert.equal(soundPrefs().notifications, true);
+assert.equal(soundPrefs().volume.notifications, 25);
+assert.equal(soundPrefs().volume.chat, 70);
+const aloud = speechText({
+  author: { displayName: 'Ada' },
+  record: { text: 'Look' },
+  embed: { $type: 'app.bsky.embed.images#view', images: [{ alt: 'A blue door' }] },
+});
+assert.match(aloud, /Ada/);
+assert.match(aloud, /Look/);
+assert.match(aloud, /A blue door/);
+const homeReply = {
+  post: { author: { did: 'did:pal' }, record: { reply: { parent: { uri: 'at://did:stranger/app.bsky.feed.post/1' } } } },
+  reply: { parent: { author: { did: 'did:stranger' } } },
+};
+assert.equal(homeAllows(homeReply, { hideRepliesByUnfollowed: true, hideReplies: false, hideReposts: false, hideQuotePosts: false }, 'did:me'), false);
+assert.equal(homeAllows({ post: { author: { did: 'did:pal' }, record: {} }, reason: { $type: 'app.bsky.feed.defs#reasonRepost' } }, { hideReposts: true }, 'did:me'), false);
+assert.equal(searchAllows({ record: { reply: {} } }, { hideReplies: true }, {}), false);
+assert.equal(searchAllows({ record: { text: 'hi' }, author: { did: 'did:pal', viewer: { following: 'at://follow' } } }, { following: true }, { did: 'did:me' }), true);
+const ordered = sortThreadReplies([
+  { post: { likeCount: 1, record: { createdAt: '2026-10-20T00:00:00.000Z' } } },
+  { post: { likeCount: 9, record: { createdAt: '2026-10-20T01:00:00.000Z' } } },
+], { sort: 'most-likes', prioritizeFollowedUsers: false }, 'did:me');
+assert.equal(ordered[0].post.likeCount, 9);
 assert.doesNotMatch(shared, /class="post /);
 
 const headed = profileHtml({
@@ -435,8 +462,12 @@ assert.match(bothProfile, /class="verified official"/);
 assert.match(bothProfile, /class="verified domain"/);
 const invalidProfile = profileHtml({ handle: 'handle.invalid', displayName: 'Gone', did: 'did:plc:gone' });
 assert.doesNotMatch(invalidProfile, /verified/);
-assert.match(appSource, /data-sound="chat"/);
-assert.match(appSource, /data-sound="notifications"/);
+assert.match(appSource, /soundRow\('chat', 'New chat messages'/);
+assert.match(appSource, /soundRow\('notifications', 'New notifications'/);
+assert.match(appSource, /soundRow\('posts', 'New posts on Home'/);
+assert.match(appSource, /data-volume="\$\{key\}"/);
+assert.match(index, /class="head-post"/);
+assert.match(index, /id="tune"/);
 assert.match(appSource, /playSound\('call'\)/);
 assert.match(appSource, /data-act="chat-read"/);
 assert.match(appSource, /data-act="chat-cleanup"/);

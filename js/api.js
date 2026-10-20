@@ -365,6 +365,58 @@ export function putPreferences(preferences) {
   return xrpc('app.bsky.actor.putPreferences', { body: { preferences }, auth: 'required' });
 }
 
+export async function patchPreferences(change) {
+  const data = await getPreferences();
+  const current = Array.isArray(data?.preferences) ? data.preferences : [];
+  const next = change(current.map((pref) => ({ ...pref })));
+  if (!Array.isArray(next)) throw new Error('Could not save preferences.');
+  await putPreferences(next);
+  return next;
+}
+
+const CLIENT_SETTINGS = 'app.libresky.settings';
+
+function missingRecord(error) {
+  return error?.status === 400 || error?.status === 404;
+}
+
+export async function readClientSettings() {
+  try {
+    const data = await xrpc('com.atproto.repo.getRecord', {
+      params: { repo: currentDid(), collection: CLIENT_SETTINGS, rkey: 'self' },
+      auth: 'required',
+    });
+    return data?.value && typeof data.value === 'object' ? data.value : null;
+  } catch (error) {
+    if (missingRecord(error)) return null;
+    throw error;
+  }
+}
+
+export async function writeClientSettings(record) {
+  let current = {};
+  try {
+    const data = await xrpc('com.atproto.repo.getRecord', {
+      params: { repo: currentDid(), collection: CLIENT_SETTINGS, rkey: 'self' },
+      auth: 'required',
+    });
+    if (data?.value && typeof data.value === 'object') current = data.value;
+  } catch (error) {
+    if (!missingRecord(error)) throw error;
+  }
+  const next = { ...current, ...record, $type: CLIENT_SETTINGS };
+  return xrpc('com.atproto.repo.putRecord', {
+    body: {
+      repo: currentDid(),
+      collection: CLIENT_SETTINGS,
+      rkey: 'self',
+      record: next,
+      validate: false,
+    },
+    auth: 'required',
+  });
+}
+
 const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
 
 function tid() {
