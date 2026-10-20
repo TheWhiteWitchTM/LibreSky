@@ -89,25 +89,77 @@ export function hostOf(url) {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function textHtml(value) {
-  return escapeHtml(value).replace(/\n/g, '<br>');
+function textHtml(value, breaks) {
+  const html = escapeHtml(value);
+  return breaks === false ? html : html.replace(/\n/g, '<br>');
 }
 
-function featureHtml(slice, features) {
-  const html = textHtml(slice);
+function featureHtml(slice, features, links, breaks) {
+  const html = textHtml(slice, breaks);
   const mention = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#mention');
   const tag = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#tag');
   const link = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#link');
-  if (mention?.did) return `<a class="facet" href="${profileHash(mention.did)}">${html}</a>`;
-  if (tag?.tag) return `<a class="facet" href="#/search/${encodeURIComponent(`#${tag.tag}`)}">${html}</a>`;
+  const wrap = (className, href, external) => {
+    if (!links) return `<span class="facet ${className}">${html}</span>`;
+    if (!href) return html;
+    const extra = external ? ' target="_blank" rel="noopener noreferrer"' : '';
+    return `<a class="facet ${className}" href="${escapeHtml(href)}"${extra}>${html}</a>`;
+  };
+  if (mention?.did) return wrap('mention', profileHash(mention.did), false);
+  if (tag?.tag) return wrap('tag', `#/search/${encodeURIComponent(`#${tag.tag}`)}`, false);
   const href = link?.uri ? safeUrl(link.uri) : '';
-  if (href) return `<a class="facet" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>`;
+  if (href) return wrap('link', href, true);
   return html;
 }
 
-export function richText(text, facets) {
+function byteAt(source, index) {
+  return encoder.encode(source.slice(0, index)).length;
+}
+
+function overlaps(marks, start, end) {
+  return marks.some((mark) => mark.start < end && start < mark.end);
+}
+
+function syntheticMarks(source) {
+  const marks = [];
+  const take = (start, end, features) => {
+    if (end <= start || overlaps(marks, start, end)) return;
+    marks.push({ start, end, features });
+  };
+  const linkRe = /https?:\/\/[^\s<>"']+/g;
+  let match = linkRe.exec(source);
+  while (match) {
+    const raw = match[0].replace(/[),.!?:;]+$/g, '').replace(/[)\]}>'"]+$/g, '');
+    const start = byteAt(source, match.index);
+    take(start, start + encoder.encode(raw).length, [{ $type: 'app.bsky.richtext.facet#link', uri: raw }]);
+    match = linkRe.exec(source);
+  }
+  const mentionRe = /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+  match = mentionRe.exec(source);
+  while (match) {
+    const handle = match[2];
+    const at = match.index + match[1].length;
+    const start = byteAt(source, at);
+    take(start, start + encoder.encode(`@${handle}`).length, [{ $type: 'app.bsky.richtext.facet#mention', did: handle }]);
+    match = mentionRe.exec(source);
+  }
+  const tagRe = /(^|\s)#([\p{L}\p{N}_]{1,64})/gu;
+  match = tagRe.exec(source);
+  while (match) {
+    const tag = match[2];
+    const at = match.index + match[1].length;
+    const start = byteAt(source, at);
+    take(start, start + encoder.encode(`#${tag}`).length, [{ $type: 'app.bsky.richtext.facet#tag', tag }]);
+    match = tagRe.exec(source);
+  }
+  return marks;
+}
+
+export function richText(text, facets, options = {}) {
   const source = String(text ?? '');
   if (!source) return '';
+  const links = options.links !== false;
+  const breaks = options.breaks !== false;
   const bytes = encoder.encode(source);
   const marks = (facets || [])
     .map((facet) => ({
@@ -115,24 +167,56 @@ export function richText(text, facets) {
       end: facet?.index?.byteEnd ?? 0,
       features: facet?.features || [],
     }))
-    .filter((mark) => mark.end > mark.start && mark.start >= 0 && mark.end <= bytes.length)
-    .sort((a, b) => a.start - b.start);
+    .filter((mark) => mark.end > mark.start && mark.start >= 0 && mark.end <= bytes.length);
+  for (const mark of syntheticMarks(source)) {
+    if (!overlaps(marks, mark.start, mark.end) && mark.end <= bytes.length) marks.push(mark);
+  }
+  marks.sort((a, b) => a.start - b.start);
   let html = '';
   let cursor = 0;
   for (const mark of marks) {
     if (mark.start < cursor) continue;
-    html += textHtml(decoder.decode(bytes.slice(cursor, mark.start)));
-    html += featureHtml(decoder.decode(bytes.slice(mark.start, mark.end)), mark.features);
+    html += textHtml(decoder.decode(bytes.slice(cursor, mark.start)), breaks);
+    html += featureHtml(decoder.decode(bytes.slice(mark.start, mark.end)), mark.features, links, breaks);
     cursor = mark.end;
   }
-  html += textHtml(decoder.decode(bytes.slice(cursor)));
+  html += textHtml(decoder.decode(bytes.slice(cursor)), breaks);
   return html;
 }
 
 export function firstUrl(text) {
-  const match = String(text ?? '').match(/https?:\/\/[^\s]+/);
+  const match = String(text ?? '').match(/https?:\/\/[^\s<>"']+/);
   if (!match) return '';
-  return match[0].replace(/[),.]+$/, '');
+  return match[0].replace(/[),.!?:;]+$/g, '').replace(/[)\]}>'"]+$/g, '');
+}
+
+export function bskyPostParts(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, '');
+    if (!['bsky.app', 'staging.bsky.app', 'main.bsky.dev'].includes(host)) return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length < 4 || parts[0] !== 'profile' || parts[2] !== 'post') return null;
+    return { actor: decodeURIComponent(parts[1]), rkey: decodeURIComponent(parts[3]) };
+  } catch {
+    return null;
+  }
+}
+
+export function xStatusParts(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, '');
+    if (!['x.com', 'twitter.com', 'mobile.twitter.com', 'mobile.x.com', 'fxtwitter.com', 'vxtwitter.com', 'fixupx.com'].includes(host)) return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    const index = parts.lastIndexOf('status');
+    if (index < 0 || !parts[index + 1]) return null;
+    const id = parts[index + 1].replace(/\D.*$/, '');
+    if (!id) return null;
+    return { user: index > 0 ? parts[index - 1] : '', id };
+  } catch {
+    return null;
+  }
 }
 
 export function rkeyOf(uri) {

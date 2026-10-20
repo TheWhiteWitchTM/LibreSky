@@ -77,7 +77,27 @@ function linkCard(external) {
   const href = safeUrl(external.uri);
   if (!href) return '';
   const thumb = safeUrl(external.thumb || '');
-  return `<a class="card" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${thumb ? `<img src="${attr(thumb)}" alt="">` : ''}<span class="card-body"><span class="domain">${escapeHtml(hostOf(href))}</span><strong>${escapeHtml(external.title || href)}</strong>${external.description ? `<span class="desc">${escapeHtml(external.description)}</span>` : ''}</span></a>`;
+  return `<a class="card" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${thumb ? `<img src="${attr(thumb)}" alt="" onerror="this.remove()">` : ''}<span class="card-body"><span class="domain">${escapeHtml(hostOf(href))}</span><strong>${escapeHtml(external.title || href)}</strong>${external.description ? `<span class="desc">${escapeHtml(external.description)}</span>` : ''}</span></a>`;
+}
+
+export function linkPreviewHtml(card) {
+  if (!card) return '';
+  if (card.kind === 'quote' && card.post?.uri) {
+    return quote({
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        $type: 'app.bsky.embed.record#viewRecord',
+        uri: card.post.uri,
+        cid: card.post.cid,
+        author: card.post.author,
+        value: card.post.record,
+      },
+    }, false);
+  }
+  if (card.kind === 'external' && card.url) {
+    return linkCard({ uri: card.url, title: card.title, description: card.description, thumb: card.image });
+  }
+  return '';
 }
 
 function recordNode(node) {
@@ -86,18 +106,21 @@ function recordNode(node) {
   return node;
 }
 
-function quote(view) {
+function quote(view, linked = true) {
   const record = recordNode(view);
   if (!record) return '';
   const type = record.$type || '';
   if (type.endsWith('NotFound') || type.endsWith('Blocked') || type.endsWith('Detached')) {
     return '<div class="quote unavailable">Post unavailable</div>';
   }
-  if (type.endsWith('viewRecord') || record.value?.text != null || record.author) {
+  if (type.endsWith('viewRecord') || record.value?.text != null || record.record?.text != null || record.author) {
     const author = record.author || {};
-    const text = record.value?.text || '';
+    const text = record.value?.text ?? record.record?.text ?? '';
+    const facets = record.value?.facets || record.record?.facets;
     bag.set(record.uri, { post: { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author } });
-    return `<a class="quote" href="${postHash({ uri: record.uri, author })}">${avatar(author.avatar, author.displayName || author.handle, 'sm')}<span><span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span><span class="quote-text">${richText(text, record.value?.facets)}</span></span></a>`;
+    const href = linked ? ` href="${postHash({ uri: record.uri, author })}"` : '';
+    const tag = linked ? 'a' : 'div';
+    return `<${tag} class="quote"${href}>${avatar(author.avatar, author.displayName || author.handle, 'sm')}<span><span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span><span class="quote-text">${richText(text, facets)}</span></span></${tag}>`;
   }
   const who = record.creator || record.author;
   if (record.displayName && who) {
@@ -187,10 +210,10 @@ export function emptyHtml(title, body, extra = '') {
 }
 
 export function profileHtml(profile) {
-  const banner = safeUrl(profile.banner || '').replace(/[()'"]/g, '');
+  const banner = safeUrl(profile.banner || '');
   const name = profile.displayName || profile.handle;
   return `<header class="profile">
-    <div class="banner"${banner ? ` style="background-image:url('${banner.replace(/'/g, '')}')"` : ''}></div>
+    <div class="banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div>
     <div class="profile-row">
       ${avatar(profile.avatar, name, 'xl')}
       <div id="profile-action"></div>
@@ -220,27 +243,119 @@ const NOTE_VERB = {
   reply: 'replied to you',
   quote: 'quoted your post',
   mention: 'mentioned you',
+  'like-via-repost': 'liked a post you reposted',
+  'repost-via-repost': 'reposted a post you reposted',
+  'starterpack-joined': 'joined via your starter pack',
 };
 
+function groupKey(note) {
+  const reason = note?.reason || '';
+  if (reason === 'follow' || reason === 'starterpack-joined') return reason;
+  if (reason === 'like' || reason === 'repost' || reason === 'like-via-repost' || reason === 'repost-via-repost') {
+    return note.reasonSubject ? `${reason}:${note.reasonSubject}` : '';
+  }
+  return '';
+}
+
+export function groupNotifications(notes) {
+  const groups = [];
+  const index = new Map();
+  (notes || []).forEach((note) => {
+    const key = groupKey(note);
+    if (key && index.has(key)) {
+      groups[index.get(key)].push(note);
+      return;
+    }
+    if (key) index.set(key, groups.length);
+    groups.push([note]);
+  });
+  return groups;
+}
+
+function personLink(actor) {
+  const name = actor?.displayName || actor?.handle || 'Someone';
+  return `<a href="${profileHash(actor)}">${escapeHtml(name)}</a>`;
+}
+
+function peopleLabel(authors) {
+  const names = (authors || []).filter((actor) => actor && (actor.did || actor.handle));
+  const linked = names.map((actor) => `<strong>${personLink(actor)}</strong>`);
+  if (linked.length <= 1) return linked[0] || '<strong>Someone</strong>';
+  if (linked.length === 2) return `${linked[0]} and ${linked[1]}`;
+  if (linked.length === 3) return `${linked[0]}, ${linked[1]}, and ${linked[2]}`;
+  const rest = linked.slice(2).join(', ');
+  return `${linked[0]}, ${linked[1]}, <button type="button" class="text-btn inline" data-act="expand-names">and ${names.length - 2} others</button><span class="more-names" hidden>${rest}</span>`;
+}
+
+function avatarStack(authors) {
+  return `<span class="avatar-stack">${authors.slice(0, 8).map((actor) => {
+    const name = actor?.displayName || actor?.handle || '';
+    return `<a href="${profileHash(actor)}" aria-label="${attr(name)}">${avatar(actor?.avatar, name, 'sm')}</a>`;
+  }).join('')}</span>`;
+}
+
+function noteGlyph(reason) {
+  if (reason === 'like' || reason === 'like-via-repost') return 'heart';
+  if (reason === 'repost' || reason === 'quote' || reason === 'repost-via-repost') return 'repost';
+  if (reason === 'follow' || reason === 'starterpack-joined') return 'user';
+  return 'reply';
+}
+
 export function notificationHtml(note, subject) {
-  const author = note.author || {};
-  const name = author.displayName || author.handle || 'Someone';
-  const verb = NOTE_VERB[note.reason] || note.reason || 'interacted';
-  const href = note.reason === 'follow' ? profileHash(author) : (subject ? postHash(subject) : profileHash(author));
-  const snippet = subject?.record?.text || '';
-  const glyph = note.reason === 'like' ? 'heart' : note.reason === 'repost' || note.reason === 'quote' ? 'repost' : note.reason === 'follow' ? 'user' : 'reply';
-  return `<a class="note ${note.isRead ? '' : 'unread'} ${attr(note.reason)}" href="${href}"><span class="note-icon">${icon(glyph)}</span><span class="note-body">${avatar(author.avatar, name, 'sm')}<span class="note-text"><strong>${escapeHtml(name)}</strong> ${escapeHtml(verb)} <span class="time">${escapeHtml(timeAgo(note.indexedAt))}</span></span>${snippet ? `<span class="snip">${escapeHtml(snippet.slice(0, 180))}</span>` : ''}</span></a>`;
+  return notificationGroupHtml([note], subject ? new Map([[note.reasonSubject, subject]]) : new Map());
+}
+
+function notificationGroupHtml(group, subjects) {
+  const first = group[0] || {};
+  const reason = first.reason || '';
+  const authors = group.map((note) => note.author || {});
+  const subject = subjects?.get?.(first.reasonSubject);
+  const verb = NOTE_VERB[reason] || reason || 'interacted';
+  const href = reason === 'follow' || reason === 'starterpack-joined'
+    ? ''
+    : (subject ? postHash(subject) : '');
+  const verbHtml = href ? `<a class="verb" href="${href}">${escapeHtml(verb)}</a>` : escapeHtml(verb);
+  const snippet = subject?.record?.text
+    ? `<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
+    : '';
+  const unread = group.some((note) => !note.isRead);
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${snippet}</span></article>`;
+}
+
+export function notificationsHtml(notes, subjects) {
+  return groupNotifications(notes).map((group) => notificationGroupHtml(group, subjects)).join('');
+}
+
+function messagePreview(message) {
+  if (!message) return 'No messages yet';
+  const type = message.$type || '';
+  if (type.endsWith('deletedMessageView')) return 'Message deleted';
+  if (message.text) return message.text;
+  if (message.embed) return 'Sent a post';
+  return 'Message';
 }
 
 export function convoHtml(convo, me) {
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
-  const text = convo.lastMessage?.text || 'No messages yet';
+  const text = messagePreview(convo.lastMessage);
   return `<a class="person convo" href="#/messages/${encodeURIComponent(convo.id)}">${avatar(other.avatar, other.displayName || other.handle)}<span><strong>${escapeHtml(other.displayName || other.handle || 'Conversation')}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></span>${convo.unreadCount ? `<b class="pill">${convo.unreadCount}</b>` : ''}</a>`;
 }
 
 export function messageHtml(message, me) {
-  const mine = message?.sender?.did === me;
-  return `<div class="bubble${mine ? ' mine' : ''}">${escapeHtml(message?.text || '')}</div>`;
+  const type = message?.$type || '';
+  if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
+  const sender = message?.sender?.did || (typeof message?.sender === 'string' ? message.sender : '');
+  const mine = Boolean(sender && sender === me);
+  const text = message?.text || '';
+  const embed = message?.embed ? embedHtml(message.embed) : '';
+  if (!text && !embed) return '';
+  return `<div class="bubble${mine ? ' mine' : ''}">${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
+}
+
+export function chatHeaderHtml(actor) {
+  if (!actor) return '';
+  const name = actor.displayName || actor.handle || 'Chat';
+  return `<a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span></span></a>`;
 }
 
 export function threadList(node) {

@@ -1,10 +1,11 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
-import { splitAtUri } from './util.js';
+import { bskyPostParts, splitAtUri, xStatusParts } from './util.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
 export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
 const CHAT_PROXY = 'did:web:api.bsky.chat#bsky_chat';
+const APPVIEW = 'did:web:api.bsky.app#bsky_appview';
 
 let refreshLock = null;
 
@@ -295,8 +296,24 @@ export function getListFeed(list, cursor, signal) {
   return xrpc('app.bsky.feed.getListFeed', { params: { list, limit: 30, cursor }, signal });
 }
 
+function appview(ns, options = {}) {
+  return xrpc(ns, {
+    ...options,
+    headers: { ...(options.headers || {}), 'atproto-proxy': APPVIEW },
+  });
+}
+
+async function bookmarkCall(ns, options) {
+  try {
+    return await appview(ns, options);
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) throw error;
+    return xrpc(ns, options);
+  }
+}
+
 export function getBookmarks(cursor, signal) {
-  return xrpc('app.bsky.bookmark.getBookmarks', { params: { limit: 30, cursor }, signal, auth: 'required' });
+  return bookmarkCall('app.bsky.bookmark.getBookmarks', { params: { limit: 30, cursor }, signal, auth: 'required' });
 }
 
 function recordBody(collection, record) {
@@ -341,11 +358,11 @@ export function follow(did) {
 }
 
 export function bookmark(uri, cid) {
-  return xrpc('app.bsky.bookmark.createBookmark', { body: { uri, cid }, auth: 'required' });
+  return bookmarkCall('app.bsky.bookmark.createBookmark', { body: { uri, cid }, auth: 'required' });
 }
 
 export function removeBookmark(uri) {
-  return xrpc('app.bsky.bookmark.deleteBookmark', { body: { uri }, auth: 'required' });
+  return bookmarkCall('app.bsky.bookmark.deleteBookmark', { body: { uri }, auth: 'required' });
 }
 
 export function deleteRecord(uri) {
@@ -434,7 +451,7 @@ async function profileRecord() {
   }
 }
 
-export async function updateProfile({ displayName, description, avatar, pinnedPost } = {}) {
+export async function updateProfile({ displayName, description, avatar, banner, pinnedPost } = {}) {
   const record = await profileRecord();
   if (displayName != null) {
     if (displayName) record.displayName = displayName;
@@ -452,6 +469,8 @@ export async function updateProfile({ displayName, description, avatar, pinnedPo
     }
   }
   if (avatar) record.avatar = avatar;
+  if (banner) record.banner = banner;
+  else if (banner === null) delete record.banner;
   if (pinnedPost === null) delete record.pinnedPost;
   else if (pinnedPost) record.pinnedPost = pinnedPost;
   return xrpc('com.atproto.repo.putRecord', {
@@ -526,35 +545,119 @@ export async function facetsFor(text) {
   return facets.filter((facet) => facet.features.length);
 }
 
-export async function linkCard(url) {
+async function cardyb(url) {
+  const res = await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(url)}`);
+  if (!res.ok) return null;
+  const meta = await res.json();
+  if (!meta || meta.error) return null;
+  return meta;
+}
+
+function canonicalPost(meta) {
+  const tag = (meta?.at_tags || []).find((item) => item?.name === 'at:canonical' && String(item.uri || '').includes('/app.bsky.feed.post/'));
+  return tag?.uri || '';
+}
+
+async function quoteFromUri(uri) {
+  if (!uri) return null;
+  const data = await getPosts([uri]);
+  return data.posts?.[0] || null;
+}
+
+async function tweetMeta(status) {
+  const paths = [];
+  if (status.user && status.user !== 'i' && status.user !== 'web') {
+    paths.push(`${encodeURIComponent(status.user)}/status/${encodeURIComponent(status.id)}`);
+  }
+  paths.push(`status/${encodeURIComponent(status.id)}`);
+  for (const path of paths) {
+    try {
+      const res = await fetch(`https://api.fxtwitter.com/${path}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const tweet = data.tweet;
+      if (!tweet?.text && !tweet?.author) continue;
+      const photo = tweet.media?.photos?.[0]?.url
+        || tweet.media?.videos?.[0]?.thumbnail_url
+        || tweet.media?.external?.thumbnail_url
+        || '';
+      const name = tweet.author?.name || status.user || 'X';
+      const handle = tweet.author?.screen_name || status.user || '';
+      return {
+        url: tweet.url || '',
+        title: handle ? `${name} (@${handle})` : name,
+        description: String(tweet.text || '').slice(0, 400),
+        image: photo || tweet.author?.avatar_url || '',
+      };
+    } catch {
+      /* try the next address */
+    }
+  }
+  return null;
+}
+
+export async function inspectLink(url) {
+  const clean = String(url || '').trim();
+  if (!clean) return null;
+  const local = bskyPostParts(clean);
+  if (local) {
+    try {
+      const did = local.actor.startsWith('did:') ? local.actor : await resolveHandle(local.actor);
+      const post = await quoteFromUri(`at://${did}/app.bsky.feed.post/${local.rkey}`);
+      if (post) return { kind: 'quote', url: clean, post };
+    } catch {
+      /* a normal link card is the fallback */
+    }
+  }
+  const status = xStatusParts(clean);
+  if (status) {
+    const tweet = await tweetMeta(status);
+    if (tweet?.title || tweet?.description) {
+      return {
+        kind: 'external',
+        url: tweet.url || clean,
+        title: tweet.title || clean,
+        description: tweet.description || '',
+        image: tweet.image || '',
+      };
+    }
+  }
   try {
-    const res = await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(url)}`);
-    if (!res.ok) return null;
-    const meta = await res.json();
-    if (!meta?.title && !meta?.description) return null;
-    const external = {
-      uri: meta.url || url,
-      title: String(meta.title || url).slice(0, 300),
-      description: String(meta.description || '').slice(0, 1000),
-    };
-    if (meta.image) {
+    const meta = await cardyb(clean);
+    if (!meta) return null;
+    const canonical = canonicalPost(meta);
+    if (canonical) {
       try {
-        const image = await fetch(meta.image);
-        if (image.ok) {
-          const blob = await image.blob();
-          if (blob.size > 0 && blob.size < 1000000) {
-            const type = blob.type || 'image/jpeg';
-            external.thumb = await uploadBlob(new File([blob], 'thumb', { type }));
-          }
-        }
+        const post = await quoteFromUri(canonical);
+        if (post) return { kind: 'quote', url: clean, post };
       } catch {
-        /* the card still works without a thumbnail */
+        /* keep the external card */
       }
     }
-    return { $type: 'app.bsky.embed.external', external };
+    const title = String(meta.title || '').trim();
+    const description = String(meta.description || '').trim();
+    if (!title && !description) return null;
+    if (/post not found|404 error/i.test(title) && !description) return null;
+    return {
+      kind: 'external',
+      url: meta.url || clean,
+      title: title || clean,
+      description,
+      image: meta.image || '',
+    };
   } catch {
     return null;
   }
+}
+
+export function externalEmbed({ url, title, description, thumb }) {
+  const external = {
+    uri: url,
+    title: String(title || url).slice(0, 300),
+    description: String(description || '').slice(0, 1000),
+  };
+  if (thumb) external.thumb = thumb;
+  return { $type: 'app.bsky.embed.external', external };
 }
 
 export async function createPost({ text, images = [], reply = null, quote = null, link = null }) {
@@ -611,8 +714,26 @@ export function getConvo(convoId, signal) {
   return chat('chat.bsky.convo.getMessages', { params: { convoId, limit: 50 }, signal });
 }
 
-export function sendMessage(convoId, text) {
-  return chat('chat.bsky.convo.sendMessage', { body: { convoId, message: { text } } });
+export function getConvoView(convoId, signal) {
+  return chat('chat.bsky.convo.getConvo', { params: { convoId }, signal });
+}
+
+export function markConvoRead(convoId) {
+  return chat('chat.bsky.convo.updateRead', { body: { convoId } });
+}
+
+export async function sendMessage(convoId, message) {
+  const payload = typeof message === 'string' ? { text: message } : { ...message };
+  if (!payload.text) payload.text = '';
+  if (payload.text && !payload.facets) {
+    try {
+      const facets = await facetsFor(payload.text);
+      if (facets.length) payload.facets = facets;
+    } catch {
+      /* the text still sends */
+    }
+  }
+  return chat('chat.bsky.convo.sendMessage', { body: { convoId, message: payload } });
 }
 
 export function convoForMember(did) {

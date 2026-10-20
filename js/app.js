@@ -1,12 +1,14 @@
 import * as api from './api.js';
 import {
   actorHtml,
+  chatHeaderHtml,
   convoHtml,
   drainPosts,
   emptyHtml,
   feedHtml,
+  linkPreviewHtml,
   messageHtml,
-  notificationHtml,
+  notificationsHtml,
   postHtml,
   profileHtml,
   resetPosts,
@@ -28,7 +30,7 @@ import {
   setPassword,
   signedIn,
 } from './session.js';
-import { escapeHtml, firstUrl, graphemeLength, parseHash, profileHash } from './util.js';
+import { escapeHtml, firstUrl, graphemeLength, hostOf, parseHash, profileHash, richText } from './util.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -338,16 +340,33 @@ async function showNotifications(filter) {
   try {
     const data = await api.getNotifications(null, null, reasons);
     if (token !== generation) return;
-    const uris = [...new Set((data.notifications || []).map((note) => note.reasonSubject).filter(Boolean))].slice(0, 25);
-    let subjects = new Map();
-    if (uris.length) {
+    const subjects = new Map();
+    const learn = async (notes) => {
+      const uris = [...new Set(notes.map((note) => note.reasonSubject).filter((uri) => uri && !subjects.has(uri)))].slice(0, 25);
+      if (!uris.length) return;
       try {
         const fetched = await api.getPosts(uris);
-        subjects = new Map((fetched.posts || []).map((post) => [post.uri, post]));
+        (fetched.posts || []).forEach((post) => subjects.set(post.uri, post));
       } catch { /* snippets are optional */ }
-    }
-    $('view').innerHTML = (data.notifications || []).map((note) => notificationHtml(note, subjects.get(note.reasonSubject))).join('')
-      || emptyHtml('No notifications', 'You are all caught up.');
+    };
+    let all = data.notifications || [];
+    await learn(all);
+    if (token !== generation) return;
+    const paint = () => {
+      $('view').innerHTML = notificationsHtml(all, subjects) || emptyHtml('No notifications', 'You are all caught up.');
+    };
+    paint();
+    const more = async (cursor) => {
+      const page = await api.getNotifications(cursor, null, reasons);
+      if (token !== generation) return;
+      const extra = page.notifications || [];
+      await learn(extra);
+      if (token !== generation) return;
+      all = all.concat(extra);
+      paint();
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
     api.updateSeen().then(refreshBadge).catch(() => {});
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load notifications', error.message);
@@ -370,13 +389,19 @@ async function showMessages(convoId) {
       $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       return;
     }
-    const data = await api.getConvo(convoId);
+    const [data, convoWrap] = await Promise.all([
+      api.getConvo(convoId),
+      api.getConvoView(convoId).catch(() => null),
+    ]);
     if (token !== generation) return;
+    const other = (convoWrap?.convo?.members || []).find((member) => member.did !== myDid()) || null;
+    if (other) $('title').textContent = other.displayName || `@${other.handle}`;
     const messages = (data.messages || []).slice().reverse();
-    $('view').innerHTML = `<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><input id="chat-text" maxlength="1000" placeholder="Message" autocomplete="off"><button class="primary small" type="submit">Send</button></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><input id="chat-text" maxlength="1000" placeholder="Message" autocomplete="off"><button class="primary small" type="submit">Send</button></form>`;
     $('chat-text')?.focus();
     const scroller = $('view').querySelector('.messages');
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
   } catch (error) {
     if (!cancelled(token, error)) {
       $('view').innerHTML = emptyHtml('Messages are unavailable', error.message || 'This sign-in does not include chat access.');
@@ -395,8 +420,26 @@ async function showBookmarks() {
   try {
     const data = await api.getBookmarks();
     if (token !== generation) return;
-    const items = (data.bookmarks || []).map((mark) => ({ post: mark.subject || mark.item || mark.post })).filter((item) => item.post?.uri);
-    paintFeed(items);
+    const saved = [];
+    const gone = [];
+    (data.bookmarks || []).forEach((mark) => {
+      const subject = mark.subject || mark.item || mark.post;
+      if (!subject?.uri) return;
+      const type = subject.$type || '';
+      if (subject.notFound || subject.blocked || type.includes('NotFound') || type.includes('Blocked')) {
+        gone.push(subject);
+        return;
+      }
+      subject.viewer = { ...(subject.viewer || {}), bookmarked: true };
+      saved.push({ post: subject });
+    });
+    const goneHtml = gone.map((subject) => `<div class="note"><span class="note-icon"></span><span class="note-body"><span>This saved post is unavailable.</span><button type="button" class="text-btn" data-act="remove-bookmark" data-uri="${escapeHtml(subject.uri)}">Remove bookmark</button></span></div>`).join('');
+    if (!saved.length && !gone.length) {
+      $('view').innerHTML = emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.');
+    } else if (saved.length) {
+      paintFeed(saved);
+      if (goneHtml) $('view').insertAdjacentHTML('afterbegin', goneHtml);
+    } else $('view').innerHTML = goneHtml;
     document.documentElement.dataset.ready = '1';
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load bookmarks', error.message);
@@ -695,18 +738,118 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
   if (replies) replies.hidden = Boolean(reply);
   if (!reply && $('compose-replies')) $('compose-replies').value = 'everyone';
   dialog._files = [];
+  dialog._card = null;
+  dialog._dismissedUrl = '';
   $('compose-previews').innerHTML = '';
+  const linkBox = $('compose-link');
+  if (linkBox) {
+    linkBox.hidden = true;
+    linkBox.innerHTML = '';
+  }
   updateCount();
+  scheduleLinkPreview();
   if (!dialog.open) dialog.showModal();
   area.focus();
 }
 
+let linkEpoch = 0;
+let linkTimer = 0;
+
 function updateCount() {
-  const left = 300 - graphemeLength($('compose-text').value);
+  const area = $('compose-text');
+  const value = area?.value || '';
+  const left = 300 - graphemeLength(value);
   $('compose-count').textContent = String(left);
   $('compose-count').classList.toggle('over', left < 0);
   const files = $('compose')._files || [];
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length);
+  const card = $('compose')._card;
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card);
+  const pre = $('compose-highlight');
+  if (pre) pre.innerHTML = `${richText(value, null, { links: false, breaks: false })}\n`;
+}
+
+function scheduleLinkPreview() {
+  clearTimeout(linkTimer);
+  linkTimer = setTimeout(refreshLinkPreview, 400);
+}
+
+function paintLinkPreview() {
+  const dialog = $('compose');
+  const box = $('compose-link');
+  const card = dialog?._card;
+  const images = (dialog?._files || []).length > 0;
+  if (!box) return;
+  if (!card || (images && card.kind !== 'quote')) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<div class="link-preview">${linkPreviewHtml(card)}<button type="button" class="card-dismiss" data-act="dismiss-link" aria-label="Remove preview">×</button></div>`;
+}
+
+async function refreshLinkPreview() {
+  const dialog = $('compose');
+  const box = $('compose-link');
+  if (!dialog?.open || !box) return;
+  const url = firstUrl($('compose-text').value);
+  if (!url || dialog.dataset.quote || dialog._dismissedUrl === url) {
+    dialog._card = null;
+    box.hidden = true;
+    box.innerHTML = '';
+    updateCount();
+    return;
+  }
+  if (dialog._card?.sourceUrl === url) {
+    paintLinkPreview();
+    return;
+  }
+  const token = ++linkEpoch;
+  box.hidden = false;
+  box.innerHTML = `<div class="card"><span class="card-body"><span class="domain">${escapeHtml(hostOf(url))}</span><strong>Loading preview…</strong></span></div>`;
+  let card = null;
+  try { card = await api.inspectLink(url); } catch { card = null; }
+  if (token !== linkEpoch || !dialog.open) return;
+  if (!card) {
+    dialog._card = null;
+    box.hidden = true;
+    box.innerHTML = '';
+    updateCount();
+    return;
+  }
+  card.sourceUrl = url;
+  dialog._card = card;
+  paintLinkPreview();
+  updateCount();
+}
+
+function dropUrl(text, url) {
+  if (!url) return text;
+  return text.replace(url, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function thumbFile(imageUrl) {
+  const load = async (target) => {
+    const res = await fetch(target);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.size || blob.size > 8000000) return null;
+    const type = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+    const file = new File([blob], 'thumb', { type });
+    if ((type === 'image/jpeg' || type === 'image/png') && file.size < 1000000) return file;
+    return compress(file);
+  };
+  try {
+    const direct = await load(imageUrl);
+    if (direct) return direct;
+  } catch {
+    /* try the card proxy, which allows the browser to read the image */
+  }
+  if (String(imageUrl).startsWith('https://cardyb.bsky.app/')) return null;
+  try {
+    return await load(`https://cardyb.bsky.app/v1/image?url=${encodeURIComponent(imageUrl)}`);
+  } catch {
+    return null;
+  }
 }
 
 async function compress(file) {
@@ -745,14 +888,14 @@ async function addFiles(list) {
   }
   $('compose')._files = bucket;
   renderPreviews();
+  paintLinkPreview();
 }
 
 async function publish(event) {
   event.preventDefault();
   const dialog = $('compose');
-  const text = $('compose-text').value.trim();
+  let text = $('compose-text').value.trim();
   const files = dialog._files || [];
-  if (!text && !files.length) return;
   if (graphemeLength(text) > 300) return;
   $('compose-send').disabled = true;
   $('compose-send').textContent = 'Posting…';
@@ -766,12 +909,27 @@ async function publish(event) {
       const raw = JSON.parse(dialog.dataset.reply);
       reply = { root: raw.root, parent: { uri: raw.uri, cid: raw.cid } };
     }
-    const quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
+    let quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
     let link = null;
-    if (!images.length && !quote) {
-      const url = firstUrl(text);
-      if (url) link = await api.linkCard(url);
+    const url = firstUrl(text);
+    let card = dialog._card;
+    if (url && dialog._dismissedUrl !== url && !quote) {
+      if (!card || card.sourceUrl !== url) {
+        try { card = await api.inspectLink(url); } catch { card = null; }
+      }
+      if (card?.kind === 'quote' && card.post?.uri) {
+        quote = { uri: card.post.uri, cid: card.post.cid };
+        text = dropUrl(text, card.sourceUrl || url);
+      } else if (card?.kind === 'external' && !images.length) {
+        let thumb = null;
+        if (card.image) {
+          const file = await thumbFile(card.image);
+          if (file) thumb = await api.uploadBlob(file);
+        }
+        link = api.externalEmbed({ ...card, url: card.url || url, thumb });
+      }
     }
+    if (!text && !images.length && !quote && !link) return;
     const created = await api.createPost({ text, images, reply, quote, link });
     let gateWarning = '';
     const gate = $('compose-replies')?.value || 'everyone';
@@ -818,6 +976,38 @@ async function onClick(event) {
   const act = event.target.closest('[data-act]')?.dataset.act;
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
+  }
+  if (act === 'dismiss-link') {
+    event.preventDefault();
+    const dialog = $('compose');
+    dialog._dismissedUrl = dialog._card?.sourceUrl || firstUrl($('compose-text').value);
+    dialog._card = null;
+    const box = $('compose-link');
+    if (box) {
+      box.hidden = true;
+      box.innerHTML = '';
+    }
+    updateCount();
+    return;
+  }
+  if (act === 'remove-bookmark') {
+    event.preventDefault();
+    const uri = event.target.closest('[data-uri]')?.dataset.uri;
+    if (!uri) return;
+    if (!signedIn()) return requireSignIn();
+    try {
+      await api.removeBookmark(uri);
+      event.target.closest('.note, .post')?.remove();
+      toast('Bookmark removed');
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (act === 'expand-names') {
+    event.preventDefault();
+    const more = event.target.nextElementSibling;
+    if (more) more.hidden = false;
+    event.target.remove();
+    return;
   }
   if (act === 'signin') return requireSignIn();
   if (act === 'compose') return openComposer();
@@ -902,6 +1092,8 @@ function moreMenu(anchor, found) {
     { id: 'copy-text', label: 'Copy text' },
     { id: 'quote', label: 'Quote' },
   ];
+  items.push({ id: 'send-chat', label: 'Send in chat' });
+  if (found.article.dataset.bookmarked === '1') items.push({ id: 'unbookmark', label: 'Remove bookmark' });
   if (own) {
     items.push({ id: pinnedUri === found.post.uri ? 'unpin' : 'pin', label: pinnedUri === found.post.uri ? 'Unpin from profile' : 'Pin to profile' });
     items.push({ id: 'delete', label: 'Delete' });
@@ -962,6 +1154,16 @@ function openProfileEditor() {
   $('profile-name').value = profile.displayName || '';
   $('profile-bio').value = profile.description || '';
   $('profile-avatar').value = '';
+  $('profile-banner').value = '';
+  $('profile-edit').dataset.clearBanner = '';
+  const preview = $('profile-banner-preview');
+  if (profile.banner) {
+    preview.src = profile.banner;
+    preview.hidden = false;
+  } else {
+    preview.hidden = true;
+    preview.removeAttribute('src');
+  }
   if (!$('profile-edit').open) $('profile-edit').showModal();
 }
 
@@ -973,11 +1175,15 @@ async function saveProfile(event) {
     let avatar = null;
     const file = $('profile-avatar').files?.[0];
     if (file) avatar = await api.uploadBlob(await compress(file));
-    await api.updateProfile({
+    const bannerFile = $('profile-banner').files?.[0];
+    const changes = {
       displayName: $('profile-name').value.trim(),
       description: $('profile-bio').value.trim(),
       avatar,
-    });
+    };
+    if (bannerFile) changes.banner = await api.uploadBlob(await compress(bannerFile));
+    else if ($('profile-edit').dataset.clearBanner === '1') changes.banner = null;
+    await api.updateProfile(changes);
     $('profile-edit').close();
     toast('Profile saved');
     await loadMe();
@@ -1017,6 +1223,8 @@ async function onMenu(event) {
   if (!id || !found) return;
   if (!['copy', 'copy-text', 'share', 'quote'].includes(id) && !signedIn()) return requireSignIn();
   if (id === 'quote') return openComposer({ quote: found.post });
+  if (id === 'unbookmark') return toggleBookmark(found);
+  if (id === 'send-chat') return sendPostToChat(found);
   if (id === 'share') return sharePost(found);
   if (id === 'copy' || id === 'copy-text') {
     const value = id === 'copy' ? postLink(found) : (found.post.record?.text || '');
@@ -1160,8 +1368,42 @@ async function toggleBookmark(found) {
   try {
     if (on) await api.removeBookmark(article.dataset.uri);
     else await api.bookmark(article.dataset.uri, article.dataset.cid);
+    if (on && parseHash()[0] === 'bookmarks') {
+      article.remove();
+      if (!$('view').querySelector('.post')) {
+        $('view').insertAdjacentHTML('beforeend', emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.'));
+      }
+      toast('Bookmark removed');
+      return;
+    }
     article.dataset.bookmarked = on ? '0' : '1';
-    button.classList.toggle('on', !on);
+    button?.classList.toggle('on', !on);
+    button?.setAttribute('aria-pressed', on ? 'false' : 'true');
+    toast(on ? 'Bookmark removed' : 'Bookmarked');
+  } catch (error) { toast(error.message); }
+}
+
+async function sendPostToChat(found) {
+  if (!signedIn()) return requireSignIn();
+  const handle = window.prompt('Send this post to which handle?');
+  if (!handle) return;
+  const url = postLink(found);
+  const embed = {
+    $type: 'app.bsky.embed.record',
+    record: { uri: found.post.uri, cid: found.post.cid },
+  };
+  try {
+    const did = await api.resolveHandle(handle.trim().replace(/^@/, ''));
+    const data = await api.convoForMember(did);
+    const id = data.convo?.id;
+    if (!id) throw new Error('Could not open that conversation.');
+    try {
+      await api.sendMessage(id, { text: '', embed });
+    } catch {
+      await api.sendMessage(id, { text: url, embed });
+    }
+    toast('Sent in chat');
+    location.hash = `#/messages/${encodeURIComponent(id)}`;
   } catch (error) { toast(error.message); }
 }
 
@@ -1419,12 +1661,30 @@ function bind() {
   $('report-cancel').addEventListener('click', () => $('report').close());
   $('profile-form').addEventListener('submit', saveProfile);
   $('profile-cancel').addEventListener('click', () => $('profile-edit').close());
+  $('profile-banner')?.addEventListener('change', () => {
+    const file = $('profile-banner').files?.[0];
+    if (!file) return;
+    $('profile-edit').dataset.clearBanner = '';
+    $('profile-banner-preview').src = URL.createObjectURL(file);
+    $('profile-banner-preview').hidden = false;
+  });
+  $('profile-banner-clear')?.addEventListener('click', () => {
+    $('profile-edit').dataset.clearBanner = '1';
+    $('profile-banner').value = '';
+    $('profile-banner-preview').hidden = true;
+    $('profile-banner-preview').removeAttribute('src');
+  });
   $('compose-form').addEventListener('submit', publish);
   $('compose-cancel').addEventListener('click', () => $('compose').close());
   $('compose-text').addEventListener('input', () => {
     updateCount();
     const dialog = $('compose');
     if (!dialog.dataset.reply && !dialog.dataset.quote) saveDraft($('compose-text').value);
+    scheduleLinkPreview();
+  });
+  $('compose-text').addEventListener('scroll', () => {
+    const pre = $('compose-highlight');
+    if (pre) pre.scrollTop = $('compose-text').scrollTop;
   });
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
@@ -1453,9 +1713,14 @@ function bind() {
       const id = parseHash()[1];
       if (!text || !id) return;
       input.disabled = true;
-      api.sendMessage(id, text).then(() => {
+      api.sendMessage(id, text).then((sent) => {
         input.value = '';
-        $('view').querySelector('.messages')?.insertAdjacentHTML('beforeend', messageHtml({ text, sender: { did: myDid() } }, myDid()));
+        const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
+        if (!message.sender) message.sender = { did: myDid() };
+        if (!message.text) message.text = text;
+        const list = $('view').querySelector('.messages');
+        list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
+        if (list) list.scrollTop = list.scrollHeight;
       }).catch((error) => toast(error.message)).finally(() => { input.disabled = false; input.focus(); });
     }
     if (event.target.id === 'thread-reply') {

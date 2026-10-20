@@ -4,7 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LibreSky</title>
-  <meta name="description" content="LibreSky is a Bluesky client for the browser.">
+  <meta name="description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="LibreSky">
+  <meta property="og:title" content="LibreSky">
+  <meta property="og:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta property="og:url" content="https://thewhitewitchtm.github.io/LibreSky/">
+  <meta property="og:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="LibreSky, a Bluesky client">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LibreSky">
+  <meta name="twitter:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta name="twitter:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
+  <meta name="twitter:image:alt" content="LibreSky, a Bluesky client">
   <meta name="theme-color" content="#0085ff">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -124,7 +138,11 @@
         <button type="submit" class="primary small" id="compose-send" disabled>Post</button>
       </div>
       <div id="compose-context"></div>
-      <textarea id="compose-text" rows="5" placeholder="What's up?" maxlength="2000"></textarea>
+      <div class="composer-field">
+        <pre id="compose-highlight" aria-hidden="true"></pre>
+        <textarea id="compose-text" rows="5" placeholder="What's up?" maxlength="2000"></textarea>
+      </div>
+      <div id="compose-link" hidden></div>
       <div id="compose-previews"></div>
       <label class="reply-control" id="reply-control">Who can reply
         <select id="compose-replies">
@@ -180,6 +198,13 @@
       <div class="compose-bar">
         <button type="button" class="text-btn" id="profile-cancel">Cancel</button>
         <button type="submit" class="primary small">Save</button>
+      </div>
+      <div class="banner-field">
+        <img id="profile-banner-preview" alt="" hidden>
+        <label>Banner
+          <input id="profile-banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+        </label>
+        <button type="button" class="text-btn" id="profile-banner-clear">Remove banner</button>
       </div>
       <label>Display name
         <input id="profile-name" maxlength="64" autocomplete="nickname">
