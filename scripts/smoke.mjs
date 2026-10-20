@@ -30,6 +30,8 @@ const rendered = feedHtml(payload.feed);
 assert.match(rendered, /class="post/);
 assert.match(rendered, /class="action like"/);
 assert.match(rendered, /class="action repost"/);
+assert.match(rendered, /data-act="share"/);
+assert.match(rendered, /class="action-group like/);
 assert.match(rendered, /class="name"/);
 assert.doesNotMatch(rendered, /<script/i);
 const handle = payload.feed[0].post.author.handle;
@@ -64,6 +66,8 @@ for (const file of await walk(root)) {
 
 const index = await readFile(path.join(root, 'index.html'), 'utf8');
 assert.match(index, /Sign in with Bluesky/);
+assert.match(index, /Create a Bluesky account/);
+assert.match(index, /stay signed in/);
 assert.match(index, /js\/app\.js/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);
 

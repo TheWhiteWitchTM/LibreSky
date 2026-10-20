@@ -1,6 +1,7 @@
 const PASSWORD_KEY = 'libresky.passwordSession';
 const MUTED_KEY = 'libresky.mutedWords';
 const DRAFT_KEY = 'libresky.draft';
+const HANDLE_KEY = 'libresky.handle';
 
 let password = null;
 let oauth = null;
@@ -42,8 +43,19 @@ export function getPassword() {
 
 export function setPassword(next) {
   password = next;
-  if (next) localStorage.setItem(PASSWORD_KEY, JSON.stringify(next));
-  else localStorage.removeItem(PASSWORD_KEY);
+  if (next) {
+    localStorage.setItem(PASSWORD_KEY, JSON.stringify(next));
+    if (next.handle) setLastHandle(next.handle);
+  } else localStorage.removeItem(PASSWORD_KEY);
+}
+
+export function lastHandle() {
+  return localStorage.getItem(HANDLE_KEY) || '';
+}
+
+export function setLastHandle(handle) {
+  const clean = String(handle || '').trim().replace(/^@/, '');
+  if (clean) localStorage.setItem(HANDLE_KEY, clean);
 }
 
 export function getOauth() {

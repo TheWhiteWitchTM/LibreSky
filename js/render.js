@@ -43,8 +43,20 @@ function counts(post) {
   };
 }
 
-function action(name, label, on, count) {
-  return `<button type="button" class="action ${name}${on ? ' on' : ''}" data-act="${name}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${attr(label)}">${icon(name === 'like' ? 'heart' : name === 'bookmark' ? 'bookmark' : name)}<span class="count">${compact(count)}</span></button>`;
+function verifiedMark(actor) {
+  if (actor?.verification?.verifiedStatus !== 'valid') return '';
+  return '<svg class="verified" viewBox="0 0 16 16" role="img" aria-label="Verified"><title>Verified</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>';
+}
+
+function action(name, label, on, count, listAct) {
+  const shown = compact(count);
+  const glyph = name === 'like' ? 'heart' : name === 'bookmark' ? 'bookmark' : name;
+  const button = `<button type="button" class="action ${name}${on ? ' on' : ''}" data-act="${name}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${attr(label)}">${icon(glyph)}</button>`;
+  if (name === 'bookmark' || name === 'share') return button;
+  const countHtml = listAct
+    ? `<button type="button" class="count-link" data-act="${listAct}" aria-label="${attr(`${label} count`)}">${shown}</button>`
+    : `<span class="count">${shown}</span>`;
+  return `<span class="action-group ${name}${on ? ' on' : ''}">${button}${countHtml}</span>`;
 }
 
 function gallery(images) {
@@ -139,7 +151,7 @@ export function postHtml(item, options = {}) {
       <a class="avatar-link" href="${profileHash(author)}">${avatar(author.avatar, author.displayName || author.handle)}</a>
       <div class="post-main">
         <div class="post-top">
-          <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}</a>
+          <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           <button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button>
@@ -152,9 +164,10 @@ export function postHtml(item, options = {}) {
         </div>
         <div class="actions">
           ${action('reply', 'Reply', false, number.reply)}
-          ${action('repost', 'Repost', reposted, number.repost)}
-          ${action('like', 'Like', liked, number.like)}
+          ${action('repost', 'Repost', reposted, number.repost, 'reposts')}
+          ${action('like', 'Like', liked, number.like, 'likes')}
           ${action('bookmark', 'Bookmark', saved, 0)}
+          ${action('share', 'Share', false, 0)}
         </div>
       </div>
     </div>
@@ -182,17 +195,22 @@ export function profileHtml(profile) {
       ${avatar(profile.avatar, name, 'xl')}
       <div id="profile-action"></div>
     </div>
-    <h2>${escapeHtml(name)}</h2>
+    <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
     <div class="handle">@${escapeHtml(profile.handle)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     <p class="counts"><a href="#/profile/${encodeURIComponent(profile.handle)}/following"><strong>${fullCount(profile.followsCount)}</strong> following</a><a href="#/profile/${encodeURIComponent(profile.handle)}/followers"><strong>${fullCount(profile.followersCount)}</strong> followers</a><span><strong>${fullCount(profile.postsCount)}</strong> posts</span></p>
   </header>`;
 }
 
-export function actorHtml(actor) {
+export function actorHtml(actor, options = {}) {
   const name = actor.displayName || actor.handle;
   const desc = actor.description ? escapeHtml(actor.description).slice(0, 120) : '';
-  return `<a class="person" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</span></a>`;
+  const following = actor.viewer?.following || '';
+  const showFollow = Boolean(options.follow && actor.did && actor.did !== options.self);
+  const follow = showFollow
+    ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(actor.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
+    : '';
+  return `<div class="person">${avatar(actor.avatar, name)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${follow}</div>`;
 }
 
 const NOTE_VERB = {

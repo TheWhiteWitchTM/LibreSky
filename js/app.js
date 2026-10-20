@@ -17,10 +17,12 @@ import {
   currentDid,
   getOauth,
   getPassword,
+  lastHandle,
   loadDraft,
   loadPassword,
   mutedWords,
   saveDraft,
+  setLastHandle,
   setMutedWords,
   setOauth,
   setPassword,
@@ -35,6 +37,8 @@ let oauthReady = null;
 let generation = 0;
 let pager = null;
 let selected = -1;
+let searchSort = 'latest';
+let reportTarget = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -128,9 +132,29 @@ function paintFeed(items, { append = false } = {}) {
   remember();
 }
 
+function clearBoot() {
+  $('boot')?.remove();
+}
+
+function openGate() {
+  document.documentElement.dataset.signedOut = '1';
+  const input = $('login-handle');
+  const saved = lastHandle();
+  if (saved && input && !input.value) input.value = saved;
+  const error = $('login-error');
+  if (error) error.hidden = true;
+  const dialog = $('login');
+  if (dialog && !dialog.open) dialog.showModal();
+  input?.focus();
+}
+
+function closeGate() {
+  document.documentElement.removeAttribute('data-signed-out');
+  if ($('login')?.open) $('login').close();
+}
+
 function requireSignIn() {
-  $('login').showModal();
-  $('login-handle').focus();
+  openGate();
 }
 
 function updateAccount() {
@@ -160,6 +184,7 @@ async function loadMe() {
   }
   try {
     me.profile = await api.getProfile(did);
+    if (me.profile?.handle) setLastHandle(me.profile.handle);
     if (getPassword()) {
       const session = getPassword();
       setPassword({ ...session, displayName: me.profile.displayName || session.handle, avatar: me.profile.avatar || '' });
@@ -172,18 +197,31 @@ async function loadMe() {
   loadRail();
 }
 
+function paintBadge(id, count) {
+  const node = $(id);
+  if (!node) return;
+  node.hidden = count < 1;
+  node.textContent = count > 99 ? '99+' : String(count);
+}
+
 async function refreshBadge() {
   if (!signedIn()) {
-    $('notif-badge').hidden = true;
+    paintBadge('notif-badge', 0);
+    paintBadge('chat-badge', 0);
     return;
   }
   try {
     const data = await api.getUnreadCount();
-    const count = data.count || 0;
-    $('notif-badge').hidden = count < 1;
-    $('notif-badge').textContent = count > 99 ? '99+' : String(count);
+    paintBadge('notif-badge', data.count || 0);
   } catch {
     /* the badge is optional */
+  }
+  try {
+    const data = await api.listConvos();
+    const count = (data.convos || []).reduce((sum, convo) => sum + (convo.unreadCount || 0), 0);
+    paintBadge('chat-badge', count);
+  } catch {
+    paintBadge('chat-badge', 0);
   }
 }
 
@@ -197,7 +235,7 @@ async function loadRail() {
     const data = await api.getSuggestions();
     const people = data.actors || [];
     card.innerHTML = people.length
-      ? `<section class="panel"><h2>Suggested follows</h2>${people.map(actorHtml).join('')}</section>`
+      ? `<section class="panel"><h2>Suggested follows</h2>${people.map((actor) => actorHtml(actor, { follow: true, self: myDid() })).join('')}</section>`
       : '';
   } catch {
     card.innerHTML = '';
@@ -252,16 +290,17 @@ function homePrompt() {
 async function showSearch(query) {
   const token = ++generation;
   setChrome({ title: 'Search', nav: 'search' });
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label></form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts and people.')}</div>`;
+  const sort = `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label>${sort}</form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts and people.')}</div>`;
   $('search-q')?.focus();
   if (!query) return;
   try {
     const [postData, actorData] = await Promise.all([
-      api.searchPosts(query),
+      api.searchPosts(query, null, null, searchSort),
       api.searchActors(query),
     ]);
     if (token !== generation) return;
-    const people = (actorData.actors || []).slice(0, 5).map(actorHtml).join('');
+    const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
     resetPosts();
     $('search-results').innerHTML = `${people ? `<div class="people">${people}</div>` : ''}${feedHtml((postData.posts || []).map((post) => ({ post }))) || emptyHtml('No posts', 'Nothing matched that search.')}`;
     remember();
@@ -270,16 +309,34 @@ async function showSearch(query) {
   }
 }
 
-async function showNotifications() {
+const NOTE_FILTERS = [
+  ['', 'All', null],
+  ['replies', 'Replies', ['reply', 'quote', 'mention']],
+  ['likes', 'Likes', ['like', 'like-via-repost']],
+  ['reposts', 'Reposts', ['repost', 'repost-via-repost']],
+  ['follows', 'Follows', ['follow']],
+];
+
+async function showNotifications(filter) {
   const token = ++generation;
-  setChrome({ title: 'Notifications', nav: 'notifications' });
+  const current = NOTE_FILTERS.some(([id]) => id === filter) ? filter : '';
+  const reasons = NOTE_FILTERS.find(([id]) => id === current)?.[2] || null;
+  setChrome({
+    title: 'Notifications',
+    nav: 'notifications',
+    tabs: NOTE_FILTERS.map(([id, label]) => ({
+      href: id ? `#/notifications/${id}` : '#/notifications',
+      label,
+      on: id === current,
+    })),
+  });
   if (!signedIn()) {
     $('view').innerHTML = emptyHtml('Notifications', 'Sign in to see likes, replies, and follows.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
     return;
   }
   showSkeletons();
   try {
-    const data = await api.getNotifications();
+    const data = await api.getNotifications(null, null, reasons);
     if (token !== generation) return;
     const uris = [...new Set((data.notifications || []).map((note) => note.reasonSubject).filter(Boolean))].slice(0, 25);
     let subjects = new Map();
@@ -467,7 +524,11 @@ async function showProfile(actor, tab) {
     else feed = await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0]);
     if (token !== generation) return;
     resetPosts();
-    $('view').innerHTML = profileHtml(profile) + (feedHtml(feed.feed) || emptyHtml('No posts', 'Nothing in this tab yet.'));
+    const pin = profile.pinnedPost?.uri ? profile.pinnedPost : profile.pinnedPost?.post;
+    const pinHtml = current === 'posts' && pin?.uri && pin?.author
+      ? `<p class="pinned-label">Pinned</p>${postHtml({ post: pin })}`
+      : '';
+    $('view').innerHTML = profileHtml(profile) + pinHtml + (feedHtml(feed.feed) || emptyHtml('No posts', 'Nothing in this tab yet.'));
     $('profile-action').innerHTML = action;
     remember();
     document.documentElement.dataset.ready = '1';
@@ -478,9 +539,15 @@ async function showProfile(actor, tab) {
 
 function profileAction(profile) {
   if (!signedIn()) return '<button type="button" class="primary small" data-act="signin">Sign in</button>';
-  if (profile.did === myDid()) return '';
+  if (profile.did === myDid()) return '<button type="button" class="primary small" data-act="edit-profile">Edit profile</button>';
   const following = profile.viewer?.following || '';
-  return `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
+  const blocking = profile.viewer?.blocking || '';
+  const follow = blocking
+    ? ''
+    : `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
+  const block = `<button type="button" class="${blocking ? 'danger' : 'text-btn'}" data-act="block-profile" data-did="${escapeHtml(profile.did)}" data-blocking="${escapeHtml(blocking)}">${blocking ? 'Blocked' : 'Block'}</button>`;
+  const report = `<button type="button" class="text-btn" data-act="report-profile" data-did="${escapeHtml(profile.did)}">Report</button>`;
+  return `<span class="profile-actions">${follow}${block}${report}</span>`;
 }
 
 async function showPeople(actor, kind) {
@@ -546,12 +613,42 @@ function showSettings() {
     <ul class="keys">
       <li><kbd>n</kbd> New post</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
-      <li><kbd>b</kbd> Bookmark</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
+      <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
     </ul>
     <h2>Account</h2>
-    <p class="dim">LibreSky talks to the Bluesky network. Sign in with Bluesky happens on Bluesky’s own login page. An app password is checked by your account’s server and stored only in this browser.</p>
+    <p class="dim">You stay signed in on this browser until you sign out. Sign in with Bluesky happens on Bluesky’s own page. LibreSky cannot read the session stored in the Bluesky app.</p>
     ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary" data-act="signin">Sign in</button>'}
   </section>`;
+}
+
+async function showEngagement(kind, uri) {
+  const token = ++generation;
+  setChrome({ title: kind === 'likes' ? 'Likes' : 'Reposts', nav: 'home', back: true });
+  showSkeletons();
+  try {
+    const load = (cursor) => (kind === 'likes' ? api.getLikes(uri, cursor) : api.getRepostedBy(uri, cursor));
+    const actorsOf = (data) => (kind === 'likes' ? (data.likes || []).map((item) => item.actor) : (data.repostedBy || []));
+    const data = await load();
+    if (token !== generation) return;
+    const paint = (list, append) => {
+      const html = list.filter(Boolean).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
+      if (append) {
+        if (html) $('view').insertAdjacentHTML('beforeend', html);
+        return;
+      }
+      $('view').innerHTML = html || emptyHtml('Nobody yet', kind === 'likes' ? 'No likes yet.' : 'No reposts yet.');
+    };
+    paint(actorsOf(data), false);
+    const more = async (cursor) => {
+      const page = await load(cursor);
+      if (token !== generation) return;
+      paint(actorsOf(page), true);
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load this list', error.message);
+  }
 }
 
 function route() {
@@ -562,7 +659,8 @@ function route() {
   if (!a) return showHome('following');
   if (a === 'discover') return showHome('discover');
   if (a === 'search') return showSearch(b || '');
-  if (a === 'notifications') return showNotifications();
+  if (a === 'notifications') return showNotifications(b || '');
+  if ((a === 'likes' || a === 'reposts') && b) return showEngagement(a, b);
   if (a === 'messages') return showMessages(b || '');
   if (a === 'bookmarks') return showBookmarks();
   if (a === 'feeds') return showFeeds();
@@ -593,6 +691,9 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
   else context.innerHTML = '';
   const area = $('compose-text');
   area.value = text || (!reply && !quote ? loadDraft() : '');
+  const replies = $('reply-control');
+  if (replies) replies.hidden = Boolean(reply);
+  if (!reply && $('compose-replies')) $('compose-replies').value = 'everyone';
   dialog._files = [];
   $('compose-previews').innerHTML = '';
   updateCount();
@@ -671,10 +772,24 @@ async function publish(event) {
       const url = firstUrl(text);
       if (url) link = await api.linkCard(url);
     }
-    await api.createPost({ text, images, reply, quote, link });
+    const created = await api.createPost({ text, images, reply, quote, link });
+    let gateWarning = '';
+    const gate = $('compose-replies')?.value || 'everyone';
+    if (!reply && gate !== 'everyone' && created?.uri) {
+      const allow = gate === 'none'
+        ? []
+        : gate === 'following'
+          ? [{ $type: 'app.bsky.feed.threadgate#followingRule' }]
+          : [{ $type: 'app.bsky.feed.threadgate#mentionRule' }];
+      try {
+        await api.createThreadgate(created.uri, allow);
+      } catch {
+        gateWarning = ' Reply limits were not saved.';
+      }
+    }
     if (!reply && !quote) saveDraft('');
     dialog.close();
-    toast('Posted');
+    toast(`Posted.${gateWarning}`);
     route();
   } catch (error) {
     toast(error.message);
@@ -690,10 +805,11 @@ function closeMenu() {
 
 function openMenu(anchor, items) {
   const menu = $('menu');
+  menu._post = null;
   menu.innerHTML = items.map((item) => `<button type="button" data-menu="${escapeHtml(item.id)}">${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
   const rect = anchor.getBoundingClientRect();
-  const width = 220;
+  const width = 250;
   menu.style.top = `${rect.bottom + 6}px`;
   menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
 }
@@ -744,11 +860,19 @@ async function onClick(event) {
   const found = postFrom(event.target);
   if (!found?.post) {
     if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
+    if (act === 'block-profile') return toggleBlock(event.target.closest('[data-act="block-profile"]'));
+    if (act === 'report-profile') return openReport({ did: event.target.closest('[data-did]')?.dataset.did });
+    if (act === 'edit-profile') return openProfileEditor();
     return;
   }
   if (act === 'reply') return openComposer({ reply: found.post });
   if (act === 'like') return toggleLike(found);
   if (act === 'bookmark') return toggleBookmark(found);
+  if (act === 'share') return sharePost(found);
+  if (act === 'likes' || act === 'reposts') {
+    location.hash = `#/${act}/${encodeURIComponent(found.article.dataset.uri)}`;
+    return;
+  }
   if (act === 'repost') return repostMenu(event.target.closest('.action'), found);
   if (act === 'more') return moreMenu(event.target.closest('.more'), found);
   if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
@@ -769,15 +893,121 @@ function repostMenu(anchor, found) {
 }
 
 function moreMenu(anchor, found) {
-  const own = found.post.author?.did && found.post.author.did === myDid();
+  const author = found.post.author || {};
+  const own = author.did && author.did === myDid();
+  const pinnedUri = me.profile?.pinnedPost?.uri || me.profile?.pinnedPost?.post?.uri || '';
   const items = [
+    { id: 'share', label: 'Share' },
     { id: 'copy', label: 'Copy link' },
+    { id: 'copy-text', label: 'Copy text' },
     { id: 'quote', label: 'Quote' },
   ];
-  if (own) items.push({ id: 'delete', label: 'Delete' });
-  else items.push({ id: 'mute', label: 'Mute account' });
+  if (own) {
+    items.push({ id: pinnedUri === found.post.uri ? 'unpin' : 'pin', label: pinnedUri === found.post.uri ? 'Unpin from profile' : 'Pin to profile' });
+    items.push({ id: 'delete', label: 'Delete' });
+  } else {
+    items.push({ id: author.viewer?.muted ? 'unmute' : 'mute', label: author.viewer?.muted ? 'Unmute account' : 'Mute account' });
+    if (!author.viewer?.blocking) items.push({ id: 'block', label: 'Block account' });
+    items.push({ id: 'report', label: 'Report post' });
+  }
+  items.push({ id: 'mute-thread', label: 'Mute thread' });
   openMenu(anchor, items);
   $('menu')._post = found;
+}
+
+function postLink(found) {
+  const handle = found.post.author?.handle;
+  const rkey = found.post.uri?.split('/').pop();
+  if (handle && rkey) return `https://bsky.app/profile/${handle}/post/${rkey}`;
+  const link = new URL(location.href);
+  link.hash = found.article.querySelector('.time')?.getAttribute('href') || location.hash;
+  return link.href;
+}
+
+function threadRoot(post) {
+  return post?.record?.reply?.root?.uri || post?.uri || '';
+}
+
+async function sharePost(found) {
+  const url = postLink(found);
+  const text = (found.post.record?.text || '').slice(0, 180);
+  const title = found.post.author?.handle ? `@${found.post.author.handle} on Bluesky` : 'Bluesky';
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied');
+  } catch {
+    toast(url);
+  }
+}
+
+function openReport(target) {
+  if (!signedIn()) return requireSignIn();
+  if (!target?.post && !target?.did) return;
+  reportTarget = target;
+  if ($('report-text')) $('report-text').value = '';
+  if (!$('report').open) $('report').showModal();
+}
+
+function openProfileEditor() {
+  const profile = me.profile;
+  if (!profile) return;
+  $('profile-name').value = profile.displayName || '';
+  $('profile-bio').value = profile.description || '';
+  $('profile-avatar').value = '';
+  if (!$('profile-edit').open) $('profile-edit').showModal();
+}
+
+async function saveProfile(event) {
+  event.preventDefault();
+  const button = event.target.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    let avatar = null;
+    const file = $('profile-avatar').files?.[0];
+    if (file) avatar = await api.uploadBlob(await compress(file));
+    await api.updateProfile({
+      displayName: $('profile-name').value.trim(),
+      description: $('profile-bio').value.trim(),
+      avatar,
+    });
+    $('profile-edit').close();
+    toast('Profile saved');
+    await loadMe();
+    route();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitReport(event) {
+  event.preventDefault();
+  const target = reportTarget;
+  if (!target) return;
+  const reasonType = $('report-reason').value;
+  const reason = $('report-text').value.trim();
+  const button = event.target.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    if (target.post) await api.reportPost(target.post.uri, target.post.cid, reasonType, reason);
+    else await api.reportAccount(target.did, reasonType, reason);
+    $('report').close();
+    reportTarget = null;
+    toast('Report sent');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function onMenu(event) {
@@ -785,20 +1015,51 @@ async function onMenu(event) {
   const found = $('menu')._post;
   closeMenu();
   if (!id || !found) return;
+  if (!['copy', 'copy-text', 'share', 'quote'].includes(id) && !signedIn()) return requireSignIn();
   if (id === 'quote') return openComposer({ quote: found.post });
-  if (id === 'copy') {
-    const link = new URL(location.href);
-    link.hash = found.article.querySelector('.time')?.getAttribute('href') || location.hash;
-    await navigator.clipboard.writeText(link.href);
-    toast('Link copied');
+  if (id === 'share') return sharePost(found);
+  if (id === 'copy' || id === 'copy-text') {
+    const value = id === 'copy' ? postLink(found) : (found.post.record?.text || '');
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(id === 'copy' ? 'Link copied' : 'Text copied');
+    } catch (error) { toast(error.message); }
     return;
   }
   if (id === 'repost' || id === 'unrepost') return toggleRepost(found);
   if (id === 'delete') return deletePost(found);
-  if (id === 'mute') {
+  if (id === 'report') return openReport(found);
+  if (id === 'mute' || id === 'unmute') {
     try {
-      await api.muteActor(found.post.author.did);
-      toast(`Muted @${found.post.author.handle}`);
+      if (id === 'mute') await api.muteActor(found.post.author.did);
+      else await api.unmuteActor(found.post.author.did);
+      toast(id === 'mute' ? `Muted @${found.post.author.handle}` : 'Unmuted');
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'block') {
+    const handle = found.post.author?.handle || 'this account';
+    if (!window.confirm(`Block @${handle}? You will not see each other’s posts.`)) return;
+    try {
+      await api.block(found.post.author.did);
+      found.article.remove();
+      toast('Blocked');
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'mute-thread') {
+    try {
+      await api.muteThread(threadRoot(found.post));
+      toast('Thread muted');
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  if (id === 'pin' || id === 'unpin') {
+    try {
+      const ref = id === 'pin' ? { uri: found.post.uri, cid: found.post.cid } : null;
+      await api.updateProfile({ pinnedPost: ref });
+      if (me.profile) me.profile.pinnedPost = ref;
+      toast(id === 'pin' ? 'Pinned to your profile' : 'Unpinned');
     } catch (error) { toast(error.message); }
   }
 }
@@ -813,7 +1074,9 @@ async function toggleLike(found) {
   article.dataset.like = nextOn ? 'pending' : '';
   article.dataset.likeCount = String(Math.max(0, previous + (nextOn ? 1 : -1)));
   button.classList.toggle('on', nextOn);
-  button.querySelector('.count').textContent = compactCount(article.dataset.likeCount);
+  button.closest('.action-group')?.classList.toggle('on', nextOn);
+  const likeCount = button.closest('.action-group')?.querySelector('.count-link, .count');
+  if (likeCount) likeCount.textContent = compactCount(article.dataset.likeCount);
   try {
     if (existing && existing !== 'pending') await api.deleteRecord(existing);
     else article.dataset.like = (await api.like(article.dataset.uri, article.dataset.cid)).uri;
@@ -821,7 +1084,9 @@ async function toggleLike(found) {
     article.dataset.like = existing;
     article.dataset.likeCount = String(previous);
     button.classList.toggle('on', Boolean(existing));
-    button.querySelector('.count').textContent = compactCount(previous);
+    button.closest('.action-group')?.classList.toggle('on', Boolean(existing));
+    const rolled = button.closest('.action-group')?.querySelector('.count-link, .count');
+    if (rolled) rolled.textContent = compactCount(previous);
     toast(error.message);
   }
 }
@@ -838,14 +1103,51 @@ async function toggleRepost(found) {
   const article = found.article;
   const existing = article.dataset.repost;
   const button = article.querySelector('.action.repost');
+  const previous = Number(article.dataset.repostCount || 0);
+  const nextOn = !existing;
+  const nextCount = Math.max(0, previous + (nextOn ? 1 : -1));
+  article.dataset.repost = nextOn ? 'pending' : '';
+  article.dataset.repostCount = String(nextCount);
+  button?.classList.toggle('on', nextOn);
+  button?.closest('.action-group')?.classList.toggle('on', nextOn);
+  const count = button?.closest('.action-group')?.querySelector('.count-link, .count');
+  if (count) count.textContent = compactCount(nextCount);
+  try {
+    if (existing && existing !== 'pending') await api.deleteRecord(existing);
+    else article.dataset.repost = (await api.repost(article.dataset.uri, article.dataset.cid)).uri;
+  } catch (error) {
+    article.dataset.repost = existing;
+    article.dataset.repostCount = String(previous);
+    button?.classList.toggle('on', Boolean(existing));
+    button?.closest('.action-group')?.classList.toggle('on', Boolean(existing));
+    if (count) count.textContent = compactCount(previous);
+    toast(error.message);
+  }
+}
+
+async function toggleBlock(button) {
+  if (!button) return;
+  if (!signedIn()) return requireSignIn();
+  const did = button.dataset.did;
+  const existing = button.dataset.blocking;
   try {
     if (existing) {
       await api.deleteRecord(existing);
-      article.dataset.repost = '';
-      button.classList.remove('on');
+      button.dataset.blocking = '';
+      button.classList.remove('danger');
+      button.classList.add('text-btn');
+      button.textContent = 'Block';
+      toast('Unblocked');
+      route();
     } else {
-      article.dataset.repost = (await api.repost(article.dataset.uri, article.dataset.cid)).uri;
-      button.classList.add('on');
+      const handle = button.closest('.profile')?.querySelector('.handle')?.textContent || 'this account';
+      if (!window.confirm(`Block ${handle}? You will not see each other’s posts.`)) return;
+      button.dataset.blocking = (await api.block(did)).uri;
+      button.classList.add('danger');
+      button.classList.remove('text-btn');
+      button.textContent = 'Blocked';
+      toast('Blocked');
+      route();
     }
   } catch (error) { toast(error.message); }
 }
@@ -961,6 +1263,7 @@ async function startOAuth(event) {
     return;
   }
   const typed = $('login-handle').value.trim().replace(/^@/, '');
+  if (typed && !typed.startsWith('http')) setLastHandle(typed);
   const button = $('login-oauth');
   button.disabled = true;
   button.textContent = 'Opening Bluesky…';
@@ -971,6 +1274,29 @@ async function startOAuth(event) {
     error.textContent = err.message || 'Bluesky did not open the login page.';
     button.disabled = false;
     button.textContent = 'Sign in with Bluesky';
+  }
+}
+
+async function startSignup() {
+  const error = $('login-error');
+  error.hidden = true;
+  if (!client) {
+    error.hidden = false;
+    error.textContent = 'Open Bluesky to create an account, then come back and sign in.';
+    window.open('https://bsky.app', '_blank', 'noopener');
+    return;
+  }
+  const button = $('login-signup');
+  button.disabled = true;
+  button.textContent = 'Opening Bluesky…';
+  try {
+    // No handle is sent, so Bluesky’s page can offer account creation.
+    await client.signInRedirect('https://bsky.social');
+  } catch (err) {
+    error.hidden = false;
+    error.textContent = err.message || 'Bluesky did not open the signup page.';
+    button.disabled = false;
+    button.textContent = 'Create a Bluesky account';
   }
 }
 
@@ -989,9 +1315,9 @@ async function startPassword() {
   try {
     await api.loginWithPassword(identifier, password);
     $('login-password').value = '';
-    $('login').close();
+    closeGate();
     await loadMe();
-    location.hash = '#/';
+    if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = '#/';
     route();
     toast(`Signed in as @${getPassword().handle}`);
   } catch (err) {
@@ -1010,15 +1336,20 @@ async function signOut() {
   if (sub && client) await client.revoke(sub).catch(() => {});
   updateAccount();
   loadRail();
+  $('view').innerHTML = '';
   location.hash = '#/';
-  route();
+  openGate();
 }
 
 function onKey(event) {
   if (event.key === 'Escape') closeMenu();
   const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
   if (typing || document.querySelector('dialog[open]')) {
-    if (event.key === 'Escape') document.querySelector('dialog[open]')?.close();
+    if (event.key === 'Escape') {
+      const dialog = document.querySelector('dialog[open]');
+      if (dialog?.id === 'login' && !signedIn()) return;
+      dialog?.close();
+    }
     return;
   }
   const postsOnPage = () => [...document.querySelectorAll('#view .post.feed-post')];
@@ -1041,6 +1372,7 @@ function onKey(event) {
   if (event.key === 'r') current.querySelector('.action.reply')?.click();
   if (event.key === 't') current.querySelector('.action.repost')?.click();
   if (event.key === 'b') current.querySelector('.action.bookmark')?.click();
+  if (event.key === 's') current.querySelector('.action.share')?.click();
   if (event.key === 'Enter') current.querySelector('.time')?.click();
 }
 
@@ -1075,7 +1407,18 @@ function bind() {
   $('login-app-toggle').addEventListener('click', () => {
     $('app-password-box').hidden = !$('app-password-box').hidden;
   });
+  $('login-signup').addEventListener('click', startSignup);
   $('login-password-btn').addEventListener('click', startPassword);
+  $('login').addEventListener('cancel', (event) => {
+    if (!signedIn()) event.preventDefault();
+  });
+  $('login').addEventListener('close', () => {
+    if (!signedIn()) queueMicrotask(() => { if (!signedIn()) openGate(); });
+  });
+  $('report-form').addEventListener('submit', submitReport);
+  $('report-cancel').addEventListener('click', () => $('report').close());
+  $('profile-form').addEventListener('submit', saveProfile);
+  $('profile-cancel').addEventListener('click', () => $('profile-edit').close());
   $('compose-form').addEventListener('submit', publish);
   $('compose-cancel').addEventListener('click', () => $('compose').close());
   $('compose-text').addEventListener('input', () => {
@@ -1138,6 +1481,11 @@ function bind() {
       setMutedWords(mutedWords().filter((item) => item !== word));
       showSettings();
     }
+    const sort = event.target.dataset?.sort;
+    if (sort === 'latest' || sort === 'top') {
+      searchSort = sort;
+      showSearch($('search-q')?.value.trim() || parseHash()[1] || '');
+    }
   });
   $('lightbox-close').addEventListener('click', () => $('lightbox').close());
   $('lightbox-prev').addEventListener('click', () => {
@@ -1150,7 +1498,9 @@ function bind() {
   });
   document.querySelectorAll('dialog').forEach((dialog) => {
     dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
+      if (event.target !== dialog) return;
+      if (dialog.id === 'login' && !signedIn()) return;
+      dialog.close();
     });
   });
   window.addEventListener('hashchange', route);
@@ -1176,6 +1526,7 @@ async function boot() {
       me.profile = null;
       updateAccount();
       toast('Your Bluesky session ended. Sign in again.');
+      openGate();
     });
     const result = await client.init();
     if (result?.session) {
@@ -1186,15 +1537,27 @@ async function boot() {
     oauthReady = error?.message || 'Sign in with Bluesky needs the published site, or http://127.0.0.1.';
     client = null;
   }
+  if (getPassword() && !getOauth()) {
+    try {
+      const ok = await api.ensurePasswordSession();
+      if (!ok) setPassword(null);
+    } catch {
+      setPassword(null);
+    }
+  }
   await loadMe();
-  if ((!location.hash || location.hash === '#' || location.hash === '#/') && !signedIn()) {
-    location.replace('#/discover');
-  } else route();
+  clearBoot();
+  if (!signedIn()) openGate();
+  else {
+    closeGate();
+    route();
+  }
   document.getElementById('boot-error')?.remove();
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 45000);
 }
 
 boot().catch((error) => {
+  clearBoot();
   const view = $('view');
   if (view) view.innerHTML = emptyHtml('LibreSky could not start', error.message || String(error));
 });

@@ -34,6 +34,25 @@ async function read(res) {
   return data ?? {};
 }
 
+function accessExpired(token) {
+  try {
+    const part = String(token || '').split('.')[1];
+    if (!part) return true;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (part.length % 4)) % 4);
+    const json = JSON.parse(atob(padded));
+    return !json.exp || json.exp * 1000 < Date.now() + 90_000;
+  } catch {
+    return true;
+  }
+}
+
+export async function ensurePasswordSession() {
+  const session = getPassword();
+  if (!session?.accessJwt) return false;
+  if (!accessExpired(session.accessJwt)) return true;
+  return refreshPassword();
+}
+
 async function refreshPassword() {
   const session = getPassword();
   if (!session?.refreshJwt) return false;
@@ -217,8 +236,8 @@ export function getActorLikes(actor, cursor, signal) {
   return xrpc('app.bsky.feed.getActorLikes', { params: { actor, limit: 30, cursor }, signal });
 }
 
-export function searchPosts(q, cursor, signal) {
-  return xrpc('app.bsky.feed.searchPosts', { params: { q, limit: 25, sort: 'latest', cursor }, signal });
+export function searchPosts(q, cursor, signal, sort = 'latest') {
+  return xrpc('app.bsky.feed.searchPosts', { params: { q, limit: 25, sort, cursor }, signal });
 }
 
 export function searchActors(q, signal) {
@@ -229,8 +248,20 @@ export function getSuggestions(signal) {
   return xrpc('app.bsky.actor.getSuggestions', { params: { limit: 5 }, signal, auth: 'required' });
 }
 
-export function getNotifications(cursor, signal) {
-  return xrpc('app.bsky.notification.listNotifications', { params: { limit: 30, cursor }, signal, auth: 'required' });
+export function getNotifications(cursor, signal, reasons) {
+  return xrpc('app.bsky.notification.listNotifications', {
+    params: { limit: 30, cursor, reasons },
+    signal,
+    auth: 'required',
+  });
+}
+
+export function getLikes(uri, cursor, signal) {
+  return xrpc('app.bsky.feed.getLikes', { params: { uri, limit: 50, cursor }, signal });
+}
+
+export function getRepostedBy(uri, cursor, signal) {
+  return xrpc('app.bsky.feed.getRepostedBy', { params: { uri, limit: 50, cursor }, signal });
 }
 
 export function getUnreadCount() {
@@ -332,6 +363,106 @@ export function muteActor(did) {
 
 export function unmuteActor(did) {
   return xrpc('app.bsky.graph.unmuteActor', { body: { actor: did }, auth: 'required' });
+}
+
+export function block(did) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.graph.block', {
+      $type: 'app.bsky.graph.block',
+      subject: did,
+      createdAt: new Date().toISOString(),
+    }),
+    auth: 'required',
+  });
+}
+
+export function muteThread(root) {
+  return xrpc('app.bsky.graph.muteThread', { body: { root }, auth: 'required' });
+}
+
+export function reportPost(uri, cid, reasonType, reason) {
+  return xrpc('com.atproto.moderation.createReport', {
+    body: {
+      reasonType,
+      reason: reason || undefined,
+      subject: { $type: 'com.atproto.repo.strongRef', uri, cid },
+    },
+    auth: 'required',
+  });
+}
+
+export function reportAccount(did, reasonType, reason) {
+  return xrpc('com.atproto.moderation.createReport', {
+    body: {
+      reasonType,
+      reason: reason || undefined,
+      subject: { $type: 'com.atproto.admin.defs#repoRef', did },
+    },
+    auth: 'required',
+  });
+}
+
+export function createThreadgate(postUri, allow) {
+  const rkey = String(postUri || '').split('/').pop();
+  return xrpc('com.atproto.repo.createRecord', {
+    body: {
+      repo: currentDid(),
+      collection: 'app.bsky.feed.threadgate',
+      rkey,
+      record: {
+        $type: 'app.bsky.feed.threadgate',
+        post: postUri,
+        allow,
+        createdAt: new Date().toISOString(),
+      },
+    },
+    auth: 'required',
+  });
+}
+
+async function profileRecord() {
+  const did = currentDid();
+  try {
+    const data = await xrpc('com.atproto.repo.getRecord', {
+      params: { repo: did, collection: 'app.bsky.actor.profile', rkey: 'self' },
+      auth: 'required',
+    });
+    return { ...(data.value || {}), $type: 'app.bsky.actor.profile' };
+  } catch (error) {
+    if (error.status && error.status !== 400 && error.status !== 404) throw error;
+    return { $type: 'app.bsky.actor.profile' };
+  }
+}
+
+export async function updateProfile({ displayName, description, avatar, pinnedPost } = {}) {
+  const record = await profileRecord();
+  if (displayName != null) {
+    if (displayName) record.displayName = displayName;
+    else delete record.displayName;
+  }
+  if (description != null) {
+    if (description) {
+      record.description = description;
+      const facets = await facetsFor(description);
+      if (facets.length) record.descriptionFacets = facets;
+      else delete record.descriptionFacets;
+    } else {
+      delete record.description;
+      delete record.descriptionFacets;
+    }
+  }
+  if (avatar) record.avatar = avatar;
+  if (pinnedPost === null) delete record.pinnedPost;
+  else if (pinnedPost) record.pinnedPost = pinnedPost;
+  return xrpc('com.atproto.repo.putRecord', {
+    body: {
+      repo: currentDid(),
+      collection: 'app.bsky.actor.profile',
+      rkey: 'self',
+      record,
+    },
+    auth: 'required',
+  });
 }
 
 export async function uploadBlob(file) {
