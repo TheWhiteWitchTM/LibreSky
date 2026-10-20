@@ -1,6 +1,8 @@
 import * as api from './api.js';
+import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
 import {
   actorHtml,
+  callBannerHtml,
   chatHeaderHtml,
   convoHtml,
   drainPosts,
@@ -9,6 +11,7 @@ import {
   linkPreviewHtml,
   messageHtml,
   notificationsHtml,
+  packHtml,
   postHtml,
   profileHtml,
   resetPosts,
@@ -30,7 +33,7 @@ import {
   setPassword,
   signedIn,
 } from './session.js';
-import { accountGone, escapeHtml, firstUrl, graphemeLength, hostOf, parseHash, profileHash, richText } from './util.js';
+import { accountGone, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, ownUnread, parseHash, profileHash, richText } from './util.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -41,6 +44,10 @@ let pager = null;
 let selected = -1;
 let searchSort = 'latest';
 let reportTarget = null;
+let chatTimer = 0;
+let suggestTimer = 0;
+let suggestSeq = 0;
+let suggestArea = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -72,6 +79,8 @@ function applyTheme(theme) {
   if (meta) meta.content = next === 'dark' ? '#000000' : '#ffffff';
 }
 
+const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack']);
+
 function setChrome({ title, back = false, tabs = [], nav = '' }) {
   $('title').textContent = title;
   $('back').hidden = !back;
@@ -83,8 +92,9 @@ function setChrome({ title, back = false, tabs = [], nav = '' }) {
     bar.hidden = false;
     bar.innerHTML = tabs.map((tab) => `<a href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}">${escapeHtml(tab.label)}</a>`).join('');
   }
+  const current = MORE_NAV.has(nav) ? 'more' : nav;
   document.querySelectorAll('[data-nav]').forEach((link) => {
-    link.classList.toggle('active', link.dataset.nav === nav);
+    link.classList.toggle('active', link.dataset.nav === current);
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
 }
@@ -200,10 +210,13 @@ async function loadMe() {
 }
 
 function paintBadge(id, count) {
-  const node = $(id);
-  if (!node) return;
-  node.hidden = count < 1;
-  node.textContent = count > 99 ? '99+' : String(count);
+  const name = id.replace('-badge', '');
+  const nodes = [...document.querySelectorAll(`[data-badge="${name}"]`)];
+  if (!nodes.length && $(id)) nodes.push($(id));
+  nodes.forEach((node) => {
+    node.hidden = count < 1;
+    node.textContent = count > 99 ? '99+' : String(count);
+  });
 }
 
 async function refreshBadge() {
@@ -220,8 +233,13 @@ async function refreshBadge() {
   }
   try {
     const data = await api.listConvos();
-    const count = (data.convos || []).reduce((sum, convo) => sum + (convo.unreadCount || 0), 0);
+    const convos = data.convos || [];
+    const mine = myDid();
+    const count = convos.reduce((sum, convo) => sum + convoUnread(convo, mine), 0);
     paintBadge('chat-badge', count);
+    convos.forEach((convo) => {
+      if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
+    });
   } catch {
     paintBadge('chat-badge', 0);
   }
@@ -293,18 +311,21 @@ async function showSearch(query) {
   const token = ++generation;
   setChrome({ title: 'Search', nav: 'search' });
   const sort = `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label>${sort}</form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts and people.')}</div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off"></label>${sort}</form><div id="search-results">${query ? skeletons(4) : emptyHtml('Search Bluesky', 'Find posts, people, and starter packs.')}</div>`;
   $('search-q')?.focus();
   if (!query) return;
   try {
-    const [postData, actorData] = await Promise.all([
+    const [postData, actorData, packData] = await Promise.all([
       api.searchPosts(query, null, null, searchSort),
       api.searchActors(query),
+      api.searchStarterPacks(query).catch(() => ({ starterPacks: [] })),
     ]);
     if (token !== generation) return;
     const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
+    const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
     resetPosts();
-    $('search-results').innerHTML = `${people ? `<div class="people">${people}</div>` : ''}${feedHtml((postData.posts || []).map((post) => ({ post }))) || emptyHtml('No posts', 'Nothing matched that search.')}`;
+    const postsHtml = feedHtml((postData.posts || []).map((post) => ({ post })));
+    $('search-results').innerHTML = `${people ? `<div class="people">${people}</div>` : ''}${packs ? `<div class="packs">${packs}</div>` : ''}${postsHtml || emptyHtml('No posts', 'Nothing matched that search.')}`;
     remember();
   } catch (error) {
     if (!cancelled(token, error)) $('search-results').innerHTML = emptyHtml('Search failed', error.message);
@@ -375,8 +396,57 @@ async function showNotifications(filter) {
   }
 }
 
+function stopChatTimer() {
+  clearInterval(chatTimer);
+  chatTimer = 0;
+}
+
+function paintCallBanner(messages, peerDid) {
+  const offer = incomingCall(messages, myDid(), peerDid);
+  const current = $('view')?.querySelector('.call-banner');
+  if (!offer || isInCall()) {
+    current?.remove();
+    return;
+  }
+  const html = callBannerHtml(offer);
+  if (current) current.outerHTML = html;
+  else $('view')?.querySelector('.chat-head')?.insertAdjacentHTML('afterend', html);
+}
+
+function watchOpenChat(convoId, peerDid, token) {
+  stopChatTimer();
+  chatTimer = setInterval(async () => {
+    if (token !== generation || parseHash()[1] !== convoId) {
+      stopChatTimer();
+      return;
+    }
+    try {
+      const data = await api.getConvo(convoId);
+      if (token !== generation) return;
+      const messages = (data.messages || []).slice().reverse();
+      const list = $('view')?.querySelector('.messages');
+      if (list) {
+        const near = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        let added = false;
+        messages.forEach((message) => {
+          const escapeId = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
+          if (!message?.id || list.querySelector(`[data-id="${escapeId(message.id)}"]`)) return;
+          list.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
+          added = true;
+        });
+        if (added && near) list.scrollTop = list.scrollHeight;
+        if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
+      }
+      paintCallBanner(messages, peerDid);
+    } catch {
+      /* the open chat stays as it is */
+    }
+  }, 4000);
+}
+
 async function showMessages(convoId) {
   const token = ++generation;
+  stopChatTimer();
   setChrome({ title: 'Messages', nav: 'messages', back: Boolean(convoId) });
   if (!signedIn()) {
     $('view').innerHTML = emptyHtml('Messages', 'Sign in to open your Bluesky chats.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
@@ -387,8 +457,13 @@ async function showMessages(convoId) {
     if (!convoId) {
       const data = await api.listConvos();
       if (token !== generation) return;
-      const rows = (data.convos || []).map((convo) => convoHtml(convo, myDid())).join('');
+      const mine = myDid();
+      (data.convos || []).forEach((convo) => {
+        if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
+      });
+      const rows = (data.convos || []).map((convo) => convoHtml(convo, mine)).join('');
       $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="text-btn" data-act="chat-cleanup">Remove deleted accounts</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
+      refreshBadge();
       return;
     }
     const [data, convoWrap] = await Promise.all([
@@ -399,12 +474,17 @@ async function showMessages(convoId) {
     const other = (convoWrap?.convo?.members || []).find((member) => member.did !== myDid()) || null;
     if (other) $('title').textContent = other.displayName || `@${other.handle}`;
     const messages = (data.messages || []).slice().reverse();
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea><button class="primary small" type="submit">Send</button></form>`;
-    fitChatInput($('chat-text'));
-    $('chat-text')?.focus();
+    const calls = canCall();
+    $('view').innerHTML = `${chatHeaderHtml(other, { calls, video: calls })}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button></form>`;
+    paintCallBanner(messages, other?.did || '');
+    const area = $('chat-text');
+    paintFieldHighlight(area, $('chat-highlight'));
+    fitChatInput(area);
+    area?.focus();
     const scroller = $('view').querySelector('.messages');
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
     api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
+    watchOpenChat(convoId, other?.did || '', token);
   } catch (error) {
     if (!cancelled(token, error)) {
       $('view').innerHTML = emptyHtml('Messages are unavailable', error.message || 'This sign-in does not include chat access.');
@@ -742,17 +822,39 @@ async function showProfile(actor, tab) {
     else feed = await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0]);
     if (token !== generation) return;
     resetPosts();
-    const pin = profile.pinnedPost?.uri ? profile.pinnedPost : profile.pinnedPost?.post;
-    const pinHtml = current === 'posts' && pin?.uri && pin?.author
-      ? `<p class="pinned-label">Pinned</p>${postHtml({ post: pin })}`
-      : '';
-    $('view').innerHTML = profileHtml(profile) + pinHtml + (feedHtml(feed.feed) || emptyHtml('No posts', 'Nothing in this tab yet.'));
+    const split = current === 'posts' ? await pinnedSplit(profile, feed.feed) : { pinned: [], feed: feed.feed || [] };
+    if (token !== generation) return;
+    const pinHtml = split.pinned.map((item) => postHtml(item, { pinned: true })).join('');
+    const postsHtml = feedHtml(split.feed);
+    const blank = pinHtml || postsHtml ? postsHtml : emptyHtml('No posts', 'Nothing in this tab yet.');
+    $('view').innerHTML = profileHtml(profile) + pinHtml + blank;
     $('profile-action').innerHTML = action;
     remember();
     document.documentElement.dataset.ready = '1';
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Profile unavailable', error.message);
   }
+}
+
+async function pinnedSplit(profile, items) {
+  const pinned = [];
+  const rest = [];
+  (items || []).forEach((item) => {
+    if (String(item?.reason?.$type || '').includes('reasonPin')) pinned.push(item);
+    else rest.push(item);
+  });
+  const uri = profile?.pinnedPost?.uri;
+  if (uri && !pinned.some((item) => item?.post?.uri === uri)) {
+    try {
+      const data = await api.getPosts([uri]);
+      const post = data.posts?.[0];
+      if (post?.uri && post.author) pinned.unshift({ post, reason: { $type: 'app.bsky.feed.defs#reasonPin' } });
+    } catch {
+      /* the profile feed still renders */
+    }
+  }
+  const seen = new Set(pinned.map((item) => item.post?.uri).filter(Boolean));
+  return { pinned, feed: rest.filter((item) => !seen.has(item.post?.uri)) };
 }
 
 function profileAction(profile) {
@@ -839,6 +941,109 @@ function showSettings() {
   </section>`;
 }
 
+function packList(packs) {
+  return (packs || []).map((pack) => packHtml(pack)).join('');
+}
+
+async function showPacks() {
+  const token = ++generation;
+  setChrome({ title: 'Starter packs', nav: 'packs', back: true });
+  $('view').innerHTML = `<form class="search-page" id="pack-form"><label class="search"><input id="pack-q" placeholder="Search starter packs" autocomplete="off"></label></form><div id="pack-results">${skeletons(4)}</div>`;
+  try {
+    const jobs = [api.getSuggestedStarterPacks()];
+    if (signedIn()) jobs.push(api.getActorStarterPacks(myDid()).catch(() => ({ starterPacks: [] })));
+    const [suggested, mine] = await Promise.all(jobs);
+    if (token !== generation) return;
+    const yours = packList(mine?.starterPacks);
+    const rows = packList(suggested?.starterPacks);
+    $('pack-results').innerHTML = `${yours ? `<h2 class="section-label">Yours</h2><div class="packs">${yours}</div>` : ''}${rows ? `<h2 class="section-label">Suggested</h2><div class="packs">${rows}</div>` : ''}` || emptyHtml('No starter packs', 'Search for a topic to find one.');
+  } catch (error) {
+    if (!cancelled(token, error)) $('pack-results').innerHTML = emptyHtml('Starter packs are unavailable', error.message);
+  }
+}
+
+async function showPack(uri) {
+  const token = ++generation;
+  setChrome({ title: 'Starter pack', nav: 'packs', back: true });
+  showSkeletons();
+  try {
+    const data = await api.getStarterPack(uri);
+    if (token !== generation) return;
+    const pack = data.starterPack;
+    if (!pack?.uri) {
+      $('view').innerHTML = emptyHtml('Starter pack unavailable', 'This starter pack could not be loaded.');
+      return;
+    }
+    const record = pack.record || {};
+    const creator = pack.creator || {};
+    const people = (pack.listItemsSample || []).map((item) => actorHtml(item.subject, { follow: signedIn(), self: myDid() })).join('');
+    const listUri = pack.list?.uri || record.list || '';
+    const follow = signedIn() && listUri
+      ? `<button type="button" class="primary small" data-act="pack-follow" data-list="${escapeHtml(listUri)}">Follow these accounts</button>`
+      : '';
+    const listLink = listUri ? `<a class="text-link" href="#/list/${encodeURIComponent(listUri)}">Open the list</a>` : '';
+    const feeds = (pack.feeds || []).map((feed) => {
+      const feedUri = feed.uri || feed;
+      const label = feed.displayName || feed.cid || 'Feed';
+      return `<a class="text-link" href="#/feed/${encodeURIComponent(feedUri)}">${escapeHtml(label)}</a>`;
+    }).join('');
+    $('title').textContent = record.name || 'Starter pack';
+    $('view').innerHTML = `<header class="list-head"><h2>${escapeHtml(record.name || 'Starter pack')}</h2><p class="dim">${escapeHtml(creator.handle ? `by @${creator.handle}` : '')}${pack.list?.listItemCount != null ? ` · ${pack.list.listItemCount} people` : ''}</p>${record.description ? `<p class="bio">${richText(record.description, record.descriptionFacets)}</p>` : ''}</header><div class="toolbar">${follow}${listLink}${feeds}</div>${people ? `<div class="directory">${people}</div>` : ''}`;
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Starter pack unavailable', error.message);
+  }
+}
+
+async function followPack(listUri, button) {
+  if (!signedIn()) return requireSignIn();
+  if (!listUri) return;
+  if (!window.confirm('Follow the accounts in this starter pack? This stops after 80 accounts.')) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Following…';
+  }
+  let followed = 0;
+  let cursor;
+  let limited = false;
+  try {
+    for (let page = 0; page < 20 && followed < 80 && !limited; page += 1) {
+      const data = await api.getList(listUri, cursor, null, 50);
+      const due = [];
+      (data.items || []).forEach((item) => {
+        const actor = item.subject;
+        if (!actor?.did || actor.did === myDid() || actor.viewer?.following) return;
+        if (followed + due.length < 80) due.push(actor.did);
+      });
+      for (let i = 0; i < due.length; i += 4) {
+        const results = await Promise.all(due.slice(i, i + 4).map(async (did) => {
+          try {
+            await api.follow(did);
+            return 'ok';
+          } catch (error) {
+            return error?.status === 429 ? 'limit' : 'skip';
+          }
+        }));
+        results.forEach((result) => {
+          if (result === 'ok') followed += 1;
+          if (result === 'limit') limited = true;
+        });
+        if (limited) break;
+      }
+      if (!data.cursor) break;
+      cursor = data.cursor;
+    }
+    toast(followed ? `Followed ${followed} ${followed === 1 ? 'account' : 'accounts'}` : 'You already follow these accounts.');
+    route();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = 'Follow these accounts';
+    }
+  }
+}
+
 async function showEngagement(kind, uri) {
   const token = ++generation;
   setChrome({ title: kind === 'likes' ? 'Likes' : 'Reposts', nav: 'home', back: true });
@@ -871,6 +1076,8 @@ async function showEngagement(kind, uri) {
 
 function route() {
   closeMenu();
+  hideSuggest();
+  stopChatTimer();
   pager?.disconnect();
   selected = -1;
   const [a, b, c, d] = parseHash();
@@ -885,6 +1092,8 @@ function route() {
   if (a === 'feed' && b) return showCustomFeed(b);
   if (a === 'lists') return showLists();
   if (a === 'list' && b) return showList(b);
+  if (a === 'packs') return showPacks();
+  if (a === 'pack' && b) return showPack(b);
   if (a === 'settings') return showSettings();
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
@@ -939,8 +1148,128 @@ function updateCount() {
   const files = $('compose')._files || [];
   const card = $('compose')._card;
   $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card);
-  const pre = $('compose-highlight');
-  if (pre) pre.innerHTML = `${richText(value, null, { links: false, breaks: false })}\n`;
+  paintFieldHighlight(area, $('compose-highlight'));
+  scheduleSuggest(area);
+}
+
+function paintFieldHighlight(area, pre) {
+  if (!area || !pre) return;
+  pre.innerHTML = `${richText(area.value || '', null, { links: false, breaks: false })}\n`;
+  pre.scrollTop = area.scrollTop;
+}
+
+function hideSuggest() {
+  const box = $('suggest');
+  if (!box) return;
+  box.innerHTML = '';
+  suggestArea = null;
+  if (typeof box.hidePopover === 'function' && box.matches(':popover-open')) {
+    try { box.hidePopover(); } catch { /* already closed */ }
+  }
+  box.hidden = true;
+}
+
+function showSuggest(box, area) {
+  const rect = area.getBoundingClientRect();
+  const width = Math.min(Math.max(rect.width, 240), window.innerWidth - 16);
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  box.style.left = `${left}px`;
+  box.style.width = `${width}px`;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if (spaceBelow < 200 && rect.top > 220) {
+    box.style.top = 'auto';
+    box.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 4)}px`;
+  } else {
+    box.style.bottom = 'auto';
+    box.style.top = `${rect.bottom + 4}px`;
+  }
+  if (typeof box.showPopover !== 'function') {
+    const host = area.closest('dialog') || document.body;
+    if (box.parentElement !== host) host.append(box);
+  }
+  box.hidden = false;
+  if (typeof box.showPopover === 'function') {
+    try {
+      if (!box.matches(':popover-open')) box.showPopover();
+    } catch { /* the list stays in the page */ }
+  }
+}
+
+function scheduleSuggest(area) {
+  if (!area) return;
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(() => refreshSuggest(area), 180);
+}
+
+async function refreshSuggest(area) {
+  if (!area?.isConnected) return hideSuggest();
+  const token = caretToken(area.value, area.selectionStart);
+  if (!token || token.query.length < 1) return hideSuggest();
+  const seq = ++suggestSeq;
+  const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
+  try {
+    const items = token.sigil === '@'
+      ? (await api.searchActorsTypeahead(token.query, signal)).actors || []
+      : await api.suggestTags(token.query, signal);
+    if (seq !== suggestSeq) return;
+    if (document.activeElement !== area) return hideSuggest();
+    const rows = token.sigil === '@'
+      ? items.slice(0, 6).map((actor, index) => suggestRow(index, `@${actor.handle}`, `${escapeHtml(actor.displayName || actor.handle)}<span class="handle">@${escapeHtml(actor.handle || '')}</span>`))
+      : items.slice(0, 6).map((tag, index) => suggestRow(index, `#${tag}`, `#${escapeHtml(tag)}`));
+    const box = $('suggest');
+    if (!box || !rows.length) return hideSuggest();
+    box.innerHTML = rows.join('');
+    suggestArea = area;
+    showSuggest(box, area);
+  } catch {
+    if (seq === suggestSeq) hideSuggest();
+  }
+}
+
+function suggestRow(index, insert, body) {
+  return `<button type="button" class="suggest-row${index === 0 ? ' on' : ''}" data-insert="${escapeHtml(insert)}">${body}</button>`;
+}
+
+function applySuggest(insert) {
+  const area = suggestArea;
+  if (!area) return;
+  const token = caretToken(area.value, area.selectionStart);
+  if (!token) return hideSuggest();
+  const next = `${area.value.slice(0, token.start)}${insert} ${area.value.slice(area.selectionStart)}`;
+  area.value = next;
+  const caret = token.start + insert.length + 1;
+  area.setSelectionRange(caret, caret);
+  hideSuggest();
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  area.focus();
+}
+
+function onSuggestKey(event) {
+  const box = $('suggest');
+  if (!box || box.hidden) return false;
+  const items = [...box.querySelectorAll('button')];
+  if (!items.length) return false;
+  const current = items.findIndex((button) => button.classList.contains('on'));
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopPropagation();
+    const next = event.key === 'ArrowDown' ? Math.min(items.length - 1, current + 1) : Math.max(0, current - 1);
+    items.forEach((button, index) => button.classList.toggle('on', index === (next < 0 ? 0 : next)));
+    return true;
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault();
+    event.stopPropagation();
+    applySuggest((items[Math.max(current, 0)] || items[0]).dataset.insert || '');
+    return true;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    hideSuggest();
+    return true;
+  }
+  return false;
 }
 
 function scheduleLinkPreview() {
@@ -1139,12 +1468,40 @@ function closeMenu() {
 function openMenu(anchor, items) {
   const menu = $('menu');
   menu._post = null;
-  menu.innerHTML = items.map((item) => `<button type="button" data-menu="${escapeHtml(item.id)}">${escapeHtml(item.label)}</button>`).join('');
+  menu.innerHTML = items.map((item) => `<button type="button" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
   const rect = anchor.getBoundingClientRect();
   const width = 250;
   menu.style.top = `${rect.bottom + 6}px`;
   menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
+}
+
+function openMoreMenu(anchor) {
+  openMenu(anchor, [
+    { id: 'go-lists', label: 'Lists' },
+    { id: 'go-feeds', label: 'Feeds' },
+    { id: 'go-packs', label: 'Starter packs' },
+    { id: 'go-bookmarks', label: 'Bookmarks' },
+    { id: 'go-settings', label: 'Settings' },
+    { id: 'go-about', label: 'About' },
+    { id: 'go-privacy', label: 'Privacy' },
+    { id: 'go-terms', label: 'Terms' },
+    { id: 'go-ai', label: 'AI · Coming soon', disabled: true },
+  ]);
+}
+
+function openAbout() {
+  const dialog = $('about');
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+function openLegal(which) {
+  const privacy = $('legal-privacy');
+  const terms = $('legal-terms');
+  if (privacy) privacy.hidden = which !== 'privacy';
+  if (terms) terms.hidden = which !== 'terms';
+  const dialog = $('legal');
+  if (dialog && !dialog.open) dialog.showModal();
 }
 
 function fitChatInput(box) {
@@ -1392,6 +1749,46 @@ async function cleanupBookmarks(button) {
 
 async function handleChromeAct(act, event) {
   const button = event.target.closest('[data-act]');
+  if (act === 'nav-more') {
+    event.preventDefault();
+    openMoreMenu(button);
+    return true;
+  }
+  if (act === 'soon') {
+    event.preventDefault();
+    return true;
+  }
+  if (act === 'pack-follow') {
+    event.preventDefault();
+    await followPack(button?.dataset.list, button);
+    return true;
+  }
+  if (act === 'call-audio' || act === 'call-video') {
+    event.preventDefault();
+    if (button?.classList.contains('soon') || button?.getAttribute('aria-disabled') === 'true') return true;
+    if (!signedIn()) return requireSignIn(), true;
+    const peer = button?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
+    const convoId = parseHash()[1];
+    startCall({ convoId, peerDid: peer, media: act === 'call-video' ? 'video' : 'audio' });
+    return true;
+  }
+  if (act === 'call-accept') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const peer = $('view')?.querySelector('.chat-head')?.dataset.peer;
+    acceptCall({
+      convoId: parseHash()[1],
+      peerDid: peer,
+      rkey: button?.dataset.rkey,
+      media: button?.dataset.media || 'audio',
+    }).catch((error) => toast(error.message));
+    return true;
+  }
+  if (act === 'call-decline') {
+    event.preventDefault();
+    declineCall(parseHash()[1], button?.dataset.rkey).finally(() => $('view')?.querySelector('.call-banner')?.remove());
+    return true;
+  }
   if (act === 'follow-back') {
     event.preventDefault();
     await followAllBack(button);
@@ -1796,7 +2193,17 @@ async function onMenu(event) {
   const id = event.target.dataset.menu;
   const found = $('menu')._post;
   closeMenu();
-  if (!id || !found) return;
+  if (!id) return;
+  if (id === 'go-lists') return void (location.hash = '#/lists');
+  if (id === 'go-feeds') return void (location.hash = '#/feeds');
+  if (id === 'go-packs') return void (location.hash = '#/packs');
+  if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
+  if (id === 'go-settings' || id === 'settings-go') return void (location.hash = '#/settings');
+  if (id === 'go-about') return openAbout();
+  if (id === 'go-privacy') return openLegal('privacy');
+  if (id === 'go-terms') return openLegal('terms');
+  if (id === 'signout-go') return signOut();
+  if (!found) return;
   if (!['copy', 'copy-text', 'share', 'quote'].includes(id) && !signedIn()) return requireSignIn();
   if (id === 'quote') return openComposer({ quote: found.post });
   if (id === 'unbookmark') return toggleBookmark(found);
@@ -1842,8 +2249,9 @@ async function onMenu(event) {
     try {
       const ref = id === 'pin' ? { uri: found.post.uri, cid: found.post.cid } : null;
       await api.updateProfile({ pinnedPost: ref });
-      if (me.profile) me.profile.pinnedPost = ref;
+      try { me.profile = await api.getProfile(myDid()); } catch { if (me.profile) me.profile.pinnedPost = ref; }
       toast(id === 'pin' ? 'Pinned to your profile' : 'Unpinned');
+      if (parseHash()[0] === 'profile') route();
     } catch (error) { toast(error.message); }
   }
 }
@@ -2166,6 +2574,7 @@ function onKey(event) {
     if (event.key === 'Escape') {
       const dialog = document.querySelector('dialog[open]');
       if (dialog?.id === 'login' && !signedIn()) return;
+      if (dialog?.id === 'call') return;
       dialog?.close();
     }
     return;
@@ -2198,7 +2607,8 @@ function bind() {
   document.body.addEventListener('click', onClick);
   $('menu').addEventListener('click', onMenu);
   document.addEventListener('click', (event) => {
-    if (!event.target.closest('#menu, [data-act="more"], [data-act="repost"], #account-btn')) closeMenu();
+    if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
+    if (!event.target.closest('#suggest, #compose-text, #chat-text')) hideSuggest();
   });
   document.addEventListener('keydown', onKey);
   $('back').addEventListener('click', () => {
@@ -2209,10 +2619,15 @@ function bind() {
     if (!signedIn()) requireSignIn();
     else openMenu($('account-btn'), [{ id: 'settings-go', label: 'Settings' }, { id: 'signout-go', label: 'Sign out' }]);
   });
-  $('menu').addEventListener('click', (event) => {
-    if (event.target.dataset.menu === 'settings-go') location.hash = '#/settings';
-    if (event.target.dataset.menu === 'signout-go') signOut();
+  $('suggest')?.addEventListener('mousedown', (event) => {
+    const button = event.target.closest('[data-insert]');
+    if (!button) return;
+    event.preventDefault();
+    applySuggest(button.dataset.insert || '');
   });
+  $('about-close')?.addEventListener('click', () => $('about')?.close());
+  $('legal-close')?.addEventListener('click', () => $('legal')?.close());
+  $('call-hangup')?.addEventListener('click', () => hangUp(true));
   $('login-form').addEventListener('submit', (event) => {
     const box = $('app-password-box');
     if (!box.hidden && $('login-password').value) {
@@ -2258,10 +2673,14 @@ function bind() {
     if (!dialog.dataset.reply && !dialog.dataset.quote) saveDraft($('compose-text').value);
     scheduleLinkPreview();
   });
+  $('compose-text').addEventListener('keydown', onSuggestKey);
+  $('compose-text').addEventListener('keyup', () => scheduleSuggest($('compose-text')));
+  $('compose-text').addEventListener('click', () => scheduleSuggest($('compose-text')));
   $('compose-text').addEventListener('scroll', () => {
     const pre = $('compose-highlight');
     if (pre) pre.scrollTop = $('compose-text').scrollTop;
   });
+  $('compose').addEventListener('close', hideSuggest);
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
     $('compose-files').value = '';
@@ -2291,14 +2710,27 @@ function bind() {
       input.disabled = true;
       api.sendMessage(id, text).then((sent) => {
         input.value = '';
+        paintFieldHighlight(input, $('chat-highlight'));
         fitChatInput(input);
         const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
         if (!message.sender) message.sender = { did: myDid() };
         if (!message.text) message.text = text;
         const list = $('view').querySelector('.messages');
         list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
-        input.closest('.reply-bar')?.scrollIntoView({ block: 'end' });
+        if (list) list.scrollTop = list.scrollHeight;
+        api.markConvoRead(id).then(refreshBadge).catch(() => {});
       }).catch((error) => toast(error.message)).finally(() => { input.disabled = false; input.focus(); });
+    }
+    if (event.target.id === 'pack-form') {
+      event.preventDefault();
+      const q = $('pack-q')?.value.trim();
+      const box = $('pack-results');
+      if (!q || !box) return;
+      box.innerHTML = skeletons(3);
+      api.searchStarterPacks(q).then((data) => {
+        const rows = packList(data.starterPacks);
+        box.innerHTML = rows ? `<div class="packs">${rows}</div>` : emptyHtml('No starter packs', 'Nothing matched that search.');
+      }).catch((error) => { box.innerHTML = emptyHtml('Search failed', error.message); });
     }
     if (event.target.id === 'list-add') {
       event.preventDefault();
@@ -2327,16 +2759,29 @@ function bind() {
       showSettings();
     }
   });
+  $('view').addEventListener('keyup', (event) => {
+    if (event.target.id === 'chat-text') scheduleSuggest(event.target);
+  });
+  $('view').addEventListener('click', (event) => {
+    if (event.target.id === 'chat-text') scheduleSuggest(event.target);
+  });
   $('view').addEventListener('keydown', (event) => {
     if (event.target.id !== 'chat-text') return;
+    if (onSuggestKey(event)) return;
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     if (matchMedia('(pointer: coarse)').matches) return;
     event.preventDefault();
     if (!event.target.disabled) event.target.form?.requestSubmit();
   });
   $('view').addEventListener('input', (event) => {
-    if (event.target.id === 'chat-text') fitChatInput(event.target);
+    if (event.target.id !== 'chat-text') return;
+    fitChatInput(event.target);
+    paintFieldHighlight(event.target, $('chat-highlight'));
+    scheduleSuggest(event.target);
   });
+  $('view').addEventListener('scroll', (event) => {
+    if (event.target.id === 'chat-text') paintFieldHighlight(event.target, $('chat-highlight'));
+  }, true);
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());
   $('view').addEventListener('click', (event) => {
@@ -2366,9 +2811,15 @@ function bind() {
     dialog.addEventListener('click', (event) => {
       if (event.target !== dialog) return;
       if (dialog.id === 'login' && !signedIn()) return;
+      if (dialog.id === 'call') return;
       dialog.close();
     });
   });
+  window.addEventListener('scroll', (event) => {
+    const target = event.target;
+    if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text') return;
+    hideSuggest();
+  }, true);
   window.addEventListener('hashchange', route);
   document.querySelectorAll('[data-nav]').forEach((link) => {
     link.addEventListener('click', () => {
@@ -2382,6 +2833,7 @@ function bind() {
 }
 
 async function boot() {
+  setupCall({ toast });
   bind();
   loadPassword();
   try {

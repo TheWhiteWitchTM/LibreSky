@@ -245,6 +245,43 @@ export function searchActors(q, signal) {
   return xrpc('app.bsky.actor.searchActors', { params: { q, limit: 20 }, signal });
 }
 
+export function searchActorsTypeahead(q, signal) {
+  return xrpc('app.bsky.actor.searchActorsTypeahead', { params: { q, limit: 6 }, signal });
+}
+
+export async function suggestTags(prefix, signal) {
+  const q = String(prefix || '').replace(/^#/, '').trim();
+  if (!q) return [];
+  const data = await searchPosts(`#${q}`, null, signal, 'latest');
+  const tags = new Map();
+  for (const post of data.posts || []) {
+    for (const facet of post.record?.facets || []) {
+      for (const feature of facet.features || []) {
+        const tag = feature?.tag;
+        if (!tag || !String(feature.$type || '').endsWith('#tag')) continue;
+        if (tag.toLowerCase().startsWith(q.toLowerCase())) tags.set(tag.toLowerCase(), tag);
+      }
+    }
+  }
+  return [...tags.values()].slice(0, 6);
+}
+
+export function searchStarterPacks(q, signal) {
+  return xrpc('app.bsky.graph.searchStarterPacks', { params: { q, limit: 12 }, signal });
+}
+
+export function getSuggestedStarterPacks(signal) {
+  return xrpc('app.bsky.unspecced.getOnboardingSuggestedStarterPacks', { params: { limit: 12 }, signal });
+}
+
+export function getActorStarterPacks(actor, signal) {
+  return xrpc('app.bsky.graph.getActorStarterPacks', { params: { actor, limit: 30 }, signal });
+}
+
+export function getStarterPack(starterPack, signal) {
+  return xrpc('app.bsky.graph.getStarterPack', { params: { starterPack }, signal });
+}
+
 export function getSuggestions(signal) {
   return xrpc('app.bsky.actor.getSuggestions', { params: { limit: 5 }, signal, auth: 'required' });
 }
@@ -533,6 +570,23 @@ export function removeBookmark(uri) {
   return bookmarkCall('app.bsky.bookmark.deleteBookmark', { body: { uri }, auth: 'required' });
 }
 
+export function createCallSignal(record) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: { ...recordBody('com.libresky.call', record), validate: false },
+    auth: 'required',
+  });
+}
+
+export async function getPublicRecord(repo, collection, rkey) {
+  const found = await resolvePds(repo);
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', found.pds);
+  url.searchParams.set('repo', repo);
+  url.searchParams.set('collection', collection);
+  url.searchParams.set('rkey', rkey);
+  const res = await fetch(url);
+  return read(res);
+}
+
 export function deleteRecord(uri) {
   const parts = splitAtUri(uri);
   if (!parts) throw new Error('Could not read that record.');
@@ -640,7 +694,7 @@ export async function updateProfile({ displayName, description, avatar, banner, 
   if (banner) record.banner = banner;
   else if (banner === null) delete record.banner;
   if (pinnedPost === null) delete record.pinnedPost;
-  else if (pinnedPost) record.pinnedPost = pinnedPost;
+  else if (pinnedPost?.uri && pinnedPost?.cid) record.pinnedPost = { uri: pinnedPost.uri, cid: pinnedPost.cid };
   return xrpc('com.atproto.repo.putRecord', {
     body: {
       repo: currentDid(),

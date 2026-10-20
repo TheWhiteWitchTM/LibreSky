@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { convoHtml, feedHtml, messageHtml, notificationsHtml, profileHtml, resetPosts } from '../js/render.js';
+import { chatHeaderHtml, convoHtml, feedHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts } from '../js/render.js';
 import { applySavedFeeds, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, bskyPostParts, richText, xStatusParts } from '../js/util.js';
+import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, ownUnread, parseCallMessage, richText, xStatusParts } from '../js/util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -203,5 +203,93 @@ assert.equal(writtenFeeds.find((pref) => pref.$type === 'app.bsky.actor.defs#adu
 assert.match(index, /id="profile-banner"/);
 assert.match(index, /id="compose-link"/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);
+assert.match(index, /id="more-btn"/);
+assert.match(index, /id="more-head"/);
+assert.match(index, /Coming soon/);
+assert.match(index, /id="about"/);
+assert.match(index, /id="legal-privacy"/);
+assert.match(index, /id="legal-terms"/);
+assert.match(index, /id="call"/);
+assert.match(index, /popover="manual"/);
+assert.match(index, /libresky\.passwordSession/);
+assert.match(index, /libresky\.mutedWords/);
+assert.match(index, /libresky\.draft/);
+assert.match(appSource, /#\/packs/);
+assert.match(appSource, /Starter packs/);
+assert.match(appSource, /ownUnread/);
+const partial = richText('@jay #town');
+assert.match(partial, /class="facet mention"/);
+assert.match(partial, /class="facet tag"/);
+const covered = 'Hi @jay.bsky.team';
+const atByte = new TextEncoder().encode(covered.slice(0, covered.indexOf('@'))).length;
+const kept = richText(covered, [{
+  index: { byteStart: atByte, byteEnd: new TextEncoder().encode(covered).length },
+  features: [{ $type: 'com.example.note' }],
+}]);
+assert.match(kept, /class="facet mention"/);
+assert.equal(convoUnread({ unreadCount: '1', lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), 0);
+assert.equal(convoUnread({ unreadCount: '2', muted: true, lastMessage: { sender: { did: 'did:them' } } }, 'did:me'), 0);
+assert.equal(convoUnread({ unreadCount: '2', lastMessage: { sender: 'did:them' } }, 'did:me'), 2);
+assert.equal(ownUnread({ unreadCount: '1', lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), true);
+assert.equal(ownUnread({ unreadCount: '1', muted: true, lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), false);
+assert.equal(ownUnread({ unreadCount: 3, lastMessage: { sender: { did: 'did:them' } } }, 'did:me'), false);
+const ownChat = convoHtml({
+  id: 'mine',
+  unreadCount: '1',
+  members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:you', handle: 'you.bsky.social', displayName: 'You' }],
+  lastMessage: { text: 'hello from me', sender: { did: 'did:me' } },
+}, 'did:me');
+assert.doesNotMatch(ownChat, /class="pill"/);
+assert.deepEqual(caretToken('hi @ja', 6), { sigil: '@', query: 'ja', start: 3 });
+assert.equal(caretToken('hi @jay ', 8), null);
+const callText = parseCallMessage('Started a voice call https://thewhitewitchtm.github.io/LibreSky/#/c/2222222222222');
+assert.equal(callText.kind, 'offer');
+assert.equal(callText.media, 'audio');
+assert.equal(callText.rkey, '2222222222222');
+assert.equal(parseCallMessage('Declined the call').kind, 'decline');
+assert.equal(parseCallMessage('hello'), null);
+const sdp = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n';
+const sdpBytes = new TextEncoder().encode(sdp);
+let sdpBinary = '';
+sdpBytes.forEach((byte) => { sdpBinary += String.fromCharCode(byte); });
+const packed = btoa(sdpBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+assert.equal(assembleCallSdp([
+  { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
+], '2222222222222', 'did:peer'), sdp);
+assert.equal(assembleCallSdp([
+  { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
+], '2222222222222', 'did:other'), '');
+const started = messageHtml({ id: 'm1', text: 'Started a voice call https://example.com/#/c/2222222222222', sender: { did: 'did:them' } }, 'did:me');
+assert.match(started, /bubble system/);
+assert.match(started, /Started a voice call/);
+assert.doesNotMatch(started, /example\.com/);
+const chunk = messageHtml({ id: 'm2', text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' } }, 'did:me');
+assert.match(chunk, /hidden/);
+assert.doesNotMatch(chunk, /Call data/);
+const pinnedPost = postHtml({
+  post: {
+    uri: 'at://did:example/app.bsky.feed.post/abc',
+    cid: 'bafyreiabc',
+    author: { did: 'did:example', handle: 'ada.bsky.social', displayName: 'Ada' },
+    record: { text: 'Pinned hello', createdAt: '2026-10-20T00:00:00.000Z' },
+    indexedAt: '2026-10-20T00:00:00.000Z',
+  },
+}, { pinned: true });
+assert.match(pinnedPost, /class="pinned-label"/);
+assert.match(pinnedPost, /Pinned/);
+const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }, { calls: false });
+assert.match(quietCalls, /Coming soon/);
+assert.match(quietCalls, /aria-disabled="true"/);
+const liveCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }, { calls: true, video: true });
+assert.match(liveCalls, /data-act="call-audio"/);
+assert.match(liveCalls, /data-act="call-video"/);
+const packRow = packHtml({
+  uri: 'at://did:example/app.bsky.graph.starterpack/abc',
+  record: { name: 'Cats', description: 'meow' },
+  creator: { handle: 'ada.bsky.social', displayName: 'Ada' },
+  list: { listItemCount: 3 },
+});
+assert.match(packRow, /Cats/);
+assert.match(packRow, /#\/pack\//);
 
 console.log(`smoke ok (${payload.feed.length} live posts, first @${handle})`);

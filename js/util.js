@@ -94,11 +94,19 @@ function textHtml(value, breaks) {
   return breaks === false ? html : html.replace(/\n/g, '<br>');
 }
 
+function facetKind(feature) {
+  const type = String(feature?.$type || '');
+  if (type.endsWith('#mention')) return 'mention';
+  if (type.endsWith('#tag')) return 'tag';
+  if (type.endsWith('#link')) return 'link';
+  return '';
+}
+
 function featureHtml(slice, features, links, breaks) {
   const html = textHtml(slice, breaks);
-  const mention = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#mention');
-  const tag = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#tag');
-  const link = features.find((feature) => feature.$type === 'app.bsky.richtext.facet#link');
+  const mention = features.find((feature) => facetKind(feature) === 'mention');
+  const tag = features.find((feature) => facetKind(feature) === 'tag');
+  const link = features.find((feature) => facetKind(feature) === 'link');
   const wrap = (className, href, external) => {
     if (!links) return `<span class="facet ${className}">${html}</span>`;
     if (!href) return html;
@@ -134,13 +142,15 @@ function syntheticMarks(source) {
     take(start, start + encoder.encode(raw).length, [{ $type: 'app.bsky.richtext.facet#link', uri: raw }]);
     match = linkRe.exec(source);
   }
-  const mentionRe = /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+  const mentionRe = /(^|\s)@([A-Za-z0-9](?:[A-Za-z0-9._-]{0,80}))/g;
   match = mentionRe.exec(source);
   while (match) {
-    const handle = match[2];
-    const at = match.index + match[1].length;
-    const start = byteAt(source, at);
-    take(start, start + encoder.encode(`@${handle}`).length, [{ $type: 'app.bsky.richtext.facet#mention', did: handle }]);
+    const handle = match[2].replace(/[._-]+$/g, '');
+    if (handle) {
+      const at = match.index + match[1].length;
+      const start = byteAt(source, at);
+      take(start, start + encoder.encode(`@${handle}`).length, [{ $type: 'app.bsky.richtext.facet#mention', did: handle }]);
+    }
     match = mentionRe.exec(source);
   }
   const tagRe = /(^|\s)#([\p{L}\p{N}_]{1,64})/gu;
@@ -165,9 +175,9 @@ export function richText(text, facets, options = {}) {
     .map((facet) => ({
       start: facet?.index?.byteStart ?? 0,
       end: facet?.index?.byteEnd ?? 0,
-      features: facet?.features || [],
+      features: (facet?.features || []).filter((feature) => facetKind(feature)),
     }))
-    .filter((mark) => mark.end > mark.start && mark.start >= 0 && mark.end <= bytes.length);
+    .filter((mark) => mark.features.length && mark.end > mark.start && mark.start >= 0 && mark.end <= bytes.length);
   for (const mark of syntheticMarks(source)) {
     if (!overlaps(marks, mark.start, mark.end) && mark.end <= bytes.length) marks.push(mark);
   }
@@ -182,6 +192,99 @@ export function richText(text, facets, options = {}) {
   }
   html += textHtml(decoder.decode(bytes.slice(cursor)), breaks);
   return html;
+}
+
+export function caretToken(text, caret) {
+  const source = String(text || '');
+  const at = Math.max(0, Math.min(source.length, Number(caret) || 0));
+  const match = source.slice(0, at).match(/(^|\s)([@#])([^\s@#]*)$/);
+  if (!match) return null;
+  return { sigil: match[2], query: match[3], start: at - match[3].length - 1 };
+}
+
+export function messageSender(message) {
+  if (!message || typeof message !== 'object') return '';
+  if (typeof message.sender === 'string') return message.sender;
+  return message.sender?.did || '';
+}
+
+export function convoUnread(convo, me) {
+  const count = Number(convo?.unreadCount) || 0;
+  if (count < 1 || convo?.muted) return 0;
+  const sender = messageSender(convo?.lastMessage);
+  if (sender && me && sender === me) return 0;
+  return count;
+}
+
+export function ownUnread(convo, me) {
+  const count = Number(convo?.unreadCount) || 0;
+  if (count < 1 || convo?.muted) return false;
+  const sender = messageSender(convo?.lastMessage);
+  return Boolean(sender && me && sender === me);
+}
+
+const CALL_RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
+
+export function parseCallMessage(text) {
+  const raw = String(text || '').trim();
+  let kind = '';
+  let media = '';
+  if (/^Started a voice call\b/.test(raw)) { kind = 'offer'; media = 'audio'; }
+  else if (/^Started a video call\b/.test(raw)) { kind = 'offer'; media = 'video'; }
+  else if (/^Joined the voice call\b/.test(raw)) { kind = 'answer'; media = 'audio'; }
+  else if (/^Joined the video call\b/.test(raw)) { kind = 'answer'; media = 'video'; }
+  else if (/^Declined the call\b/.test(raw)) kind = 'decline';
+  else if (/^Call ended\b/.test(raw)) kind = 'end';
+  else {
+    const data = raw.match(/^Call data ([234567abcdefghijklmnopqrstuvwxyz]{13}) (\d+)\/(\d+) ([A-Za-z0-9_-]+)$/);
+    if (!data) return null;
+    return {
+      kind: 'data',
+      media: '',
+      rkey: data[1],
+      index: Number(data[2]),
+      total: Number(data[3]),
+      chunk: data[4],
+    };
+  }
+  const link = raw.match(/https?:\/\/\S+/)?.[0] || '';
+  let rkey = '';
+  try {
+    const parts = new URL(link).hash.replace(/^#/, '').split('/').filter(Boolean);
+    const index = parts.indexOf('c');
+    const candidate = index >= 0 ? decodeURIComponent(parts[index + 1] || '') : '';
+    if (CALL_RKEY.test(candidate)) rkey = candidate;
+  } catch {
+    rkey = '';
+  }
+  return { kind, media, rkey };
+}
+
+export function assembleCallSdp(messages, rkey, sender) {
+  const parts = new Map();
+  let total = 0;
+  for (const message of messages || []) {
+    if (sender && messageSender(message) !== sender) continue;
+    const parsed = parseCallMessage(message?.text);
+    if (parsed?.kind !== 'data' || parsed.rkey !== rkey || !parsed.chunk) continue;
+    parts.set(parsed.index, parsed.chunk);
+    total = parsed.total || total;
+  }
+  if (!total || parts.size < total) return '';
+  let packed = '';
+  for (let index = 1; index <= total; index += 1) {
+    if (!parts.has(index)) return '';
+    packed += parts.get(index);
+  }
+  try {
+    const normalized = packed.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return '';
+  }
 }
 
 export function firstUrl(text) {

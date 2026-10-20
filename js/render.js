@@ -8,6 +8,9 @@ import {
   hostOf,
   postHash,
   profileHash,
+  convoUnread,
+  messageSender,
+  parseCallMessage,
   richText,
   safeUrl,
   timeAgo,
@@ -162,6 +165,7 @@ export function postHtml(item, options = {}) {
   const record = post.record || {};
   const reason = item?.reason;
   const repostBy = reason?.$type?.includes('reasonRepost') ? reason.by : null;
+  const pinned = Boolean(options.pinned) || String(reason?.$type || '').includes('reasonPin');
   const parentHandle = item?.reply?.parent?.author?.handle;
   const number = counts(post);
   const liked = Boolean(post.viewer?.like);
@@ -170,6 +174,7 @@ export function postHtml(item, options = {}) {
   const when = record.createdAt || post.indexedAt;
   const blur = warned(post) ? ' blurred' : '';
   return `<article class="post${options.connected ? ' connected' : ''}${options.feed === false ? '' : ' feed-post'}" data-feed="${options.feed === false ? '0' : '1'}" data-uri="${attr(post.uri)}" data-cid="${attr(post.cid)}" data-did="${attr(author.did)}" data-handle="${attr(author.handle)}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-reply-count="${number.reply}" data-bookmarked="${saved ? '1' : '0'}">
+    ${pinned ? `<p class="pinned-label">${icon('pin')} Pinned</p>` : ''}
     ${repostBy ? `<a class="repost-line" href="${profileHash(repostBy)}">${icon('repost')}<span>${escapeHtml(repostBy.displayName || repostBy.handle)} reposted</span></a>` : ''}
     <div class="post-row">
       <a class="avatar-link" href="${profileHash(author)}">${avatar(author.avatar, author.displayName || author.handle)}</a>
@@ -333,6 +338,12 @@ function messagePreview(message) {
   if (!message) return 'No messages yet';
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
+  const call = parseCallMessage(message.text);
+  if (call?.kind === 'offer') return call.media === 'video' ? 'Started a video call' : 'Started a voice call';
+  if (call?.kind === 'answer') return call.media === 'video' ? 'Joined the video call' : 'Joined the voice call';
+  if (call?.kind === 'decline') return 'Declined the call';
+  if (call?.kind === 'end') return 'Call ended';
+  if (call?.kind === 'data') return 'Call';
   if (message.text) return message.text;
   if (message.embed) return 'Sent a post';
   return 'Message';
@@ -343,30 +354,69 @@ export function convoHtml(convo, me) {
   const gone = accountGone(other);
   const text = messagePreview(convo.lastMessage);
   const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');
-  const pill = convo.unreadCount ? `<b class="pill">${convo.unreadCount}</b>` : '';
+  const unread = convoUnread(convo, me);
+  const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const remove = gone
     ? `<button type="button" class="text-btn mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
   return `<div class="person convo${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
 }
 
+function callLine(parsed) {
+  if (parsed.kind === 'offer') return parsed.media === 'video' ? 'Started a video call' : 'Started a voice call';
+  if (parsed.kind === 'answer') return parsed.media === 'video' ? 'Joined the video call' : 'Joined the voice call';
+  if (parsed.kind === 'decline') return 'Declined the call';
+  return 'Call ended';
+}
+
 export function messageHtml(message, me) {
   const type = message?.$type || '';
   if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
-  const sender = message?.sender?.did || (typeof message?.sender === 'string' ? message.sender : '');
+  const sender = messageSender(message);
   const mine = Boolean(sender && sender === me);
   const text = message?.text || '';
+  const call = parseCallMessage(text);
+  const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
+  if (call?.kind === 'data') return `<div class="bubble signal"${id} hidden></div>`;
+  if (call) return `<div class="bubble system"${id}>${escapeHtml(callLine(call))}</div>`;
   const embed = message?.embed ? embedHtml(message.embed) : '';
   if (!text && !embed) return '';
-  return `<div class="bubble${mine ? ' mine' : ''}">${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
+  return `<div class="bubble${mine ? ' mine' : ''}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
 }
 
-export function chatHeaderHtml(actor) {
+function soonButton(label, glyph) {
+  return `<button type="button" class="icon-btn soon" aria-disabled="true" title="Coming soon" aria-label="${attr(label)}, coming soon">${icon(glyph)}<span class="soon-tip">Coming soon</span></button>`;
+}
+
+export function chatHeaderHtml(actor, options = {}) {
   if (!actor) return '';
   const gone = accountGone(actor);
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
   const handle = gone ? 'This account was deleted' : `@${actor.handle || ''}`;
-  return `<a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>`;
+  const calls = !gone && options.calls
+    ? `${iconButton('call-audio', 'Voice call', 'phone', actor.did)}${options.video ? iconButton('call-video', 'Video call', 'video', actor.did) : soonButton('Video call', 'video')}`
+    : `${soonButton('Voice call', 'phone')}${soonButton('Video call', 'video')}`;
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a><span class="chat-tools">${calls}</span></div>`;
+}
+
+function iconButton(act, label, glyph, peer) {
+  return `<button type="button" class="icon-btn" data-act="${act}" data-peer="${attr(peer || '')}" title="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}</button>`;
+}
+
+export function packHtml(pack) {
+  const record = pack?.record || {};
+  const creator = pack?.creator || {};
+  const name = record.name || 'Starter pack';
+  const count = pack?.list?.listItemCount;
+  const href = `#/pack/${encodeURIComponent(pack?.uri || '')}`;
+  const by = creator.handle ? `by @${creator.handle}` : 'Starter pack';
+  const meta = [by, count != null ? `${fullCount(count)} people` : ''].filter(Boolean).join(' · ');
+  return `<a class="pack" href="${href}">${avatar(creator.avatar, creator.displayName || creator.handle, 'sm')}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(meta)}</span>${record.description ? `<span class="snip">${escapeHtml(record.description)}</span>` : ''}</span></a>`;
+}
+
+export function callBannerHtml(offer) {
+  const label = offer?.media === 'video' ? 'Incoming video call' : 'Incoming voice call';
+  return `<div class="call-banner"><span>${label}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}">Accept</button><button type="button" class="text-btn" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}">Decline</button></div>`;
 }
 
 export function threadList(node) {
