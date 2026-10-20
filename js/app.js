@@ -22,6 +22,7 @@ import {
   packHtml,
   postHtml,
   profileHtml,
+  collectionKind,
   resetPosts,
   skeletons,
   speechText,
@@ -118,6 +119,11 @@ let homeLanesDid = '';
 let lanesAt = 0;
 let laneDraft = null;
 let shownProfile = null;
+let profileLinkViews = [];
+let profileFeatured = new Set();
+let profileTab = { actor: '', tab: 'posts' };
+const navStack = [];
+let dictateRec = null;
 const LANE_CAP = 20;
 const CHEVRON_LEFT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
 const CHEVRON_RIGHT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M9.5 5.5 16 12l-6.5 6.5"/></svg>';
@@ -155,7 +161,7 @@ function applyTheme(theme, options = {}) {
   if (!options.quiet) syncClientPrefs();
 }
 
-const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs', 'pack', 'downloads']);
+const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'packs', 'pack', 'downloads']);
 
 function syncStrip(scroller) {
   const strip = scroller?.closest?.('.tab-strip');
@@ -216,12 +222,13 @@ function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {
 }
 
 function measureHead() {
+  const top = document.querySelector('.app-top');
   const head = document.querySelector('.sticky-head');
-  if (!head) return;
-  document.documentElement.style.setProperty('--head-h', `${Math.ceil(head.getBoundingClientRect().height)}px`);
+  if (top) document.documentElement.style.setProperty('--top-h', `${Math.ceil(top.getBoundingClientRect().height)}px`);
+  if (head) document.documentElement.style.setProperty('--head-h', `${Math.ceil(head.getBoundingClientRect().height)}px`);
 }
 
-function setChrome({ title, back = false, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
+function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
   $('title').textContent = title;
   $('back').hidden = !back;
   const bar = $('tabs');
@@ -241,7 +248,10 @@ function setChrome({ title, back = false, tabs = [], nav = '', menuAct = '', men
   }
   const current = MORE_NAV.has(nav) ? 'more' : nav;
   document.querySelectorAll('[data-nav]').forEach((link) => {
-    link.classList.toggle('active', link.dataset.nav === current);
+    const on = link.dataset.nav === current;
+    link.classList.toggle('active', on);
+    if (on) link.setAttribute('aria-current', 'page');
+    else if (link.id !== 'head-config') link.removeAttribute('aria-current');
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
   measureHead();
@@ -362,10 +372,7 @@ function updateAccount() {
   avatar.dataset.initial = (name.trim().charAt(0) || 'L').toUpperCase();
   avatar.innerHTML = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
   const href = profile?.handle ? profileHash(profile) : '#/';
-  const nav = document.querySelector('[data-nav="profile"]');
-  if (nav) nav.href = href;
-  const mobile = document.querySelector('.tabbar a[aria-label="Profile"]');
-  if (mobile) mobile.href = href;
+  document.querySelectorAll('a[data-nav="profile"]').forEach((nav) => { nav.href = href; });
 }
 
 async function loadMe() {
@@ -975,6 +982,7 @@ function paintHomeChrome(active) {
   setChrome({
     title: homeTitle(active),
     nav: 'home',
+    back: false,
     tabs: homeTabs(active),
     menuAct: 'tab-menu',
     menuLabel: 'Home menu',
@@ -1096,6 +1104,7 @@ async function showBrowse() {
   setChrome({
     title: 'Browse',
     nav: 'home',
+    back: false,
     tabs: [
       { href: '#/', label: 'Browse', on: true },
       { href: '#/discover', label: 'Discover', on: false },
@@ -1423,7 +1432,7 @@ function watchOpenChat(convoId, peerDid, token) {
 async function showMessages(convoId) {
   const token = ++generation;
   stopChatTimer();
-  setChrome({ title: 'Messages', nav: 'messages', back: Boolean(convoId) });
+  setChrome({ title: 'Messages', nav: 'messages', back: true });
   if (!signedIn()) {
     $('view').innerHTML = emptyHtml('Messages', 'Sign in to open your Bluesky chats.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
     return;
@@ -1801,18 +1810,69 @@ const PROFILE_FILTERS = {
   likes: ['likes', 'Likes'],
 };
 
-function profileTabs(actor, current) {
-  return Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
+function profileTabs(actor, current, links = []) {
+  const tabs = Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
     href: id === 'posts' ? `#/profile/${encodeURIComponent(actor)}` : `#/profile/${encodeURIComponent(actor)}/${id}`,
     label,
     on: id === current,
   }));
+  links.forEach((link) => {
+    if (link?.href && link?.label) tabs.push({ href: link.href, label: link.label, on: false });
+  });
+  return tabs;
+}
+
+function ownAuthorItems(items, profile) {
+  const did = profile?.did || '';
+  return (items || []).filter((item) => {
+    if (String(item?.reason?.$type || '').includes('reasonRepost')) return false;
+    const author = item?.post?.author?.did || '';
+    return !author || !did || author === did;
+  });
+}
+
+function featuredTab(view) {
+  const kind = collectionKind(view);
+  if (!kind || !view?.uri) return null;
+  const inner = view.record && view.record.text == null ? view.record : null;
+  const label = kind === 'pack'
+    ? (inner?.name || view.name || 'Starter pack')
+    : kind === 'list'
+      ? (view.name || 'List')
+      : kind === 'labeler'
+        ? (view.creator?.displayName || view.creator?.handle || 'Labeler')
+        : (view.displayName || view.name || 'Feed');
+  const href = kind === 'feed'
+    ? `#/feed/${encodeURIComponent(view.uri)}`
+    : kind === 'list'
+      ? `#/list/${encodeURIComponent(view.uri)}`
+      : kind === 'pack'
+        ? `#/pack/${encodeURIComponent(view.uri)}`
+        : '';
+  if (!href) return null;
+  return { href, label };
+}
+
+function paintProfileTabs() {
+  const host = $('profile-tabs');
+  if (!host || !profileTab.actor) return;
+  forgetStrips(host);
+  const links = profileLinkViews.map((view) => featuredTab(view)).filter(Boolean);
+  host.innerHTML = tabStrip(profileTabs(profileTab.actor, profileTab.tab, links), {
+    menuAct: 'profile-menu',
+    menuLabel: 'Profile menu',
+    sticky: true,
+  });
+  watchStrips(host);
 }
 
 async function showProfile(actor, tab) {
   const token = ++generation;
   const current = PROFILE_FILTERS[tab] ? tab : 'posts';
   shownProfile = null;
+  profileLinkViews = [];
+  profileFeatured = new Set();
+  profileTab = { actor, tab: current };
   setChrome({ title: 'Profile', nav: 'profile', back: true });
   showSkeletons();
   try {
@@ -1826,20 +1886,38 @@ async function showProfile(actor, tab) {
     else feed = await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0]);
     if (token !== generation) return;
     resetPosts();
-    const split = current === 'posts' ? await pinnedSplit(profile, feed.feed) : { pinned: [], feed: feed.feed || [] };
+    const raw = feed.feed || [];
+    const visible = current === 'likes' ? raw : ownAuthorItems(raw, profile);
+    const split = current === 'posts' ? await pinnedSplit(profile, visible) : { pinned: [], feed: visible };
     if (token !== generation) return;
     const pinHtml = split.pinned.map((item) => postHtml(item, { pinned: true })).join('');
     const postsHtml = feedHtml(split.feed);
-    const blank = pinHtml || postsHtml ? postsHtml : emptyHtml('No posts', 'Nothing in this tab yet.');
+    const blank = pinHtml || postsHtml
+      ? postsHtml
+      : (feed.cursor ? '<p class="dim lang-wait">Loading posts…</p>' : emptyHtml('No posts', 'Nothing in this tab yet.'));
     const mine = signedIn() && profile.did === myDid();
     shownProfile = profile;
-    const strip = tabStrip(profileTabs(actor, current), { menuAct: 'profile-menu', menuLabel: 'Profile menu', sticky: true });
     forgetStrips($('view'));
-    $('view').innerHTML = profileHtml(profile) + (mine ? aiStripHtml() : '') + strip + profileShelfHtml(mine) + pinHtml + blank;
-    watchStrips($('view'));
+    $('view').innerHTML = `${profileHtml(profile)}${mine ? aiStripHtml() : ''}<div id="profile-tabs"></div>${pinHtml}${blank}`;
+    paintProfileTabs();
     $('profile-action').innerHTML = action;
     remember();
     document.documentElement.dataset.ready = '1';
+    const more = async (cursor) => {
+      const page = current === 'likes'
+        ? await api.getActorLikes(profile.handle, cursor)
+        : await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0], cursor);
+      if (token !== generation) return;
+      const nextRaw = page.feed || [];
+      const nextItems = current === 'likes' ? nextRaw : ownAuthorItems(nextRaw, profile);
+      paintFeed(nextItems, { append: true });
+      if (nextItems.length || !page.cursor) $('view')?.querySelector('.lang-wait')?.remove();
+      if (!page.cursor && !$('view')?.querySelector('.post')) {
+        $('view')?.insertAdjacentHTML('beforeend', emptyHtml('No posts', 'Nothing in this tab yet.'));
+      }
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(feed.cursor, more);
     loadProfileShelf(profile, token);
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Profile unavailable', error.message);
@@ -1867,19 +1945,24 @@ async function pinnedSplit(profile, items) {
   return { pinned, feed: rest.filter((item) => !seen.has(item.post?.uri)) };
 }
 
-function profileShelfHtml(mine) {
-  const action = mine ? '<button type="button" class="text-btn" data-act="profile-attach">Attach</button>' : '';
-  return `<section class="shelf" id="profile-shelf"><div class="shelf-head"><h3>Feeds, lists, and starter packs</h3>${action}</div><div id="shelf-body"><p class="dim">Loading…</p></div></section>`;
-}
-
-function shelfCards(items, featured, mine) {
-  const pinned = new Set((featured || []).map((item) => item.uri));
-  return items.map((view) => {
-    const card = collectionCardHtml(view);
-    if (!card) return '';
-    if (!mine || !pinned.has(view.uri)) return card;
-    return `<div class="shelf-item">${card}<button type="button" class="text-btn mini" data-act="shelf-unpin" data-uri="${escapeHtml(view.uri)}">Unpin</button></div>`;
+function paintAttachCurrent() {
+  const host = $('attach-current');
+  if (!host) return;
+  if (attachMode !== 'profile') {
+    host.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  host.hidden = false;
+  const tabs = profileLinkViews.map((view) => {
+    const tab = featuredTab(view);
+    if (!tab) return '';
+    const remove = profileFeatured.has(view.uri)
+      ? `<button type="button" class="lane-x" data-act="shelf-unpin" data-uri="${escapeHtml(view.uri)}" aria-label="Remove ${escapeHtml(tab.label)}">×</button>`
+      : '';
+    return `<span class="lane-tab" role="tab"><span>${escapeHtml(tab.label)}</span>${remove}</span>`;
   }).join('');
+  host.innerHTML = `<p class="dim">Same row as Home. Posts stays. Added links sit beside it.</p><div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist"><span role="tab" aria-selected="true">Posts</span><span role="tab">Replies</span><span role="tab">Media</span><span role="tab">Likes</span>${tabs}</div></div>`;
 }
 
 async function resolveFeatured(ref) {
@@ -1896,9 +1979,7 @@ async function resolveFeatured(ref) {
 
 async function loadProfileShelf(profile, token) {
   const did = profile?.did;
-  const body = $('shelf-body');
-  if (!did || !body) return;
-  const mine = signedIn() && did === myDid();
+  if (!did || !$('profile-tabs')) return;
   try {
     const [feeds, lists, packs, featured] = await Promise.all([
       api.getActorFeeds(did).catch(() => ({ feeds: [] })),
@@ -1906,7 +1987,7 @@ async function loadProfileShelf(profile, token) {
       api.getActorStarterPacks(did).catch(() => ({ starterPacks: [] })),
       api.readFeatured(did).catch(() => []),
     ]);
-    if (token !== generation || !$('shelf-body')) return;
+    if (token !== generation || !$('profile-tabs')) return;
     const byUri = new Map();
     const add = (item) => { if (item?.uri && item?.cid) byUri.set(item.uri, item); };
     const packLists = new Set((packs.starterPacks || []).flatMap((pack) => [pack?.record?.list, pack?.list?.uri]).filter(Boolean));
@@ -1919,7 +2000,7 @@ async function loadProfileShelf(profile, token) {
     const missing = featured.filter((item) => item?.uri && !byUri.has(item.uri));
     if (missing.length) {
       const resolved = await Promise.all(missing.map((item) => resolveFeatured(item)));
-      if (token !== generation || !$('shelf-body')) return;
+      if (token !== generation || !$('profile-tabs')) return;
       resolved.forEach(add);
     }
     const ordered = [];
@@ -1935,22 +2016,12 @@ async function loadProfileShelf(profile, token) {
       seen.add(view.uri);
       ordered.push(view);
     });
-    if (!ordered.length && !mine) {
-      $('profile-shelf')?.remove();
-      return;
-    }
-    const visible = ordered.slice(0, 12);
-    const rest = ordered.slice(12);
-    const more = rest.length
-      ? `<button type="button" class="text-btn" data-act="shelf-more">Show ${rest.length} more</button><div class="shelf-more" hidden>${shelfCards(rest, featured, mine)}</div>`
-      : '';
-    const note = mine
-      ? '<p class="dim shelf-note">Pins are saved on your Bluesky profile record, so anyone opening your profile in LibreSky can see them. Feeds, lists, and starter packs you create also show in other Bluesky apps.</p>'
-      : '';
-    const cards = shelfCards(visible, featured, mine);
-    $('shelf-body').innerHTML = `${cards ? `<div class="shelf-list">${cards}</div>` : '<p class="dim">Nothing here yet. Attach a feed, list, or starter pack.</p>'}${more}${note}`;
+    profileFeatured = new Set((featured || []).map((item) => item?.uri).filter(Boolean));
+    profileLinkViews = ordered;
+    paintProfileTabs();
+    if ($('attach')?.open) paintAttachCurrent();
   } catch (error) {
-    if (token === generation && $('shelf-body')) $('shelf-body').innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load these.')}</p>`;
+    if (token === generation && $('profile-tabs')) toast(error.message || 'Could not load profile links.');
   }
 }
 
@@ -2022,14 +2093,11 @@ function paintLaneEditor() {
   const rows = showing.map((item, index) => {
     const up = index === 0 ? ' disabled' : '';
     const down = index === showing.length - 1 ? ' disabled' : '';
-    return `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${item.type === 'list' ? 'List' : 'Feed'}</span></span><span class="lane-moves"><button type="button" class="lane-move" data-act="lane-up" data-index="${index}"${up} aria-label="Move up">${CHEVRON_UP}</button><button type="button" class="lane-move" data-act="lane-down" data-index="${index}"${down} aria-label="Move down">${CHEVRON_DOWN}</button><button type="button" class="text-btn" data-act="lane-remove" data-index="${index}">Remove</button></span></div>`;
+    return `<span class="lane-tab" role="tab"><button type="button" class="lane-nudge" data-act="lane-up" data-index="${index}"${up} aria-label="Move left">${CHEVRON_LEFT}</button><span>${escapeHtml(item.label)}</span><button type="button" class="lane-nudge" data-act="lane-down" data-index="${index}"${down} aria-label="Move right">${CHEVRON_RIGHT}</button><button type="button" class="lane-x" data-act="lane-remove" data-index="${index}" aria-label="Remove ${escapeHtml(item.label)}">×</button></span>`;
   }).join('');
   const available = laneDraft.available.map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${escapeHtml(item.kind)}</span></span><button type="button" class="text-btn" data-act="lane-add" data-type="${escapeHtml(item.type)}" data-value="${escapeHtml(item.value)}" data-label="${escapeHtml(item.label)}">Add</button></div>`).join('');
-  body.innerHTML = `<h3>Always on Home</h3>
-    <div class="lane-row"><span><strong>Following</strong><span class="handle">People you follow</span></span><span class="lane-lock">Kept</span></div>
-    <div class="lane-row"><span><strong>Discover</strong><span class="handle">What is happening</span></span><span class="lane-lock">Kept</span></div>
-    <h3>On Home</h3>
-    ${rows || '<p class="dim">Nothing extra yet. Add a list or a saved feed below.</p>'}
+  body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist"><span role="tab" aria-selected="true">Following</span><span role="tab">Discover</span>${rows}</div></div>
+    ${rows ? '' : '<p class="dim">Nothing extra yet. Add a list or a saved feed below. It shows on this row.</p>'}
     <h3>Add</h3>
     ${available || '<p class="dim">No other lists or saved feeds. Create a list or save a feed, then add it here.</p>'}
     <button type="button" class="primary lanes-save" data-act="lane-save">Save</button>`;
@@ -2138,7 +2206,10 @@ function openProfileMenu(anchor) {
   const mine = signedIn() && profile.did === myDid();
   const blocking = profile.viewer?.blocking || '';
   const items = [];
-  if (mine) items.push({ id: 'edit-profile', label: 'Edit profile' });
+  if (mine) {
+    items.push({ id: 'edit-profile', label: 'Edit profile' });
+    items.push({ id: 'edit-links', label: 'Edit links' });
+  }
   if (!mine && signedIn() && !blocking) {
     items.push({ id: 'message-profile', label: 'Message' });
     items.push({ id: 'profile-voice', label: 'Voice call' });
@@ -2873,18 +2944,18 @@ async function startCallToHandle(media) {
 
 const PUBLISHED = 'https://thewhitewitchtm.github.io/LibreSky/';
 const DOWNLOADS = [
-  ['LibreSky-linux-x64.zip', 'Linux', 'Unzip the folder and run the LibreSky file.'],
-  ['LibreSky-windows-x64.zip', 'Windows', 'Unzip the folder and run LibreSky.exe.'],
-  ['LibreSky-mac-x64.zip', 'Mac', 'Unzip the folder, then right-click LibreSky.app and choose Open. The Mac app is not signed.'],
+  ['LibreSky-linux-x64.zip', 'Linux', 'LibreSky-Linux.zip', 'Unzip the folder and run the LibreSky file.'],
+  ['LibreSky-windows-x64.zip', 'Windows', 'LibreSky-Windows.zip', 'Unzip the folder and run LibreSky.exe.'],
+  ['LibreSky-mac-x64.zip', 'Mac', 'LibreSky-Mac.zip', 'Unzip the folder, then right-click LibreSky.app and choose Open. The Mac app is not signed.'],
 ];
 
 let desktopManifest = null;
 
 function downloadsHtml(compact) {
-  const links = DOWNLOADS.map(([file, label]) => `<button type="button" class="download-btn" data-act="desktop-download" data-file="${escapeHtml(file)}">${escapeHtml(label)}</button>`).join('');
+  const links = DOWNLOADS.map(([file, label, saveAs]) => `<button type="button" class="download-btn" data-act="desktop-download" data-file="${escapeHtml(file)}" data-save="${escapeHtml(saveAs)}"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(saveAs)}</span></button>`).join('');
   const notes = compact
-    ? '<p class="dim download-note">The Mac app is not signed. Right-click it and choose Open the first time.</p>'
-    : `<ul class="download-notes">${DOWNLOADS.map(([, label, note]) => `<li><strong>${escapeHtml(label)}.</strong> ${escapeHtml(note)}</li>`).join('')}</ul>`;
+    ? '<p class="dim download-note">The Mac app is not signed. Right-click it and choose Open the first time. Each button saves a different file.</p>'
+    : `<ul class="download-notes">${DOWNLOADS.map(([, label, saveAs, note]) => `<li><strong>${escapeHtml(label)} saves ${escapeHtml(saveAs)}.</strong> ${escapeHtml(note)}</li>`).join('')}</ul>`;
   return `<div class="app-downloads"><p class="download-label">Desktop app</p><div class="download-row">${links}</div>${notes}</div>`;
 }
 
@@ -2913,7 +2984,8 @@ async function saveDesktopZip(file, button) {
     toast('The download opened in your browser.');
     return;
   }
-  const label = button?.textContent || '';
+  const label = button?.innerHTML || '';
+  const saveAs = button?.dataset.save || DOWNLOADS.find(([name]) => name === file)?.[2] || file;
   if (button) {
     button.disabled = true;
     button.textContent = 'Starting…';
@@ -2933,14 +3005,14 @@ async function saveDesktopZip(file, button) {
       got += data.byteLength;
       if (button && total) button.textContent = `${Math.min(99, Math.round((got / total) * 100))}%`;
     }
-    saveBlob(new Blob(chunks, { type: 'application/zip' }), file);
-    toast('Download ready. Unzip it and run LibreSky.');
+    saveBlob(new Blob(chunks, { type: 'application/zip' }), saveAs);
+    toast(`Saved ${saveAs}. Unzip it and run LibreSky.`);
   } catch (error) {
     toast(error?.message || 'The download failed.');
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
-      button.textContent = label;
+      button.innerHTML = label;
     }
   }
 }
@@ -3088,7 +3160,43 @@ async function showEngagement(kind, uri) {
   }
 }
 
+function noteNav() {
+  const hash = location.hash || '#/';
+  if (navStack[navStack.length - 1] === hash) return;
+  if (navStack.length > 1 && navStack[navStack.length - 2] === hash) {
+    navStack.pop();
+    return;
+  }
+  navStack.push(hash);
+  if (navStack.length > 40) navStack.shift();
+}
+
+function fallbackBack() {
+  const [a, b, c] = parseHash();
+  if (!a || a === 'discover' || a === 'lane') return '#/';
+  if (a === 'messages' && b) return '#/messages';
+  if (a === 'notifications' && b) return '#/notifications';
+  if (a === 'profile' && b && c) return `#/profile/${encodeURIComponent(b)}`;
+  if (a === 'feed' && b) return '#/feeds';
+  if (a === 'list' && b) return '#/lists';
+  if (a === 'pack' && b) return '#/packs';
+  return '#/';
+}
+
+function goBack() {
+  const here = location.hash || '#/';
+  while (navStack.length && navStack[navStack.length - 1] === here) navStack.pop();
+  const prev = navStack.length ? navStack[navStack.length - 1] : '';
+  const target = prev && prev !== here ? prev : fallbackBack();
+  if (!target || target === here) {
+    if (here !== '#/') location.hash = '#/';
+    return;
+  }
+  location.hash = target;
+}
+
 function route() {
+  noteNav();
   closeMenu();
   hideSuggest();
   closeHover();
@@ -3330,6 +3438,95 @@ function applyFieldLanguage(area) {
   const code = ($('compose')?.open && area.id === 'compose-text' ? $('compose')._langs : languagePrefs().posts)[0] || 'en';
   area.lang = code;
   area.spellcheck = true;
+}
+
+let dictateCaret = null;
+
+function rememberDictateCaret(area) {
+  const field = area || $('compose-text');
+  if (!field) return;
+  dictateCaret = {
+    start: field.selectionStart ?? field.value.length,
+    end: field.selectionEnd ?? field.value.length,
+  };
+}
+
+function stopDictate() {
+  const rec = dictateRec;
+  dictateRec = null;
+  const mic = $('compose-mic');
+  if (mic) mic.setAttribute('aria-pressed', 'false');
+  if (!rec) return;
+  rec.onresult = null;
+  rec.onerror = null;
+  rec.onend = null;
+  try { rec.stop(); } catch { /* already stopped */ }
+}
+
+function toggleDictate() {
+  if (dictateRec) {
+    stopDictate();
+    return;
+  }
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Ctor) {
+    toast('Chrome or Edge can dictate a post.');
+    return;
+  }
+  const area = $('compose-text');
+  if (!area) return;
+  const start = dictateCaret?.start ?? area.selectionStart ?? area.value.length;
+  const end = dictateCaret?.end ?? area.selectionEnd ?? start;
+  const before = area.value.slice(0, Math.min(start, area.value.length));
+  const after = area.value.slice(Math.min(end, area.value.length));
+  const lead = before && !/\s$/.test(before) ? `${before} ` : before;
+  const tail = after.replace(/^\s+/, '');
+  const finals = [];
+  let rec;
+  try {
+    rec = new Ctor();
+  } catch {
+    toast('Chrome or Edge can dictate a post.');
+    return;
+  }
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = ($('compose')?._langs || languagePrefs().posts)[0] || 'en';
+  rec.onresult = (event) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const piece = event.results[i][0]?.transcript || '';
+      if (event.results[i].isFinal) finals.push(piece);
+      else interim += piece;
+    }
+    const words = `${finals.join(' ')} ${interim}`.replace(/\s+/g, ' ').trim();
+    const next = `${lead}${words}${words && tail ? ' ' : ''}${tail}`.slice(0, 2000);
+    area.value = next;
+    const caret = Math.min(`${lead}${words}`.length, area.value.length);
+    area.setSelectionRange(caret, caret);
+    rememberDictateCaret(area);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  rec.onerror = (event) => {
+    const code = event?.error || '';
+    if (code === 'aborted' || code === 'no-speech') return;
+    stopDictate();
+    if (code === 'not-allowed' || code === 'service-not-allowed') toast('Allow the microphone to dictate.');
+    else toast('Dictation stopped.');
+  };
+  rec.onend = () => {
+    if (dictateRec !== rec) return;
+    dictateRec = null;
+    $('compose-mic')?.setAttribute('aria-pressed', 'false');
+  };
+  dictateRec = rec;
+  $('compose-mic')?.setAttribute('aria-pressed', 'true');
+  try {
+    rec.start();
+  } catch {
+    stopDictate();
+    toast('Dictation stopped.');
+  }
 }
 
 let linkEpoch = 0;
@@ -3776,6 +3973,7 @@ async function addFiles(list) {
 
 async function publish(event) {
   event.preventDefault();
+  stopDictate();
   const dialog = $('compose');
   let text = $('compose-text').value.trim();
   const files = dialog._files || [];
@@ -4105,9 +4303,10 @@ function paintAttachKinds() {
   if (title) title.textContent = attachMode === 'profile' ? 'Attach to your profile' : 'Attach to this post';
   if (note) {
     note.textContent = attachMode === 'profile'
-      ? 'This is saved on your profile record. People who open your profile can see it.'
+      ? 'Added links sit on your profile row, the same way lists sit on Home.'
       : 'This is embedded in the post, so other Bluesky apps show it too.';
   }
+  paintAttachCurrent();
 }
 
 function openAttachPicker(mode) {
@@ -4472,7 +4671,7 @@ function filterLanguageButtons(input) {
 }
 
 function hoverBlocked(node) {
-  return Boolean(node?.closest?.('.left, .tabbar, .account, #account-btn, [data-no-hover]'));
+  return Boolean(node?.closest?.('.app-top, .tabbar, .account, #account-btn, [data-no-hover]'));
 }
 
 function actorFromLink(node) {
@@ -5477,6 +5676,11 @@ async function onClick(event) {
     if (button?.dataset.file) saveDesktopZip(button.dataset.file, button);
     return;
   }
+  if (act === 'dictate') {
+    event.preventDefault();
+    toggleDictate();
+    return;
+  }
   if (act && await handleChromeAct(act, event)) return;
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
@@ -5876,6 +6080,7 @@ async function onMenu(event) {
     return;
   }
   if (id === 'edit-profile') return openProfileEditor();
+  if (id === 'edit-links') return openAttachPicker('profile');
   if (id === 'message-profile') {
     if (!signedIn()) return requireSignIn();
     try {
@@ -6493,8 +6698,10 @@ function bind() {
   }, { once: true });
   document.addEventListener('selectionchange', () => {
     const area = document.activeElement;
-    if (area?.id === 'compose-text') paintFieldHighlight(area, $('compose-highlight'));
-    else if (area?.id === 'chat-text') paintFieldHighlight(area, $('chat-highlight'));
+    if (area?.id === 'compose-text') {
+      rememberDictateCaret(area);
+      paintFieldHighlight(area, $('compose-highlight'));
+    } else if (area?.id === 'chat-text') paintFieldHighlight(area, $('chat-highlight'));
     else if (area?.id === 'ai-text') paintFieldHighlight(area, $('ai-highlight'));
   });
   document.addEventListener('pointerdown', (event) => {
@@ -6531,9 +6738,10 @@ function bind() {
     if (!event.target.closest('#hovercard') && !actorFromLink(event.target)) closeHover();
   });
   document.addEventListener('keydown', onKey);
-  $('back').addEventListener('click', () => {
-    if (history.length > 1) history.back();
-    else location.hash = '#/';
+  $('back').addEventListener('click', () => goBack());
+  $('compose-mic')?.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    rememberDictateCaret($('compose-text'));
   });
   $('account-btn').addEventListener('click', () => {
     if (!signedIn()) requireSignIn();
@@ -6608,6 +6816,7 @@ function bind() {
     }
   });
   $('compose').addEventListener('close', () => {
+    stopDictate();
     hideSuggest();
     closePicker();
     const video = $('compose')._video;
