@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import {
+  accountGone,
   compact,
   escapeHtml,
   fullCount,
@@ -177,6 +178,7 @@ export function postHtml(item, options = {}) {
           <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
+          ${options.bookmarkRemove ? `<button type="button" class="text-btn mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
           <button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}</button>
         </div>
         ${parentHandle ? `<a class="replying" href="${profileHash(parentHandle)}">Replying to @${escapeHtml(parentHandle)}</a>` : ''}
@@ -233,7 +235,8 @@ export function actorHtml(actor, options = {}) {
   const follow = showFollow
     ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(actor.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
     : '';
-  return `<div class="person">${avatar(actor.avatar, name)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${follow}</div>`;
+  const actions = `${follow}${options.extra || ''}`;
+  return `<div class="person">${avatar(actor.avatar, name)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${actions ? `<span class="row-actions">${actions}</span>` : ''}</div>`;
 }
 
 const NOTE_VERB = {
@@ -337,8 +340,14 @@ function messagePreview(message) {
 
 export function convoHtml(convo, me) {
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
+  const gone = accountGone(other);
   const text = messagePreview(convo.lastMessage);
-  return `<a class="person convo" href="#/messages/${encodeURIComponent(convo.id)}">${avatar(other.avatar, other.displayName || other.handle)}<span><strong>${escapeHtml(other.displayName || other.handle || 'Conversation')}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></span>${convo.unreadCount ? `<b class="pill">${convo.unreadCount}</b>` : ''}</a>`;
+  const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');
+  const pill = convo.unreadCount ? `<b class="pill">${convo.unreadCount}</b>` : '';
+  const remove = gone
+    ? `<button type="button" class="text-btn mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
+    : '';
+  return `<div class="person convo${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
 }
 
 export function messageHtml(message, me) {
@@ -354,8 +363,10 @@ export function messageHtml(message, me) {
 
 export function chatHeaderHtml(actor) {
   if (!actor) return '';
-  const name = actor.displayName || actor.handle || 'Chat';
-  return `<a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span></span></a>`;
+  const gone = accountGone(actor);
+  const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
+  const handle = gone ? 'This account was deleted' : `@${actor.handle || ''}`;
+  return `<a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>`;
 }
 
 export function threadList(node) {

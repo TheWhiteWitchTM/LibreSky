@@ -280,6 +280,68 @@ export function getPreferences() {
   return xrpc('app.bsky.actor.getPreferences', { auth: 'required' });
 }
 
+export function putPreferences(preferences) {
+  return xrpc('app.bsky.actor.putPreferences', { body: { preferences }, auth: 'required' });
+}
+
+const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
+
+function tid() {
+  let now = BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+  let out = '';
+  for (let i = 0; i < 13; i += 1) {
+    out = TID_ALPHABET[Number(now % 32n)] + out;
+    now /= 32n;
+  }
+  return out;
+}
+
+export function savedFeedItems(preferences) {
+  const list = preferences || [];
+  const v2 = list.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPrefV2');
+  if (v2) {
+    return (v2.items || [])
+      .filter((item) => item?.type && item?.value)
+      .map((item) => ({
+        id: item.id,
+        type: item.type,
+        value: item.value,
+        pinned: Boolean(item.pinned),
+      }));
+  }
+  const v1 = list.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPref');
+  if (!v1) return [];
+  const pinned = new Set(v1.pinned || []);
+  const uris = [...new Set([...(v1.saved || []), ...(v1.pinned || [])])].filter(Boolean);
+  return uris.map((uri) => ({
+    type: String(uri).includes('/app.bsky.graph.list/') ? 'list' : 'feed',
+    value: uri,
+    pinned: pinned.has(uri),
+  }));
+}
+
+export function applySavedFeeds(preferences, items) {
+  const next = (preferences || []).map((pref) => ({ ...pref }));
+  const v2items = items.map((item) => ({
+    id: item.id || tid(),
+    type: item.type,
+    value: item.value,
+    pinned: Boolean(item.pinned),
+  }));
+  let v2 = next.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPrefV2');
+  if (!v2) {
+    v2 = { $type: 'app.bsky.actor.defs#savedFeedsPrefV2', items: v2items };
+    next.push(v2);
+  } else v2.items = v2items;
+  const v1 = next.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPref');
+  if (v1) {
+    const rows = v2items.filter((item) => item.type === 'feed' || item.type === 'list');
+    v1.pinned = rows.filter((item) => item.pinned).map((item) => item.value);
+    v1.saved = rows.map((item) => item.value);
+  }
+  return next;
+}
+
 export function getFollowers(actor, cursor, signal) {
   return xrpc('app.bsky.graph.getFollowers', { params: { actor, limit: 30, cursor }, signal });
 }
@@ -288,12 +350,118 @@ export function getFollows(actor, cursor, signal) {
   return xrpc('app.bsky.graph.getFollows', { params: { actor, limit: 30, cursor }, signal });
 }
 
-export function getLists(actor) {
-  return xrpc('app.bsky.graph.getLists', { params: { actor, limit: 50 } });
+export function getLists(actor, cursor) {
+  return xrpc('app.bsky.graph.getLists', { params: { actor, limit: 50, cursor } });
+}
+
+export function getList(list, cursor, signal, limit = 50) {
+  return xrpc('app.bsky.graph.getList', { params: { list, limit, cursor }, signal });
 }
 
 export function getListFeed(list, cursor, signal) {
   return xrpc('app.bsky.feed.getListFeed', { params: { list, limit: 30, cursor }, signal });
+}
+
+export function createList({ name, description, purpose, descriptionFacets }) {
+  const record = {
+    $type: 'app.bsky.graph.list',
+    purpose: purpose || 'app.bsky.graph.defs#curatelist',
+    name,
+    createdAt: new Date().toISOString(),
+  };
+  if (description) record.description = description;
+  if (descriptionFacets?.length) record.descriptionFacets = descriptionFacets;
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.graph.list', record),
+    auth: 'required',
+  });
+}
+
+export function addListMember(list, did) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: recordBody('app.bsky.graph.listitem', {
+      $type: 'app.bsky.graph.listitem',
+      subject: did,
+      list,
+      createdAt: new Date().toISOString(),
+    }),
+    auth: 'required',
+  });
+}
+
+export function muteList(list) {
+  return xrpc('app.bsky.graph.muteActorList', { body: { list }, auth: 'required' });
+}
+
+export function unmuteList(list) {
+  return xrpc('app.bsky.graph.unmuteActorList', { body: { list }, auth: 'required' });
+}
+
+export async function updateRecord(uri, change) {
+  const parts = splitAtUri(uri);
+  if (!parts) throw new Error('Could not read that record.');
+  const got = await xrpc('com.atproto.repo.getRecord', {
+    params: { repo: parts.repo, collection: parts.collection, rkey: parts.rkey },
+    auth: 'required',
+  });
+  const record = { ...(got.value || {}) };
+  const next = (await change(record)) || record;
+  if (!next.$type) next.$type = parts.collection;
+  return xrpc('com.atproto.repo.putRecord', {
+    body: {
+      repo: parts.repo,
+      collection: parts.collection,
+      rkey: parts.rkey,
+      record: next,
+      swapRecord: got.cid || undefined,
+    },
+    auth: 'required',
+  });
+}
+
+async function deleteWrites(writes) {
+  if (!writes.length) return;
+  try {
+    for (let i = 0; i < writes.length; i += 100) {
+      await xrpc('com.atproto.repo.applyWrites', {
+        body: { repo: currentDid(), writes: writes.slice(i, i + 100) },
+        auth: 'required',
+      });
+    }
+  } catch {
+    for (const write of writes) {
+      await xrpc('com.atproto.repo.deleteRecord', {
+        body: { repo: currentDid(), collection: write.collection, rkey: write.rkey },
+        auth: 'required',
+      });
+    }
+  }
+}
+
+export async function deleteList(uri) {
+  let cursor;
+  for (let page = 0; page < 40; page += 1) {
+    let data;
+    try {
+      data = await getList(uri, cursor, null, 100);
+    } catch {
+      break;
+    }
+    const writes = [];
+    (data.items || []).forEach((item) => {
+      const parts = splitAtUri(item.uri);
+      if (!parts) return;
+      writes.push({
+        $type: 'com.atproto.repo.applyWrites#delete',
+        collection: parts.collection,
+        rkey: parts.rkey,
+      });
+    });
+    await deleteWrites(writes);
+    if (!data.cursor || data.cursor === cursor) break;
+    cursor = data.cursor;
+  }
+  return deleteRecord(uri);
 }
 
 function appview(ns, options = {}) {
@@ -706,8 +874,8 @@ function chat(ns, options = {}) {
   });
 }
 
-export function listConvos(signal) {
-  return chat('chat.bsky.convo.listConvos', { params: { limit: 30 }, signal });
+export function listConvos(cursor, signal) {
+  return chat('chat.bsky.convo.listConvos', { params: { limit: 40, cursor }, signal });
 }
 
 export function getConvo(convoId, signal) {
@@ -720,6 +888,14 @@ export function getConvoView(convoId, signal) {
 
 export function markConvoRead(convoId) {
   return chat('chat.bsky.convo.updateRead', { body: { convoId } });
+}
+
+export function markAllConvosRead() {
+  return chat('chat.bsky.convo.updateAllRead', { body: {} });
+}
+
+export function leaveConvo(convoId) {
+  return chat('chat.bsky.convo.leaveConvo', { body: { convoId } });
 }
 
 export async function sendMessage(convoId, message) {

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { feedHtml, messageHtml, notificationsHtml, profileHtml, resetPosts } from '../js/render.js';
-import { inspectLink } from '../js/api.js';
-import { bskyPostParts, richText, xStatusParts } from '../js/util.js';
+import { convoHtml, feedHtml, messageHtml, notificationsHtml, profileHtml, resetPosts } from '../js/render.js';
+import { applySavedFeeds, inspectLink, savedFeedItems } from '../js/api.js';
+import { accountGone, bskyPostParts, richText, xStatusParts } from '../js/util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -148,8 +148,58 @@ assert.match(index, /Create a Bluesky account/);
 assert.match(index, /stay signed in/);
 assert.match(index, /js\/app\.js/);
 assert.match(index, /property="og:image"/);
+assert.match(index, /property="og:image:type" content="image\/png"/);
 assert.match(index, /name="twitter:card" content="summary_large_image"/);
+assert.match(index, /name="twitter:site" content="@TheWhiteWitchTM"/);
+assert.match(index, /rel="canonical"/);
+assert.match(index, /G-13S6Z9KCX9/);
 assert.match(index, /assets\/banner.png/);
+assert.match(index, /id="manage-form"/);
+const robots = await readFile(path.join(root, 'robots.txt'), 'utf8');
+const sitemap = await readFile(path.join(root, 'sitemap.xml'), 'utf8');
+assert.match(robots, /Sitemap: https:\/\/thewhitewitchtm\.github\.io\/LibreSky\/sitemap\.xml/);
+assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
+const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
+assert.match(appSource, /<textarea id="chat-text"/);
+assert.match(appSource, /data-act="follow-back"/);
+assert.match(appSource, /data-act="chat-read"/);
+assert.match(appSource, /data-act="chat-cleanup"/);
+assert.match(appSource, /'list-delete'/);
+assert.match(appSource, /'feed-remove'/);
+assert.match(appSource, /bookmarks-cleanup/);
+assert.equal(accountGone({ did: 'did:x', handle: 'handle.invalid' }), true);
+assert.equal(accountGone({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' }), false);
+assert.equal(accountGone(null), false);
+const deletedChat = convoHtml({
+  id: 'abc',
+  unreadCount: 2,
+  members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:gone', handle: 'handle.invalid' }],
+  lastMessage: { text: 'hi' },
+}, 'did:me');
+assert.match(deletedChat, /Deleted account/);
+assert.match(deletedChat, /data-act="leave-convo"/);
+assert.match(deletedChat, /data-convo="abc"/);
+const feedPrefs = [{
+  $type: 'app.bsky.actor.defs#savedFeedsPref',
+  pinned: ['at://did:example/app.bsky.feed.generator/hot'],
+  saved: ['at://did:example/app.bsky.feed.generator/hot', 'at://did:example/app.bsky.graph.list/people'],
+}, {
+  $type: 'app.bsky.actor.defs#adultContentPref',
+  enabled: true,
+}];
+const feedItems = savedFeedItems(feedPrefs);
+assert.equal(feedItems.length, 2);
+assert.equal(feedItems[0].pinned, true);
+assert.equal(feedItems[1].type, 'list');
+const writtenFeeds = applySavedFeeds(feedPrefs, feedItems.filter((item) => item.type !== 'list').map((item) => ({ ...item, pinned: false })));
+const savedV2 = writtenFeeds.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPrefV2');
+assert.equal(savedV2.items.length, 1);
+assert.equal(savedV2.items[0].pinned, false);
+assert.match(savedV2.items[0].id, /^[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}$/);
+const savedV1 = writtenFeeds.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPref');
+assert.deepEqual(savedV1.pinned, []);
+assert.deepEqual(savedV1.saved, ['at://did:example/app.bsky.feed.generator/hot']);
+assert.equal(writtenFeeds.find((pref) => pref.$type === 'app.bsky.actor.defs#adultContentPref').enabled, true);
 assert.match(index, /id="profile-banner"/);
 assert.match(index, /id="compose-link"/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);

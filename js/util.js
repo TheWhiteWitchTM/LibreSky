@@ -223,6 +223,16 @@ export function rkeyOf(uri) {
   return String(uri || '').split('/').pop();
 }
 
+export function accountGone(actor) {
+  if (!actor || typeof actor !== 'object') return false;
+  const handle = String(actor.handle || '').trim().toLowerCase();
+  const name = String(actor.displayName || '').trim().toLowerCase();
+  if (handle === 'invalid.handle' || handle === 'handle.invalid' || handle.endsWith('.invalid')) return true;
+  if (name === 'account deleted' || name === 'deleted account') return true;
+  if (actor.did && !handle) return true;
+  return false;
+}
+
 export function splitAtUri(uri) {
   const raw = String(uri || '').replace(/^at:\/\//, '');
   const first = raw.indexOf('/');

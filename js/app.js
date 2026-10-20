@@ -30,7 +30,7 @@ import {
   setPassword,
   signedIn,
 } from './session.js';
-import { escapeHtml, firstUrl, graphemeLength, hostOf, parseHash, profileHash, richText } from './util.js';
+import { accountGone, escapeHtml, firstUrl, graphemeLength, hostOf, parseHash, profileHash, richText } from './util.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -122,10 +122,10 @@ function muted(post) {
   return words.some((word) => hay.includes(word.toLowerCase()));
 }
 
-function paintFeed(items, { append = false } = {}) {
+function paintFeed(items, { append = false, post = null } = {}) {
   const prepared = (items || []).map((item) => (muted(item.post || item) ? { ...item, muted: true } : item));
   resetPosts();
-  const html = feedHtml(prepared);
+  const html = feedHtml(prepared, post || undefined);
   if (append) {
     const sentinel = $('view').querySelector('.sentinel');
     if (sentinel) sentinel.insertAdjacentHTML('beforebegin', html);
@@ -353,7 +353,9 @@ async function showNotifications(filter) {
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
-      $('view').innerHTML = notificationsHtml(all, subjects) || emptyHtml('No notifications', 'You are all caught up.');
+      const rows = notificationsHtml(all, subjects);
+      const tools = `<div class="toolbar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>`;
+      $('view').innerHTML = tools + (rows || emptyHtml('No notifications', 'You are all caught up.'));
     };
     paint();
     const more = async (cursor) => {
@@ -386,7 +388,7 @@ async function showMessages(convoId) {
       const data = await api.listConvos();
       if (token !== generation) return;
       const rows = (data.convos || []).map((convo) => convoHtml(convo, myDid())).join('');
-      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
+      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="text-btn" data-act="chat-cleanup">Remove deleted accounts</button></div>${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       return;
     }
     const [data, convoWrap] = await Promise.all([
@@ -397,7 +399,8 @@ async function showMessages(convoId) {
     const other = (convoWrap?.convo?.members || []).find((member) => member.did !== myDid()) || null;
     if (other) $('title').textContent = other.displayName || `@${other.handle}`;
     const messages = (data.messages || []).slice().reverse();
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><input id="chat-text" maxlength="1000" placeholder="Message" autocomplete="off"><button class="primary small" type="submit">Send</button></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea><button class="primary small" type="submit">Send</button></form>`;
+    fitChatInput($('chat-text'));
     $('chat-text')?.focus();
     const scroller = $('view').querySelector('.messages');
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
@@ -407,6 +410,27 @@ async function showMessages(convoId) {
       $('view').innerHTML = emptyHtml('Messages are unavailable', error.message || 'This sign-in does not include chat access.');
     }
   }
+}
+
+function bookmarkParts(marks) {
+  const saved = [];
+  const gone = [];
+  (marks || []).forEach((mark) => {
+    const subject = mark.subject || mark.item || mark.post;
+    if (!subject?.uri) return;
+    const type = subject.$type || '';
+    if (subject.notFound || subject.blocked || type.includes('NotFound') || type.includes('Blocked')) {
+      gone.push(subject);
+      return;
+    }
+    subject.viewer = { ...(subject.viewer || {}), bookmarked: true };
+    saved.push({ post: subject });
+  });
+  return { saved, gone };
+}
+
+function goneBookmarkHtml(gone) {
+  return gone.map((subject) => `<div class="note"><span class="note-icon"></span><span class="note-body"><span>This saved post is unavailable.</span><button type="button" class="text-btn" data-act="remove-bookmark" data-uri="${escapeHtml(subject.uri)}">Remove bookmark</button></span></div>`).join('');
 }
 
 async function showBookmarks() {
@@ -420,57 +444,127 @@ async function showBookmarks() {
   try {
     const data = await api.getBookmarks();
     if (token !== generation) return;
-    const saved = [];
-    const gone = [];
-    (data.bookmarks || []).forEach((mark) => {
-      const subject = mark.subject || mark.item || mark.post;
-      if (!subject?.uri) return;
-      const type = subject.$type || '';
-      if (subject.notFound || subject.blocked || type.includes('NotFound') || type.includes('Blocked')) {
-        gone.push(subject);
-        return;
-      }
-      subject.viewer = { ...(subject.viewer || {}), bookmarked: true };
-      saved.push({ post: subject });
-    });
-    const goneHtml = gone.map((subject) => `<div class="note"><span class="note-icon"></span><span class="note-body"><span>This saved post is unavailable.</span><button type="button" class="text-btn" data-act="remove-bookmark" data-uri="${escapeHtml(subject.uri)}">Remove bookmark</button></span></div>`).join('');
+    const { saved, gone } = bookmarkParts(data.bookmarks);
+    const tools = `<div class="toolbar"><button type="button" class="text-btn" data-act="bookmarks-cleanup">Remove unavailable</button></div>`;
     if (!saved.length && !gone.length) {
-      $('view').innerHTML = emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.');
-    } else if (saved.length) {
-      paintFeed(saved);
-      if (goneHtml) $('view').insertAdjacentHTML('afterbegin', goneHtml);
-    } else $('view').innerHTML = goneHtml;
+      $('view').innerHTML = tools + emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.');
+    } else {
+      $('view').innerHTML = tools + goneBookmarkHtml(gone);
+      if (saved.length) paintFeed(saved, { append: true, post: { bookmarkRemove: true } });
+    }
+    const more = async (cursor) => {
+      const page = await api.getBookmarks(cursor);
+      if (token !== generation) return;
+      const next = bookmarkParts(page.bookmarks);
+      if (next.gone.length) $('view').querySelector('.toolbar')?.insertAdjacentHTML('afterend', goneBookmarkHtml(next.gone));
+      if (next.saved.length) paintFeed(next.saved, { append: true, post: { bookmarkRemove: true } });
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
     document.documentElement.dataset.ready = '1';
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load bookmarks', error.message);
   }
 }
 
+function listKind(purpose) {
+  const value = String(purpose || '');
+  if (value.includes('modlist')) return 'Mute list';
+  if (value.includes('referencelist')) return 'Reference list';
+  return 'People';
+}
+
+function miniButton(act, label, attrs = {}, danger = false) {
+  const extra = Object.entries(attrs).map(([key, value]) => ` data-${key}="${escapeHtml(value ?? '')}"`).join('');
+  return `<button type="button" class="${danger ? 'danger' : 'text-btn'} mini" data-act="${act}"${extra}>${escapeHtml(label)}</button>`;
+}
+
+function manageRow(avatarHtml, href, title, detail, actions) {
+  return `<div class="person manage-row">${avatarHtml}<a class="person-link" href="${href}"><strong>${escapeHtml(title)}</strong><span class="handle">${escapeHtml(detail)}</span></a><span class="row-actions">${actions}</span></div>`;
+}
+
+function initialAvatar(letter) {
+  return `<span class="avatar" data-initial="${escapeHtml(String(letter || '?').charAt(0))}"></span>`;
+}
+
+function imageAvatar(url, letter) {
+  return url
+    ? `<span class="avatar"><img src="${escapeHtml(url)}" alt=""></span>`
+    : initialAvatar(letter);
+}
+
+async function loadGenerators(uris) {
+  const views = [];
+  for (let i = 0; i < uris.length; i += 25) {
+    try {
+      const gens = await api.getFeedGenerators(uris.slice(i, i + 25));
+      views.push(...(gens.feeds || []));
+    } catch {
+      /* one bad feed should not hide the rest */
+    }
+  }
+  return views;
+}
+
+async function changeFeeds(edit) {
+  const data = await api.getPreferences();
+  const current = api.savedFeedItems(data.preferences);
+  const items = edit(current.map((item) => ({ ...item })));
+  await api.putPreferences(api.applySavedFeeds(data.preferences, items));
+}
+
+function feedActions(item, view) {
+  const own = view?.creator?.did && view.creator.did === myDid();
+  const buttons = [
+    miniButton('feed-pin', item.pinned ? 'Unpin' : 'Pin', { uri: item.value, pinned: item.pinned ? '1' : '0', type: item.type || 'feed' }),
+    miniButton('feed-remove', 'Remove', { uri: item.value }),
+  ];
+  if (own) {
+    buttons.push(miniButton('feed-edit', 'Edit', { uri: item.value, name: view.displayName || '', description: view.description || '' }));
+    buttons.push(miniButton('feed-delete', 'Delete', { uri: item.value }, true));
+  }
+  return buttons.join('');
+}
+
 async function showFeeds() {
   const token = ++generation;
   setChrome({ title: 'Feeds', nav: 'feeds' });
-  const hot = `<a class="person" href="#/discover"><span class="avatar" data-initial="D"></span><span><strong>Discover</strong><span class="handle">What's Hot</span></span></a>`;
+  const hot = `<a class="person" href="#/discover">${initialAvatar('D')}<span><strong>Discover</strong><span class="handle">What's Hot</span></span></a>`;
   if (!signedIn()) {
-    $('view').innerHTML = hot + emptyHtml('Your feeds', 'Sign in to see the feeds you pinned on Bluesky.');
+    $('view').innerHTML = `<div class="directory">${hot}</div>` + emptyHtml('Your feeds', 'Sign in to see the feeds you saved on Bluesky.');
     return;
   }
   showSkeletons();
   try {
     const prefs = await api.getPreferences();
     if (token !== generation) return;
-    const saved = (prefs.preferences || []).find((pref) => pref.$type?.includes('savedFeedsPref'));
-    const items = (saved?.items || saved?.pinned || []).filter((item) => (item.type || item) && (item.value || item).startsWith?.('at://') || item.value);
-    const uris = (saved?.items || []).filter((item) => item.type === 'feed' && item.value).map((item) => item.value);
-    let views = [];
-    if (uris.length) {
-      const gens = await api.getFeedGenerators(uris);
-      views = gens.feeds || [];
-    }
-    const rows = views.map((feed) => `<a class="person" href="#/feed/${encodeURIComponent(feed.uri)}">${feed.avatar ? `<span class="avatar"><img src="${escapeHtml(feed.avatar)}" alt=""></span>` : '<span class="avatar" data-initial="F"></span>'}<span><strong>${escapeHtml(feed.displayName || 'Feed')}</strong><span class="handle">${escapeHtml(feed.description || '')}</span></span></a>`).join('');
-    $('view').innerHTML = hot + rows;
-    if (!rows) $('view').insertAdjacentHTML('beforeend', emptyHtml('No pinned feeds', 'Pin feeds in Bluesky and they show up here.'));
+    const items = api.savedFeedItems(prefs.preferences).filter((item) => item.type === 'feed' || item.type === 'list');
+    const feedUris = items.filter((item) => item.type === 'feed').map((item) => item.value);
+    const listUris = items.filter((item) => item.type === 'list').map((item) => item.value);
+    const [views, lists] = await Promise.all([
+      feedUris.length ? loadGenerators(feedUris) : [],
+      Promise.all(listUris.map((uri) => api.getList(uri, null, null, 1).then((found) => found.list).catch(() => null))),
+    ]);
+    if (token !== generation) return;
+    const byFeed = new Map(views.map((feed) => [feed.uri, feed]));
+    const byList = new Map(lists.filter(Boolean).map((list) => [list.uri, list]));
+    const rows = items.map((item) => {
+      if (item.type === 'list') {
+        const list = byList.get(item.value);
+        const title = list?.name || 'Unavailable list';
+        const detail = [list ? listKind(list.purpose) : 'Saved list', item.pinned ? 'Pinned' : 'Saved'].join(' · ');
+        return manageRow(imageAvatar(list?.avatar, title), `#/list/${encodeURIComponent(item.value)}`, title, detail, feedActions(item, null));
+      }
+      const feed = byFeed.get(item.value);
+      const title = feed?.displayName || 'Unavailable feed';
+      const blurb = (feed?.description || '').replace(/\s+/g, ' ').slice(0, 80);
+      const detail = [blurb, item.pinned ? 'Pinned' : 'Saved'].filter(Boolean).join(' · ');
+      return manageRow(imageAvatar(feed?.avatar, 'F'), `#/feed/${encodeURIComponent(item.value)}`, title, detail, feedActions(item, feed));
+    }).join('');
+    $('view').innerHTML = `<div class="directory">${hot}${rows}</div>`;
+    if (!rows) $('view').insertAdjacentHTML('beforeend', emptyHtml('No saved feeds', 'Open a feed and save it. Pinned feeds stay at the top of this list.'));
   } catch (error) {
-    if (!cancelled(token, error)) $('view').innerHTML = hot + emptyHtml('Could not load feeds', error.message);
+    if (!cancelled(token, error)) $('view').innerHTML = `<div class="directory">${hot}</div>` + emptyHtml('Could not load feeds', error.message);
   }
 }
 
@@ -479,13 +573,31 @@ async function showCustomFeed(uri) {
   setChrome({ title: 'Feed', nav: 'feeds', back: true });
   showSkeletons();
   try {
-    const [info, data] = await Promise.all([
-      api.getFeedGenerator(uri).catch(() => null),
-      api.getFeed(uri),
-    ]);
+    const jobs = [api.getFeedGenerator(uri).catch(() => null), api.getFeed(uri)];
+    if (signedIn()) jobs.push(api.getPreferences().catch(() => null));
+    const [info, data, prefs] = await Promise.all(jobs);
     if (token !== generation) return;
-    if (info?.view?.displayName) $('title').textContent = info.view.displayName;
-    paintFeed(data.feed);
+    const view = info?.view;
+    if (view?.displayName) $('title').textContent = view.displayName;
+    let tools = '';
+    if (signedIn()) {
+      const saved = api.savedFeedItems(prefs?.preferences).find((item) => item.value === uri);
+      const own = view?.creator?.did && view.creator.did === myDid();
+      const buttons = [];
+      if (!saved) buttons.push(miniButton('feed-save', 'Save', { uri }));
+      else {
+        buttons.push(miniButton('feed-pin', saved.pinned ? 'Unpin' : 'Pin', { uri, pinned: saved.pinned ? '1' : '0', type: 'feed' }));
+        buttons.push(miniButton('feed-remove', 'Remove', { uri }));
+      }
+      if (own) {
+        buttons.push(miniButton('feed-edit', 'Edit', { uri, name: view.displayName || '', description: view.description || '' }));
+        buttons.push(miniButton('feed-delete', 'Delete', { uri }, true));
+      }
+      tools = `<div class="toolbar">${buttons.join('')}</div>`;
+    }
+    $('view').innerHTML = tools;
+    if ((data.feed || []).length) paintFeed(data.feed, { append: true });
+    else $('view').insertAdjacentHTML('beforeend', emptyHtml('Nothing here', 'There are no posts to show.'));
     const more = async (cursor) => {
       const page = await api.getFeed(uri, cursor);
       if (token !== generation) return;
@@ -509,8 +621,35 @@ async function showLists() {
   try {
     const data = await api.getLists(myDid());
     if (token !== generation) return;
-    const rows = (data.lists || []).map((list) => `<a class="person" href="#/list/${encodeURIComponent(list.uri)}"><span class="avatar" data-initial="${escapeHtml((list.name || 'L').charAt(0))}"></span><span><strong>${escapeHtml(list.name)}</strong><span class="handle">${escapeHtml(list.description || list.purpose || '')}</span></span></a>`).join('');
-    $('view').innerHTML = rows || emptyHtml('No lists', 'Lists you create on Bluesky show up here.');
+    const tools = `<div class="toolbar"><button type="button" class="primary small" data-act="list-new">New list</button></div>`;
+    const listRows = (lists) => (lists || []).map((list) => {
+      const blurb = (list.description || '').replace(/\s+/g, ' ').slice(0, 80);
+      const detail = [listKind(list.purpose), blurb].filter(Boolean).join(' · ');
+      const actions = [
+        miniButton('list-edit', 'Edit', {
+          uri: list.uri,
+          name: list.name || '',
+          description: list.description || '',
+          purpose: list.purpose || 'app.bsky.graph.defs#curatelist',
+        }),
+        miniButton('list-delete', 'Delete', { uri: list.uri, name: list.name || 'this list' }, true),
+      ].join('');
+      return manageRow(imageAvatar(list.avatar, list.name || 'L'), `#/list/${encodeURIComponent(list.uri)}`, list.name || 'List', detail, actions);
+    }).join('');
+    const rows = listRows(data.lists);
+    $('view').innerHTML = tools + (rows ? `<div class="directory">${rows}</div>` : emptyHtml('No lists', 'Create a list to gather people, or to mute them together.'));
+    const more = async (cursor) => {
+      const page = await api.getLists(myDid(), cursor);
+      if (token !== generation) return;
+      const extra = listRows(page.lists);
+      if (extra) {
+        const box = $('view').querySelector('.directory');
+        if (box) box.insertAdjacentHTML('beforeend', extra);
+        else $('view').insertAdjacentHTML('beforeend', `<div class="directory">${extra}</div>`);
+      }
+      pagerFor(page.cursor, more);
+    };
+    pagerFor(data.cursor, more);
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load lists', error.message);
   }
@@ -521,9 +660,45 @@ async function showList(uri) {
   setChrome({ title: 'List', nav: 'lists', back: true });
   showSkeletons();
   try {
-    const data = await api.getListFeed(uri);
+    const [info, data] = await Promise.all([
+      api.getList(uri).catch(() => null),
+      api.getListFeed(uri),
+    ]);
     if (token !== generation) return;
-    paintFeed(data.feed);
+    const list = info?.list;
+    if (list?.name) $('title').textContent = list.name;
+    const mine = Boolean(list?.creator?.did && list.creator.did === myDid());
+    const buttons = [];
+    if (mine) {
+      buttons.push(miniButton('list-edit', 'Edit', {
+        uri,
+        name: list.name || '',
+        description: list.description || '',
+        purpose: list.purpose || 'app.bsky.graph.defs#curatelist',
+      }));
+      buttons.push(miniButton('list-delete', 'Delete', { uri, name: list.name || 'this list' }, true));
+    }
+    if (signedIn() && String(list?.purpose || '').includes('modlist')) {
+      const muted = Boolean(list?.viewer?.muted);
+      buttons.push(miniButton('list-mute', muted ? 'Unmute list' : 'Mute list', { uri, muted: muted ? '1' : '0' }));
+    }
+    const meta = [list ? listKind(list.purpose) : '', list?.listItemCount != null ? `${list.listItemCount} people` : ''].filter(Boolean).join(' · ');
+    const memberRow = (item) => actorHtml(item.subject, {
+      follow: signedIn(),
+      self: myDid(),
+      extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }) : '',
+    });
+    const members = (info?.items || []).map(memberRow).join('');
+    const morePeople = info?.cursor
+      ? `<div class="toolbar"><button type="button" class="text-btn" data-act="list-more" data-uri="${escapeHtml(uri)}" data-cursor="${escapeHtml(info.cursor)}" data-mine="${mine ? '1' : '0'}">More people</button></div>`
+      : '';
+    const add = mine
+      ? `<form id="list-add" class="add-row" data-list="${escapeHtml(uri)}"><input id="list-add-handle" placeholder="Add a handle" autocomplete="off" spellcheck="false"><button class="primary small" type="submit">Add</button></form>`
+      : '';
+    const head = `<header class="list-head"><h2>${escapeHtml(list?.name || 'List')}</h2>${meta ? `<p class="dim">${escapeHtml(meta)}</p>` : ''}${list?.description ? `<p class="bio">${richText(list.description, list.descriptionFacets)}</p>` : ''}</header>${buttons.length ? `<div class="toolbar">${buttons.join('')}</div>` : ''}${add}${members ? `<div class="directory">${members}</div>` : ''}${morePeople}`;
+    $('view').innerHTML = head;
+    if ((data.feed || []).length) paintFeed(data.feed, { append: true });
+    else $('view').insertAdjacentHTML('beforeend', emptyHtml('No posts', 'People on this list have not posted yet.'));
     const more = async (cursor) => {
       const page = await api.getListFeed(uri, cursor);
       if (token !== generation) return;
@@ -972,8 +1147,406 @@ function openMenu(anchor, items) {
   menu.style.left = `${Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))}px`;
 }
 
+function fitChatInput(box) {
+  if (!box) return;
+  box.style.height = 'auto';
+  const full = box.scrollHeight;
+  box.style.height = `${Math.min(full, 160)}px`;
+  box.style.overflowY = full > 160 ? 'auto' : 'hidden';
+}
+
+function openManage({ mode, uri = '', title, name = '', description = '', purpose = '' }) {
+  const form = $('manage-form');
+  form.dataset.mode = mode;
+  form.dataset.uri = uri;
+  $('manage-title').textContent = title;
+  $('manage-name').value = name;
+  $('manage-name').maxLength = mode === 'feed-edit' ? 240 : 64;
+  $('manage-desc').value = description;
+  $('manage-desc').maxLength = mode === 'feed-edit' ? 3000 : 300;
+  const kind = $('manage-kind-label');
+  kind.hidden = mode === 'feed-edit';
+  const select = $('manage-kind');
+  [...select.querySelectorAll('option[data-custom]')].forEach((option) => option.remove());
+  if (mode !== 'feed-edit') {
+    const next = purpose || 'app.bsky.graph.defs#curatelist';
+    if (![...select.options].some((option) => option.value === next)) {
+      const extra = document.createElement('option');
+      extra.value = next;
+      extra.dataset.custom = '1';
+      extra.textContent = 'Custom';
+      select.append(extra);
+    }
+    select.value = next;
+  }
+  if (!$('manage').open) $('manage').showModal();
+  $('manage-name').focus();
+}
+
+async function writeDescription(record, description) {
+  if (description) {
+    record.description = description;
+    const facets = await api.facetsFor(description);
+    if (facets.length) record.descriptionFacets = facets;
+    else delete record.descriptionFacets;
+  } else {
+    delete record.description;
+    delete record.descriptionFacets;
+  }
+}
+
+async function saveManage(event) {
+  event.preventDefault();
+  const form = event.target;
+  const button = $('manage-save');
+  const name = $('manage-name').value.trim();
+  const description = $('manage-desc').value.trim();
+  const purpose = $('manage-kind').value;
+  if (!name) {
+    toast('Add a name.');
+    return;
+  }
+  button.disabled = true;
+  try {
+    if (form.dataset.mode === 'list-new') {
+      const descriptionFacets = description ? await api.facetsFor(description) : [];
+      await api.createList({ name, description, purpose, descriptionFacets });
+      toast('List created');
+    } else if (form.dataset.mode === 'list-edit') {
+      await api.updateRecord(form.dataset.uri, async (record) => {
+        record.name = name;
+        record.purpose = purpose || record.purpose;
+        await writeDescription(record, description);
+        return record;
+      });
+      toast('List saved');
+    } else if (form.dataset.mode === 'feed-edit') {
+      await api.updateRecord(form.dataset.uri, async (record) => {
+        record.displayName = name;
+        await writeDescription(record, description);
+        return record;
+      });
+      toast('Feed saved');
+    }
+    $('manage').close();
+    route();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function refreshHere() {
+  const [page] = parseHash();
+  if (['feeds', 'feed', 'lists', 'list', 'bookmarks', 'notifications', 'messages'].includes(page)) return route();
+}
+
+async function followAllBack(button) {
+  if (!signedIn()) return requireSignIn();
+  if (!window.confirm('Follow everyone who follows you and you do not follow back? This stops after 80 accounts. Run it again to continue.')) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Following…';
+  }
+  let followed = 0;
+  let cursor;
+  let capped = false;
+  let limited = false;
+  try {
+    for (let page = 0; page < 30 && followed < 80 && !limited; page += 1) {
+      const data = await api.getFollowers(myDid(), cursor);
+      const due = [];
+      (data.followers || []).forEach((actor) => {
+        if (followed + due.length >= 80) return;
+        if (!actor?.did || actor.did === myDid()) return;
+        if (actor.viewer?.following || actor.viewer?.blocking || actor.viewer?.blockedBy) return;
+        due.push(actor.did);
+      });
+      for (let i = 0; i < due.length; i += 4) {
+        const slice = due.slice(i, i + 4);
+        const results = await Promise.all(slice.map(async (did) => {
+          try {
+            await api.follow(did);
+            return 'ok';
+          } catch (error) {
+            return error?.status === 429 ? 'limit' : 'skip';
+          }
+        }));
+        results.forEach((result) => {
+          if (result === 'ok') followed += 1;
+          if (result === 'limit') limited = true;
+        });
+        if (limited) break;
+      }
+      if (followed >= 80 && data.cursor) capped = true;
+      if (!data.cursor || capped) break;
+      cursor = data.cursor;
+    }
+    const tail = capped ? ' Run it again to continue.' : (limited ? ' Bluesky asked for a pause. Run it again in a little while.' : '');
+    toast(followed ? `Followed ${followed} ${followed === 1 ? 'person' : 'people'} back.${tail}` : 'You already follow them back.');
+    await refreshHere();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = 'Follow all back';
+    }
+  }
+}
+
+async function markEveryChatRead(button) {
+  if (!signedIn()) return requireSignIn();
+  if (button) button.disabled = true;
+  try {
+    let count = 0;
+    try {
+      const data = await api.markAllConvosRead();
+      count = data?.updatedCount || 0;
+    } catch {
+      let cursor;
+      for (let page = 0; page < 20; page += 1) {
+        const data = await api.listConvos(cursor);
+        const unread = (data.convos || []).filter((convo) => convo.unreadCount);
+        for (const convo of unread) {
+          await api.markConvoRead(convo.id);
+          count += 1;
+        }
+        if (!data.cursor) break;
+        cursor = data.cursor;
+      }
+    }
+    toast(count ? `Marked ${count} ${count === 1 ? 'chat' : 'chats'} as read` : 'All chats are already read');
+    refreshBadge();
+    await refreshHere();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function cleanupDeletedChats(button) {
+  if (!signedIn()) return requireSignIn();
+  if (button) button.disabled = true;
+  try {
+    let cursor;
+    const ids = [];
+    for (let page = 0; page < 20; page += 1) {
+      const data = await api.listConvos(cursor);
+      (data.convos || []).forEach((convo) => {
+        const other = (convo.members || []).find((member) => member.did !== myDid()) || convo.members?.[0];
+        if (accountGone(other)) ids.push(convo.id);
+      });
+      if (!data.cursor) break;
+      cursor = data.cursor;
+    }
+    if (!ids.length) {
+      toast('No deleted accounts in your chats');
+      return;
+    }
+    if (!window.confirm(`Leave ${ids.length} ${ids.length === 1 ? 'chat' : 'chats'} with deleted accounts?`)) return;
+    for (const id of ids) await api.leaveConvo(id);
+    toast(`Removed ${ids.length} ${ids.length === 1 ? 'chat' : 'chats'}`);
+    refreshBadge();
+    await refreshHere();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function cleanupBookmarks(button) {
+  if (!signedIn()) return requireSignIn();
+  if (!window.confirm('Remove bookmarks whose posts are unavailable?')) return;
+  if (button) button.disabled = true;
+  try {
+    let cursor;
+    let removed = 0;
+    for (let page = 0; page < 30; page += 1) {
+      const data = await api.getBookmarks(cursor);
+      const gone = [];
+      (data.bookmarks || []).forEach((mark) => {
+        const subject = mark.subject || mark.item || mark.post;
+        if (!subject?.uri) return;
+        const type = subject.$type || '';
+        if (subject.notFound || subject.blocked || type.includes('NotFound') || type.includes('Blocked')) gone.push(subject.uri);
+      });
+      for (const uri of gone) {
+        await api.removeBookmark(uri);
+        removed += 1;
+      }
+      if (!data.cursor) break;
+      cursor = data.cursor;
+    }
+    toast(removed ? `Removed ${removed} unavailable ${removed === 1 ? 'bookmark' : 'bookmarks'}` : 'No unavailable bookmarks');
+    await refreshHere();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function handleChromeAct(act, event) {
+  const button = event.target.closest('[data-act]');
+  if (act === 'follow-back') {
+    event.preventDefault();
+    await followAllBack(button);
+    return true;
+  }
+  if (act === 'chat-read') {
+    event.preventDefault();
+    await markEveryChatRead(button);
+    return true;
+  }
+  if (act === 'chat-cleanup') {
+    event.preventDefault();
+    await cleanupDeletedChats(button);
+    return true;
+  }
+  if (act === 'leave-convo') {
+    event.preventDefault();
+    const id = button?.dataset.convo;
+    if (!id) return true;
+    if (!window.confirm('Remove this chat with a deleted account?')) return true;
+    try {
+      await api.leaveConvo(id);
+      button.closest('.person')?.remove();
+      toast('Chat removed');
+      refreshBadge();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'bookmarks-cleanup') {
+    event.preventDefault();
+    await cleanupBookmarks(button);
+    return true;
+  }
+  if (act === 'list-new') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    openManage({ mode: 'list-new', title: 'New list', purpose: 'app.bsky.graph.defs#curatelist' });
+    return true;
+  }
+  if (act === 'list-edit' || act === 'feed-edit') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    openManage({
+      mode: act === 'list-edit' ? 'list-edit' : 'feed-edit',
+      uri: button.dataset.uri,
+      title: act === 'list-edit' ? 'Edit list' : 'Edit feed',
+      name: button.dataset.name || '',
+      description: button.dataset.description || '',
+      purpose: button.dataset.purpose || '',
+    });
+    return true;
+  }
+  if (act === 'list-delete') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const name = button.dataset.name || 'this list';
+    if (!window.confirm(`Delete ${name}? People on the list stay on Bluesky. The list itself is removed.`)) return true;
+    try {
+      await api.deleteList(button.dataset.uri);
+      toast('List deleted');
+      if (parseHash()[0] === 'list') location.hash = '#/lists';
+      else route();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'list-mute') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    try {
+      if (button.dataset.muted === '1') await api.unmuteList(button.dataset.uri);
+      else await api.muteList(button.dataset.uri);
+      toast(button.dataset.muted === '1' ? 'List unmuted' : 'List muted');
+      route();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'list-more') {
+    event.preventDefault();
+    button.disabled = true;
+    try {
+      const page = await api.getList(button.dataset.uri, button.dataset.cursor);
+      const mine = button.dataset.mine === '1';
+      const rows = (page.items || []).map((item) => actorHtml(item.subject, {
+        follow: signedIn(),
+        self: myDid(),
+        extra: mine ? miniButton('list-remove-member', 'Remove', { uri: item.uri }) : '',
+      })).join('');
+      let box = $('view').querySelector('.directory');
+      if (!box && rows) {
+        button.closest('.toolbar')?.insertAdjacentHTML('beforebegin', `<div class="directory">${rows}</div>`);
+      } else if (rows) box.insertAdjacentHTML('beforeend', rows);
+      if (page.cursor) {
+        button.dataset.cursor = page.cursor;
+        button.disabled = false;
+      } else button.closest('.toolbar')?.remove();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message);
+    }
+    return true;
+  }
+  if (act === 'list-remove-member') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    try {
+      await api.deleteRecord(button.dataset.uri);
+      button.closest('.person')?.remove();
+      toast('Removed from list');
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'feed-pin' || act === 'feed-save' || act === 'feed-remove') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const uri = button.dataset.uri;
+    try {
+      if (act === 'feed-remove') {
+        await changeFeeds((items) => items.filter((item) => item.value !== uri));
+        toast('Removed from your feeds');
+      } else if (act === 'feed-save') {
+        await changeFeeds((items) => (items.some((item) => item.value === uri) ? items : [...items, { type: 'feed', value: uri, pinned: false }]));
+        toast('Feed saved');
+      } else {
+        const type = button.dataset.type || 'feed';
+        const pinned = button.dataset.pinned === '1';
+        await changeFeeds((items) => {
+          const found = items.find((item) => item.value === uri);
+          if (!found) return [...items, { type, value: uri, pinned: true }];
+          return items.map((item) => (item.value === uri ? { ...item, pinned: !pinned } : item));
+        });
+        toast(pinned ? 'Unpinned' : 'Pinned');
+      }
+      route();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  if (act === 'feed-delete') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    if (!window.confirm('Delete this feed from your account?')) return true;
+    try {
+      await api.deleteRecord(button.dataset.uri);
+      await changeFeeds((items) => items.filter((item) => item.value !== button.dataset.uri)).catch(() => {});
+      toast('Feed deleted');
+      if (parseHash()[0] === 'feeds') route();
+      else location.hash = '#/feeds';
+    } catch (error) { toast(error.message); }
+    return true;
+  }
+  return false;
+}
+
 async function onClick(event) {
   const act = event.target.closest('[data-act]')?.dataset.act;
+  if (act && await handleChromeAct(act, event)) return;
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
   }
@@ -998,6 +1571,9 @@ async function onClick(event) {
     try {
       await api.removeBookmark(uri);
       event.target.closest('.note, .post')?.remove();
+      if (parseHash()[0] === 'bookmarks' && !$('view').querySelector('.post, .note')) {
+        $('view').insertAdjacentHTML('beforeend', emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.'));
+      }
       toast('Bookmark removed');
     } catch (error) { toast(error.message); }
     return;
@@ -1715,13 +2291,26 @@ function bind() {
       input.disabled = true;
       api.sendMessage(id, text).then((sent) => {
         input.value = '';
+        fitChatInput(input);
         const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
         if (!message.sender) message.sender = { did: myDid() };
         if (!message.text) message.text = text;
         const list = $('view').querySelector('.messages');
         list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
-        if (list) list.scrollTop = list.scrollHeight;
+        input.closest('.reply-bar')?.scrollIntoView({ block: 'end' });
       }).catch((error) => toast(error.message)).finally(() => { input.disabled = false; input.focus(); });
+    }
+    if (event.target.id === 'list-add') {
+      event.preventDefault();
+      const input = $('list-add-handle');
+      const handle = input?.value.trim().replace(/^@/, '');
+      const uri = event.target.dataset.list;
+      if (!handle || !uri) return;
+      input.disabled = true;
+      api.resolveHandle(handle).then((did) => api.addListMember(uri, did)).then(() => {
+        toast(`Added @${handle}`);
+        route();
+      }).catch((error) => toast(error.message)).finally(() => { if (input.isConnected) input.disabled = false; });
     }
     if (event.target.id === 'thread-reply') {
       event.preventDefault();
@@ -1738,6 +2327,18 @@ function bind() {
       showSettings();
     }
   });
+  $('view').addEventListener('keydown', (event) => {
+    if (event.target.id !== 'chat-text') return;
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    if (matchMedia('(pointer: coarse)').matches) return;
+    event.preventDefault();
+    if (!event.target.disabled) event.target.form?.requestSubmit();
+  });
+  $('view').addEventListener('input', (event) => {
+    if (event.target.id === 'chat-text') fitChatInput(event.target);
+  });
+  $('manage-form').addEventListener('submit', saveManage);
+  $('manage-cancel').addEventListener('click', () => $('manage').close());
   $('view').addEventListener('click', (event) => {
     const theme = event.target.dataset?.themeSet;
     if (theme) applyTheme(theme);

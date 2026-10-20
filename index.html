@@ -3,22 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-13S6Z9KCX9"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-13S6Z9KCX9');
+  </script>
   <title>LibreSky</title>
   <meta name="description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="author" content="LibreSky">
+  <link rel="canonical" href="https://thewhitewitchtm.github.io/LibreSky/">
   <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
   <meta property="og:site_name" content="LibreSky">
   <meta property="og:title" content="LibreSky">
   <meta property="og:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
   <meta property="og:url" content="https://thewhitewitchtm.github.io/LibreSky/">
   <meta property="og:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
+  <meta property="og:image:secure_url" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="LibreSky, a Bluesky client">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@TheWhiteWitchTM">
   <meta name="twitter:title" content="LibreSky">
   <meta name="twitter:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
   <meta name="twitter:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
   <meta name="twitter:image:alt" content="LibreSky, a Bluesky client">
+  <link rel="image_src" href="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "LibreSky",
+    "url": "https://thewhitewitchtm.github.io/LibreSky/",
+    "image": "https://thewhitewitchtm.github.io/LibreSky/assets/banner.png",
+    "description": "LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.",
+    "applicationCategory": "SocialNetworkingApplication",
+    "operatingSystem": "Any",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <meta name="theme-color" content="#0085ff">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -51,7 +81,7 @@
   </script>
 </head>
 <body>
-  <div id="boot" class="boot">LibreSky</div>
+  <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A Bluesky client for the browser.</p></div></div>
   <div class="shell">
     <nav class="left" aria-label="Primary">
       <a class="brand" href="#/" aria-label="LibreSky home">
@@ -190,6 +220,29 @@
         <button type="button" class="text-btn" id="report-cancel">Cancel</button>
         <button type="submit" class="danger">Submit report</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="manage">
+    <form id="manage-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="manage-cancel">Cancel</button>
+        <button type="submit" class="primary small" id="manage-save">Save</button>
+      </div>
+      <h2 id="manage-title">List</h2>
+      <label>Name
+        <input id="manage-name" maxlength="64" required autocomplete="off">
+      </label>
+      <label>Description
+        <textarea id="manage-desc" maxlength="300" rows="4"></textarea>
+      </label>
+      <label id="manage-kind-label">Kind
+        <select id="manage-kind">
+          <option value="app.bsky.graph.defs#curatelist">People</option>
+          <option value="app.bsky.graph.defs#modlist">Mute list</option>
+          <option value="app.bsky.graph.defs#referencelist">Reference list</option>
+        </select>
+      </label>
     </form>
   </dialog>
 
