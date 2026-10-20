@@ -1682,29 +1682,44 @@ function dropUrl(text, url) {
   return text.replace(url, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function imageCandidates(imageUrl) {
+  const value = String(imageUrl || '');
+  const list = [];
+  const push = (url) => {
+    if (url && !list.includes(url)) list.push(url);
+  };
+  push(value);
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname === 'cardyb.bsky.app' && parsed.pathname === '/v1/image') push(parsed.searchParams.get('url') || '');
+  } catch {
+    /* keep the address we already have */
+  }
+  const original = list.find((url) => !url.startsWith('https://cardyb.bsky.app/'));
+  if (original) push(`https://cardyb.bsky.app/v1/image?url=${encodeURIComponent(original)}`);
+  return list;
+}
+
 async function thumbFile(imageUrl) {
   const load = async (target) => {
     const res = await fetch(target);
     if (!res.ok) return null;
     const blob = await res.blob();
-    if (!blob.size || blob.size > 8000000) return null;
-    const type = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+    const type = blob.type || '';
+    if (!blob.size || blob.size > 8000000 || !type.startsWith('image/') || type === 'image/svg+xml') return null;
     const file = new File([blob], 'thumb', { type });
     if ((type === 'image/jpeg' || type === 'image/png') && file.size < 1000000) return file;
     return compress(file);
   };
-  try {
-    const direct = await load(imageUrl);
-    if (direct) return direct;
-  } catch {
-    /* try the card proxy, which allows the browser to read the image */
+  for (const target of imageCandidates(imageUrl)) {
+    try {
+      const file = await load(target);
+      if (file) return file;
+    } catch {
+      /* the next address may still be a readable image */
+    }
   }
-  if (String(imageUrl).startsWith('https://cardyb.bsky.app/')) return null;
-  try {
-    return await load(`https://cardyb.bsky.app/v1/image?url=${encodeURIComponent(imageUrl)}`);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 async function compress(file) {
@@ -1800,8 +1815,12 @@ async function publish(event) {
       } else if (card?.kind === 'external' && !images.length) {
         let thumb = null;
         if (card.image) {
-          const file = await thumbFile(card.image);
-          if (file) thumb = await api.uploadBlob(file);
+          try {
+            const file = await thumbFile(card.image);
+            if (file) thumb = await api.uploadBlob(file);
+          } catch {
+            thumb = null;
+          }
         }
         link = api.externalEmbed({ ...card, url: card.url || url, thumb });
       }

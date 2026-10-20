@@ -1,5 +1,5 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
-import { bskyPostParts, splitAtUri, xStatusParts } from './util.js';
+import { bskyPostParts, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -765,12 +765,14 @@ export async function facetsFor(text) {
     let match = pattern.re.exec(source);
     while (match) {
       if (pattern.type === 'link') {
-        const value = match[0];
-        const start = bytes.encode(source.slice(0, match.index)).length;
-        facets.push({
-          index: { byteStart: start, byteEnd: start + bytes.encode(value).length },
-          features: [{ $type: 'app.bsky.richtext.facet#link', uri: value }],
-        });
+        const value = trimLink(match[0]);
+        if (value) {
+          const start = bytes.encode(source.slice(0, match.index)).length;
+          facets.push({
+            index: { byteStart: start, byteEnd: start + bytes.encode(value).length },
+            features: [{ $type: 'app.bsky.richtext.facet#link', uri: value }],
+          });
+        }
       } else if (pattern.type === 'mention') {
         const handle = match[2];
         const offset = match[1].length;
@@ -808,6 +810,44 @@ async function cardyb(url) {
   const meta = await res.json();
   if (!meta || meta.error) return null;
   return meta;
+}
+
+async function readPage(pageUrl) {
+  try {
+    const res = await fetch(pageUrl, {
+      redirect: 'follow',
+      headers: { Accept: 'text/html,application/xhtml+xml,image/*;q=0.8' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!res.ok) return null;
+    const type = (res.headers.get('content-type') || '').toLowerCase();
+    const finalUrl = res.url || pageUrl;
+    if (type.startsWith('image/') && !type.includes('svg')) return { title: '', description: '', image: finalUrl };
+    if (!type.includes('html') && !type.includes('xml') && !type.startsWith('text/')) return null;
+    return pageCard((await res.text()).slice(0, 500000), finalUrl);
+  } catch {
+    return null;
+  }
+}
+
+async function microlinkImage(pageUrl) {
+  try {
+    const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(pageUrl)}&screenshot=false&video=false&audio=false&iframe=false`, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    const image = data?.data?.image;
+    const href = typeof image === 'string' ? image : image?.url;
+    const width = Number(image?.width) || 0;
+    const height = Number(image?.height) || 0;
+    if (!href || !/^https?:\/\//i.test(href)) return '';
+    if ((width && width < 200) || (height && height < 100)) return '';
+    if (/favicon|gstatic\.com\/favicon/i.test(href)) return '';
+    return href;
+  } catch {
+    return '';
+  }
 }
 
 function canonicalPost(meta) {
@@ -879,9 +919,9 @@ export async function inspectLink(url) {
       };
     }
   }
-  try {
-    const meta = await cardyb(clean);
-    if (!meta) return null;
+  let meta = null;
+  try { meta = await cardyb(clean); } catch { meta = null; }
+  if (meta) {
     const canonical = canonicalPost(meta);
     if (canonical) {
       try {
@@ -891,20 +931,29 @@ export async function inspectLink(url) {
         /* keep the external card */
       }
     }
-    const title = String(meta.title || '').trim();
-    const description = String(meta.description || '').trim();
-    if (!title && !description) return null;
-    if (/post not found|404 error/i.test(title) && !description) return null;
-    return {
-      kind: 'external',
-      url: meta.url || clean,
-      title: title || clean,
-      description,
-      image: meta.image || '',
-    };
-  } catch {
-    return null;
   }
+  let title = String(meta?.title || '').trim();
+  let description = String(meta?.description || '').trim();
+  let image = String(meta?.image || '').trim();
+  const pageUrl = String(meta?.url || '').trim() || clean;
+  if (!image || !title) {
+    const page = await readPage(clean);
+    if (page) {
+      if (!title) title = page.title;
+      if (!description) description = page.description;
+      if (!image) image = page.image;
+    }
+  }
+  if (!image) image = await microlinkImage(clean);
+  if (!title && !description && !image) return null;
+  if (/post not found|404 error/i.test(title) && !description && !image) return null;
+  return {
+    kind: 'external',
+    url: pageUrl,
+    title: title || pageUrl,
+    description,
+    image,
+  };
 }
 
 export function externalEmbed({ url, title, description, thumb }) {

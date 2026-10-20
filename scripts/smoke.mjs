@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
-import { applySavedFeeds, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, ownUnread, parseCallMessage, richText, xStatusParts } from '../js/util.js';
+import { callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
+import { accountGone, assembleCallSdp, bskyPostParts, caretToken, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -81,6 +81,17 @@ assert.match(headed, /class="banner"/);
 assert.match(headed, /src="https:\/\/cdn.example\/banner.jpg"/);
 assert.equal(bskyPostParts('https://bsky.app/profile/jay.bsky.team/post/abc123')?.rkey, 'abc123');
 assert.equal(xStatusParts('https://x.com/jack/status/20')?.id, '20');
+assert.equal(trimLink('https://example.com/a.'), 'https://example.com/a');
+assert.equal(trimLink('https://en.wikipedia.org/wiki/Foo_(bar)'), 'https://en.wikipedia.org/wiki/Foo_(bar)');
+assert.equal(firstUrl('see (https://example.com/a).'), 'https://example.com/a');
+const plainLink = await facetsFor('Look https://example.com/path.');
+assert.equal(plainLink[0].features[0].uri, 'https://example.com/path');
+const homeHtml = `<title>The White Witch™</title>
+<img src="/assets/images/banner.jpg" alt="The White Witch banner">
+<img src="https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg" alt="" width="1200" height="630">
+<img src="https://thewhitewitchtm.github.io/emojigames/assets/images/preview.jpg" alt="" width="1200" height="630">`;
+assert.equal(pageSummary(homeHtml, 'https://thewhitewitchtm.github.io/').image, 'https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg');
+assert.equal(pageSummary('<meta property="og:image" content="/cover.jpg"><img src="https://cdn.example/other.jpg" width="1200" height="630">', 'https://example.com/posts/1').image, 'https://example.com/cover.jpg');
 
 const feedUrl = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed='
   + encodeURIComponent('at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot')
@@ -159,6 +170,11 @@ const tweetCard = await inspectLink('https://x.com/jack/status/20');
 assert.equal(tweetCard?.kind, 'external');
 assert.match(tweetCard.description, /twttr/i);
 assert.ok(tweetCard.title);
+const homeCard = await inspectLink('https://thewhitewitchtm.github.io/');
+assert.equal(homeCard?.kind, 'external');
+assert.match(homeCard.title, /White Witch/);
+assert.match(homeCard.image, /\/og\.jpg|\/banner\.jpg/, 'homepage link preview is missing its image');
+assert.match(linkPreviewHtml(homeCard), /<img [^>]*og\.jpg|banner\.jpg/);
 
 const metadata = JSON.parse(await readFile(path.join(root, 'client-metadata.json'), 'utf8'));
 assert.equal(metadata.client_name, 'LibreSky');

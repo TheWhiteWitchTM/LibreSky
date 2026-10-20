@@ -137,7 +137,7 @@ function syntheticMarks(source) {
   const linkRe = /https?:\/\/[^\s<>"']+/g;
   let match = linkRe.exec(source);
   while (match) {
-    const raw = match[0].replace(/[),.!?:;]+$/g, '').replace(/[)\]}>'"]+$/g, '');
+    const raw = trimLink(match[0]);
     const start = byteAt(source, match.index);
     take(start, start + encoder.encode(raw).length, [{ $type: 'app.bsky.richtext.facet#link', uri: raw }]);
     match = linkRe.exec(source);
@@ -287,10 +287,112 @@ export function assembleCallSdp(messages, rkey, sender) {
   }
 }
 
+export function trimLink(raw) {
+  let uri = String(raw || '');
+  for (;;) {
+    const cut = uri.replace(/[.,;:!?]+$/g, '').replace(/[\]}>'"]+$/g, '');
+    const next = cut.endsWith(')') && !cut.includes('(') ? cut.slice(0, -1) : cut;
+    if (next === uri) return uri;
+    uri = next;
+  }
+}
+
 export function firstUrl(text) {
   const match = String(text ?? '').match(/https?:\/\/[^\s<>"']+/);
   if (!match) return '';
-  return match[0].replace(/[),.!?:;]+$/g, '').replace(/[)\]}>'"]+$/g, '');
+  return trimLink(match[0]);
+}
+
+function tagAttr(tag, name) {
+  const match = String(tag).match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>]+))`, 'i'));
+  return match ? (match[1] ?? match[2] ?? match[3] ?? '') : '';
+}
+
+function decodePoint(code) {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
+  try { return String.fromCodePoint(code); } catch { return ''; }
+}
+
+function decodeBasic(value) {
+  return String(value || '')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => decodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, num) => decodePoint(Number(num)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function metaValue(html, key) {
+  const wanted = key.toLowerCase();
+  const tags = String(html).match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const name = (tagAttr(tag, 'property') || tagAttr(tag, 'name') || tagAttr(tag, 'itemprop')).toLowerCase();
+    if (name !== wanted) continue;
+    const content = tagAttr(tag, 'content');
+    if (content) return decodeBasic(content);
+  }
+  return '';
+}
+
+function absoluteHttp(value, base) {
+  try {
+    const url = new URL(decodeBasic(value), base);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.href;
+  } catch {
+    return '';
+  }
+}
+
+function imageScore(url, width, height) {
+  if (width && width < 200) return 0;
+  if (height && height < 100) return 0;
+  if (/favicon|\/sprite(?:\/|[.-])|\/emoji[./]|1x1|pixel|spacer|\/badge/i.test(url)) return 0;
+  let score = width > 0 && height > 0 ? width * height : 10_000;
+  if (width >= 600 && height >= 300) score += 500_000;
+  if (/(?:^|[/-])og[.-]|opengraph|social|share|cover|hero|preview|banner/i.test(url)) score += 1_000_000;
+  return score;
+}
+
+export function pageCard(html, pageUrl) {
+  const source = String(html || '');
+  const base = String(pageUrl || '');
+  let image = '';
+  for (const key of ['og:image:secure_url', 'og:image:url', 'og:image', 'twitter:image', 'twitter:image:src']) {
+    const content = metaValue(source, key);
+    image = content ? absoluteHttp(content, base) : '';
+    if (image) break;
+  }
+  if (!image) {
+    for (const tag of source.match(/<link\b[^>]*>/gi) || []) {
+      if (tagAttr(tag, 'rel').toLowerCase() !== 'image_src') continue;
+      image = absoluteHttp(tagAttr(tag, 'href'), base);
+      if (image) break;
+    }
+  }
+  if (!image) {
+    let best = '';
+    let bestScore = 0;
+    for (const tag of source.match(/<img\b[^>]*>/gi) || []) {
+      const src = absoluteHttp(tagAttr(tag, 'src'), base);
+      if (!src || /\.svg($|\?)/i.test(src)) continue;
+      const score = imageScore(src, Number(tagAttr(tag, 'width')) || 0, Number(tagAttr(tag, 'height')) || 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = src;
+      }
+    }
+    image = best;
+  }
+  const title = decodeBasic(metaValue(source, 'og:title') || (source.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || '')).replace(/\s+/g, ' ').trim();
+  const description = decodeBasic(metaValue(source, 'og:description') || metaValue(source, 'description') || metaValue(source, 'twitter:description')).replace(/\s+/g, ' ').trim();
+  return {
+    title: title.slice(0, 300),
+    description: description.slice(0, 1000),
+    image,
+  };
 }
 
 export function bskyPostParts(value) {
