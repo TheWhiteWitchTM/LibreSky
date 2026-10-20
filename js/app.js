@@ -763,7 +763,7 @@ async function loadRail() {
     trends = '';
   }
   if (!signedIn()) {
-    card.innerHTML = `${trends}<section class="panel"><h2>LibreSky</h2><p>A Bluesky client. Sign in with your Bluesky account.</p><button type="button" class="primary" data-act="signin">Sign in</button></section>`;
+    card.innerHTML = `${trends}<section class="panel"><h2>LibreSky</h2><p>Edit, AI, voice, video, and chat. Sign in with your Bluesky account.</p><button type="button" class="primary" data-act="signin">Sign in</button></section>`;
     return;
   }
   try {
@@ -7546,7 +7546,92 @@ async function settleSession(result) {
   }
 }
 
+let alphaAudio;
+
+function playAlphaDoor() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  if (!alphaAudio) alphaAudio = new AudioCtx();
+  const ctx = alphaAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const now = ctx.currentTime;
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.72);
+  master.connect(ctx.destination);
+
+  const noiseLen = Math.floor(ctx.sampleRate * 0.07);
+  const buffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < noiseLen; i += 1) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.018));
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 1400;
+  band.Q.value = 0.7;
+  noise.connect(band);
+  band.connect(master);
+  noise.start(now);
+
+  const tick = ctx.createOscillator();
+  tick.type = 'triangle';
+  tick.frequency.setValueAtTime(240, now);
+  tick.frequency.exponentialRampToValueAtTime(80, now + 0.12);
+  const tickGain = ctx.createGain();
+  tickGain.gain.setValueAtTime(0.45, now);
+  tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+  tick.connect(tickGain);
+  tickGain.connect(master);
+  tick.start(now);
+  tick.stop(now + 0.16);
+
+  [784, 1176].forEach((freq, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    const start = now + 0.06;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(index === 0 ? 0.16 : 0.07, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.55);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(start);
+    osc.stop(start + 0.56);
+  });
+}
+
+function bindAlphaDoor() {
+  const mark = document.getElementById('alpha-mark');
+  if (!mark) return;
+  const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let last = 0;
+  const play = () => {
+    if (quiet) return;
+    const now = performance.now();
+    if (now - last < 900) return;
+    last = now;
+    try { playAlphaDoor(); } catch { /* this browser kept the chime */ }
+  };
+  mark.addEventListener('pointerenter', play);
+  mark.addEventListener('focus', play);
+  mark.addEventListener('click', () => {
+    const open = mark.classList.toggle('is-open');
+    mark.setAttribute('aria-expanded', open ? 'true' : 'false');
+    play();
+  });
+  document.addEventListener('pointerdown', () => {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!alphaAudio) alphaAudio = new AudioCtx();
+    if (alphaAudio.state === 'suspended') alphaAudio.resume().catch(() => {});
+  }, { capture: true });
+}
+
 async function boot() {
+  bindAlphaDoor();
   applyA11y(a11yPrefs());
   setupCall({ toast });
   bind();

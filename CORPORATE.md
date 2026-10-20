@@ -1,6 +1,6 @@
 # LibreSky Corporate
 
-![LibreSky Corporate, coming soon. Self-hosted services, small enough for a Pi.](assets/banner-corporate.png)
+![LibreSky Corporate. Highlighted features: self-hosted, your Pi, your services. Coming soon.](assets/banner-corporate.png)
 
 **Coming soon.**
 
@@ -20,6 +20,6 @@ A setup guide will land here when the edition is ready to run. The public client
 
 ## Already in the sky
 
-[![LibreSky. Edit, AI, voice, video, and chat.](assets/banner.png)](README.md)
+[![LibreSky. Highlighted features: Edit, AI, Voice, Video, and Chat.](assets/banner.png)](README.md)
 
 [LibreSky](README.md) is the client you can use now. Home, Discover, search, chat, calls, and `@ai` are live there. Corporate is the one coming next.

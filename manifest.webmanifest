@@ -1,7 +1,7 @@
 {
   "name": "LibreSky",
   "short_name": "LibreSky",
-  "description": "A Bluesky client for the browser.",
+  "description": "A free Bluesky client in the browser. Edit, AI, voice, video, and chat.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

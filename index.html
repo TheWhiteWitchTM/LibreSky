@@ -12,29 +12,32 @@
 
     gtag('config', 'G-13S6Z9KCX9');
   </script>
-  <title>LibreSky</title>
-  <meta name="description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <title>LibreSky — Bluesky client for chat, voice, video, and AI</title>
+  <meta name="description" content="LibreSky is a free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.">
+  <meta name="keywords" content="LibreSky, Bluesky client, Bluesky app, chat, voice call, video call, AI, edit posts, open source">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="author" content="LibreSky">
   <link rel="canonical" href="https://thewhitewitchtm.github.io/LibreSky/">
+  <link rel="author" href="https://thewhitewitchtm.github.io/">
+  <link rel="describedby" href="./llms.txt" type="text/plain" title="LibreSky summary">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
   <meta property="og:site_name" content="LibreSky">
-  <meta property="og:title" content="LibreSky">
-  <meta property="og:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta property="og:title" content="LibreSky — Bluesky client for chat, voice, video, and AI">
+  <meta property="og:description" content="LibreSky is a free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.">
   <meta property="og:url" content="https://thewhitewitchtm.github.io/LibreSky/">
   <meta property="og:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
   <meta property="og:image:secure_url" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="LibreSky. Edit, AI, voice, video, and chat.">
+  <meta property="og:image:alt" content="LibreSky. Highlighted features: Edit, AI, Voice, Video, and Chat.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@TheWhiteWitchTM">
-  <meta name="twitter:title" content="LibreSky">
-  <meta name="twitter:description" content="LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.">
+  <meta name="twitter:title" content="LibreSky — Bluesky client for chat, voice, video, and AI">
+  <meta name="twitter:description" content="LibreSky is a free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.">
   <meta name="twitter:image" content="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
-  <meta name="twitter:image:alt" content="LibreSky. Edit, AI, voice, video, and chat.">
+  <meta name="twitter:image:alt" content="LibreSky. Highlighted features: Edit, AI, Voice, Video, and Chat.">
   <link rel="image_src" href="https://thewhitewitchtm.github.io/LibreSky/assets/banner.png">
   <script type="application/ld+json">
   {
@@ -43,10 +46,22 @@
     "name": "LibreSky",
     "url": "https://thewhitewitchtm.github.io/LibreSky/",
     "image": "https://thewhitewitchtm.github.io/LibreSky/assets/banner.png",
-    "description": "LibreSky is a Bluesky client for the browser. Home, search, notifications, chat, bookmarks, and profiles come from your Bluesky account.",
+    "screenshot": "https://thewhitewitchtm.github.io/LibreSky/assets/banner.png",
+    "description": "LibreSky is a free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.",
     "applicationCategory": "SocialNetworkingApplication",
-    "operatingSystem": "Any",
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    "applicationSubCategory": "Bluesky client",
+    "operatingSystem": "Web, Linux, Windows, macOS",
+    "browserRequirements": "Requires a modern browser.",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "featureList": ["Edit posts", "AI", "Voice calls", "Video calls", "Chat", "Home and Discover", "Search", "Notifications", "Bookmarks", "Profiles"],
+    "author": {
+      "@type": "Organization",
+      "name": "LibreSky",
+      "url": "https://thewhitewitchtm.github.io/"
+    },
+    "license": "https://opensource.org/licenses/MIT",
+    "codeRepository": "https://github.com/TheWhiteWitchTM/LibreSky"
   }
   </script>
   <meta name="theme-color" content="#0085ff">
@@ -88,12 +103,24 @@
 </head>
 <body>
   <a class="skip" href="#view">Skip to posts</a>
-  <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A Bluesky client for the browser.</p></div></div>
+  <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A free Bluesky client. Edit, AI, voice, video, and chat.</p></div></div>
   <header class="app-top">
     <a class="top-mark" href="#/" aria-label="LibreSky home">
       <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0085ff"/><circle cx="22" cy="11" r="3.2" fill="#fff"/><path d="M6 21c4-4 7-4 11 0s7 4 11 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
     </a>
-    <span class="alpha" title="Alpha"><span aria-hidden="true">α</span><span class="sr-name">Alpha</span></span>
+    <button type="button" class="alpha" id="alpha-mark" aria-expanded="false">
+      <span class="alpha-door" aria-hidden="true">
+        <span class="alpha-door-string"></span>
+        <span class="alpha-door-card">
+          <span class="alpha-door-kicker">Door</span>
+          <strong>ALPHA</strong>
+          <span class="alpha-door-line">Come on in</span>
+          <span class="alpha-door-note">The paint is still wet</span>
+        </span>
+      </span>
+      <span class="alpha-glyph" aria-hidden="true">α</span>
+      <span class="sr-name">Alpha</span>
+    </button>
     <div class="headline">
       <button type="button" class="icon-btn" id="back" hidden aria-label="Back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/></svg></button>
       <span class="page-icon" id="page-icon" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg></span>
@@ -141,7 +168,22 @@
         <div class="tabs" id="tabs" hidden></div>
       </header>
       <button type="button" id="fresh" class="fresh" data-act="fresh-update" hidden aria-live="polite"></button>
-      <div id="view" aria-live="polite"></div>
+      <div id="view" aria-live="polite">
+        <noscript>
+          <section class="noscript-pitch">
+            <h2>LibreSky</h2>
+            <p>LibreSky is a free Bluesky client you open in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.</p>
+            <ul>
+              <li>Edit</li>
+              <li>AI</li>
+              <li>Voice</li>
+              <li>Video</li>
+              <li>Chat</li>
+            </ul>
+            <p>This page needs JavaScript. The source is on <a href="https://github.com/TheWhiteWitchTM/LibreSky">GitHub</a>.</p>
+          </section>
+        </noscript>
+      </div>
     </main>
 
     <aside class="right">

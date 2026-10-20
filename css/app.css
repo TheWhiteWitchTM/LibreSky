@@ -133,10 +133,20 @@ img { max-width: 100%; }
   width: 100%;
   min-height: 52px;
   padding: 0 8px 0 6px;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(12px);
+  overflow: visible;
+  background: transparent;
   border-bottom: 1px solid var(--border);
 }
+.app-top::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+.app-top > * { position: relative; z-index: 1; }
 .top-mark {
   display: grid;
   place-items: center;
@@ -148,12 +158,16 @@ img { max-width: 100%; }
 .top-mark:hover { background: var(--hover); }
 .top-mark .mark { width: 32px; height: 32px; }
 .alpha {
+  position: relative;
+  z-index: 4;
   display: grid;
   place-items: center;
   flex: none;
   width: 28px;
   height: 28px;
   margin-right: 4px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   background: radial-gradient(circle at 32% 28%, #ff6d80, #e11d48 58%, #9f1239);
   color: #fff;
@@ -163,8 +177,115 @@ img { max-width: 100%; }
   font-size: 18px;
   line-height: 1;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 0 0 1px rgba(159, 18, 57, 0.35);
+  cursor: pointer;
 }
-.alpha span[aria-hidden] { transform: translate(0.5px, -0.5px); }
+.alpha-glyph { transform: translate(0.5px, -0.5px); }
+.alpha-door {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 5;
+  width: 138px;
+  margin-left: -69px;
+  transform: rotate(-16deg);
+  transform-origin: 69px 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.alpha-door-string {
+  display: block;
+  width: 2px;
+  height: 14px;
+  margin: 0 auto;
+  border-radius: 1px;
+  background: linear-gradient(#9f1239, #4c1020);
+}
+.alpha-door-card {
+  display: block;
+  padding: 8px 10px 12px;
+  border-radius: 10px 10px 18px 18px;
+  background: linear-gradient(#fffaf3, #f4e2c8);
+  color: #7a1430;
+  text-align: center;
+  font-family: Palatino, "Palatino Linotype", Georgia, serif;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  box-shadow:
+    0 14px 24px rgba(60, 10, 24, 0.28),
+    inset 0 0 0 1.5px rgba(122, 20, 48, 0.38);
+}
+.alpha-door-card::before {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 2px auto 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 4px, #7a1430 5px 7px, #fffaf3 8px);
+  box-shadow: 0 0 0 1px rgba(122, 20, 48, 0.28);
+}
+.alpha-door-kicker {
+  display: block;
+  color: #9a6840;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-transform: uppercase;
+}
+.alpha-door-card strong {
+  display: block;
+  margin: 1px 0 5px;
+  font-size: 22px;
+  font-style: italic;
+  letter-spacing: 0.12em;
+}
+.alpha-door-line { display: block; font-size: 14px; }
+.alpha-door-note {
+  display: block;
+  margin-top: 4px;
+  color: #8d5348;
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 600;
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .alpha:hover .alpha-door {
+    opacity: 1;
+    animation: alpha-door-swing 0.8s cubic-bezier(.2, .85, .2, 1) both;
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .alpha:hover .alpha-door { opacity: 1; transform: none; }
+}
+.alpha:focus-visible .alpha-door,
+.alpha.is-open .alpha-door { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .alpha:focus-visible .alpha-door,
+  .alpha.is-open .alpha-door {
+    animation: alpha-door-swing 0.8s cubic-bezier(.2, .85, .2, 1) both;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .alpha:focus-visible .alpha-door,
+  .alpha.is-open .alpha-door { transform: none; }
+}
+@keyframes alpha-door-swing {
+  0% { opacity: 0; transform: rotate(-22deg) translateY(-8px); }
+  42% { opacity: 1; transform: rotate(8deg); }
+  68% { transform: rotate(-5deg); }
+  100% { opacity: 1; transform: rotate(-1deg); }
+}
+.noscript-pitch {
+  margin: 28px auto;
+  max-width: 34rem;
+  padding: 8px 16px 24px;
+}
+.noscript-pitch h2 { margin: 0 0 8px; font-size: 28px; }
+.noscript-pitch ul { padding-left: 1.2rem; }
 .headline {
   display: flex;
   align-items: center;
