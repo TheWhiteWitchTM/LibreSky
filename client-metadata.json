@@ -1,20 +1,17 @@
 {
   "client_id": "https://thewhitewitchtm.github.io/LibreSky/client-metadata.json",
   "client_name": "LibreSky",
-  "client_uri": "https://thewhitewitchtm.github.io/LibreSky",
-  "logo_uri": "https://thewhitewitchtm.github.io/LibreSky/favicon.svg",
-  "tos_uri": "https://thewhitewitchtm.github.io/LibreSky",
-  "policy_uri": "https://thewhitewitchtm.github.io/LibreSky",
+  "client_uri": "https://thewhitewitchtm.github.io/LibreSky/",
+  "logo_uri": "https://thewhitewitchtm.github.io/LibreSky/assets/icon.svg",
   "redirect_uris": [
     "https://thewhitewitchtm.github.io/LibreSky/",
-    "http://127.0.0.1:5173/",
-    "http://localhost:5173/",
-    "libresky://oauth/callback"
+    "http://127.0.0.1:4173/",
+    "http://localhost:4173/"
   ],
   "scope": "atproto transition:generic",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
-  "application_type": "web",
   "token_endpoint_auth_method": "none",
+  "application_type": "web",
   "dpop_bound_access_tokens": true
 }

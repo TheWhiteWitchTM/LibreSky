@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# LibreSky — Sovereign Bluesky Web Client
+# Launches LibreSky locally and opens it in your default browser.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PORT="${LIBRESKY_PORT:-4173}"
+
+# Find an open port if the default is in use
+find_open_port() {
+  local p="$1"
+  while command -v lsof >/dev/null 2>&1 && lsof -i :"$p" >/dev/null 2>&1; do
+    p=$((p + 1))
+  done
+  echo "$p"
+}
+
+PORT=$(find_open_port "$PORT")
+URL="http://127.0.0.1:${PORT}"
+
+echo -e "\033[1;36m"
+echo "  ██╗     ██╗██████╗ ██████╗ ███████╗███████╗██╗  ██╗██╗   ██╗"
+echo "  ██║     ██║██╔══██╗██╔══██╗██╔════╝██╔════╝██║ ██╔╝╚██╗ ██╔╝"
+echo "  ██║     ██║██████╔╝██████╔╝█████╗  ███████╗█████╔╝  ╚████╔╝ "
+echo "  ██║     ██║██╔══██╗██╔══██╗██╔══╝  ╚════██║██╔═██╗   ╚██╔╝  "
+echo "  ███████╗██║██████╔╝██║  ██║███████╗███████║██║  ██╗   ██║   "
+echo "  ╚══════╝╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝   "
+echo -e "\033[0m"
+echo -e "\033[1;32m  ★ Sovereign Bluesky Client with Local AI & Dark Default Theme ★\033[0m"
+echo ""
+echo "  Serving:  $ROOT"
+echo "  URL:      $URL"
+echo ""
+
+# Probe local AI (Ollama)
+if curl -s --connect-timeout 1 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+  echo -e "  \033[1;33m[AI Detected]\033[0m Local Ollama detected at 127.0.0.1:11434"
+else
+  echo -e "  \033[0;37m[AI Scan]\033[0m Local Ollama not detected at 127.0.0.1:11434 (start with: systemctl --user start ollama)"
+fi
+echo ""
+echo "  Press Ctrl+C to stop the server."
+echo ""
+
+# Try opening in browser after server starts
+open_browser() {
+  sleep 0.5
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$URL" >/dev/null 2>&1 &
+  elif python3 -m webbrowser "$URL" >/dev/null 2>&1; then
+    :
+  fi
+}
+
+open_browser &
+
+cd "$ROOT"
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m http.server "$PORT" --bind 127.0.0.1
+elif command -v node >/dev/null 2>&1; then
+  exec node -e "
+    const http = require('http');
+    const fs = require('fs');
+    const path = require('path');
+    const root = process.cwd();
+    const mime = {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'application/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.svg': 'image/svg+xml',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.ico': 'image/x-icon'
+    };
+    http.createServer((req, res) => {
+      let reqPath = decodeURI(req.url.split('?')[0]);
+      if (reqPath === '/') reqPath = '/index.html';
+      const file = path.join(root, reqPath);
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        res.writeHead(404, {'Content-Type': 'text/plain'});
+        return res.end('404 Not Found');
+      }
+      const ext = path.extname(file).toLowerCase();
+      res.writeHead(200, {
+        'Content-Type': mime[ext] || 'application/octet-stream',
+        'Access-Control-Allow-Origin': '*'
+      });
+      fs.createReadStream(file).pipe(res);
+    }).listen($PORT, '127.0.0.1');
+  "
+else
+  echo "Error: Neither python3 nor node found to start a local server."
+  exit 1
+fi

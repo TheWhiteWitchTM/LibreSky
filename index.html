@@ -1,19 +1,230 @@
 <!DOCTYPE html>
-<html lang="en" class="dark bg-black">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#000000" />
-    <meta name="description" content="LibreSky - High performance, OLED true-black Bluesky client with local AI integration and smart editor" />
-    <title>LibreSky</title>
-    <!-- Preconnect to Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  </head>
-  <body class="bg-black text-zinc-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-200 overflow-hidden">
-    <div id="root"></div>
-    <script type="module" src="./src/main.tsx"></script>
-  </body>
+<html lang="en" data-theme="black">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LibreSky — Sovereign Bluesky Client</title>
+  <meta name="description" content="Sovereign Bluesky client with dark theme and local AI assistant.">
+  <link rel="stylesheet" href="./css/styles.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e7c98a' d='M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z'/%3E%3C/svg%3E">
+</head>
+<body>
+  <!-- Splash Screen -->
+  <div id="splash" style="position:fixed;inset:0;display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;background:var(--bg);z-index:999;">
+    <div class="spark large pulse"></div>
+    <strong style="font-size:20px;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
+      Libre<span style="color:var(--blue);">Sky</span>
+    </strong>
+    <span class="dim" style="font-size:12px;font-family:var(--mono);">Initializing sovereign ATProto client...</span>
+  </div>
+
+  <!-- App Shell -->
+  <div id="app">
+    <!-- Left Navigation Sidebar -->
+    <nav class="nav-sidebar" aria-label="Main Navigation">
+      <div class="brand-header" onclick="window.location.hash='timeline'">
+        <span class="spark"></span>
+        <div>
+          <div class="brand-title">Libre<span class="accent">Sky</span></div>
+          <div class="brand-sub">Sovereign Client</div>
+        </div>
+      </div>
+
+      <div class="nav-menu">
+        <a class="nav-item active" data-view="timeline" href="#timeline">
+          <svg viewBox="0 0 24 24"><path d="M12 2.1L1 12h3v9h6v-6h4v6h6v-9h3L12 2.1zm0 2.69L19 11v8h-3v-6H8v6H5v-8l7-6.21z"/></svg>
+          <span>Home</span>
+        </a>
+        <a class="nav-item" data-view="discover" href="#discover">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></svg>
+          <span>Discover</span>
+        </a>
+        <a class="nav-item" data-view="search" href="#search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-5.2-5.2" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Search</span>
+        </a>
+        <a class="nav-item" data-view="notifications" href="#notifications">
+          <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+          <span>Notifications</span>
+          <span class="nav-badge" id="notif-badge" hidden>0</span>
+        </a>
+        <a class="nav-item" data-view="chat" href="#chat">
+          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/></svg>
+          <span>Messages</span>
+        </a>
+        <a class="nav-item" data-view="bookmarks" href="#bookmarks">
+          <svg viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></svg>
+          <span>Bookmarks</span>
+        </a>
+
+        <!-- Grok AI Assistant Button -->
+        <div class="nav-item ai-item" id="nav-ai-btn" style="cursor:pointer;" title="Grok Local AI Assistant (G)">
+          <span class="spark small"></span>
+          <span>Grok AI</span>
+          <span class="ai-status-dot" id="ai-nav-dot" title="Local AI connection status"></span>
+        </div>
+
+        <button type="button" class="compose-btn-primary" id="primary-compose-btn">
+          <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          <span>Post</span>
+        </button>
+      </div>
+
+      <!-- Account / Sign In Pill -->
+      <div class="nav-account" id="nav-account-pill">
+        <div class="account-avatar" style="display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 24 24" style="width:20px;height:20px;fill:currentColor;"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        </div>
+        <div class="account-info">
+          <span class="account-name">Guest Mode</span>
+          <span class="account-handle">Click to sign in</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Wrapper -->
+    <div class="main-wrapper">
+      <!-- Center Feed Column -->
+      <main class="center-column">
+        <!-- Sticky Header -->
+        <header class="view-header">
+          <div class="view-header-title" id="view-title">
+            <span>Home</span>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="icon-btn" id="header-refresh-btn" title="Refresh feed (R)">
+              <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- Feed Tabs (Following / Discover) -->
+        <div class="feed-tabs-bar" id="feed-tabs-bar">
+          <div class="feed-tab active" data-tab="timeline">Following</div>
+          <div class="feed-tab" data-tab="discover">Discover</div>
+        </div>
+
+        <!-- Scrollable Feed Body -->
+        <div class="feed-scroll-container">
+          <!-- Inline Composer -->
+          <div class="feed-composer" id="inline-composer">
+            <div class="composer-avatar" style="display:flex;align-items:center;justify-content:center;">
+              <span class="spark small"></span>
+            </div>
+            <div class="composer-body">
+              <textarea id="composer-textarea" class="composer-input" rows="2" placeholder="What is happening?!"></textarea>
+              <div id="composer-previews" class="composer-previews"></div>
+              <div class="composer-bottom">
+                <div class="composer-tools">
+                  <label class="composer-tool-btn" title="Add Images">
+                    <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    <input type="file" id="inline-img-input" accept="image/*" multiple hidden>
+                  </label>
+                  <button type="button" class="composer-tool-btn ai-tool" id="inline-ai-assist-btn" title="Grok AI Polish">
+                    <span class="spark small"></span>
+                  </button>
+                </div>
+                <div class="composer-submit-group">
+                  <span id="inline-char-count" class="char-count-text">300</span>
+                  <button type="button" class="submit-post-btn" id="inline-submit-btn" disabled>Post</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Feed Posts Container -->
+          <div id="feed-container"></div>
+        </div>
+      </main>
+
+      <!-- Right Grok AI & Info Sidebar -->
+      <aside class="grok-sidebar" id="grok-sidebar">
+        <div class="grok-header">
+          <div class="grok-title">
+            <span class="spark small"></span>
+            <span>LibreSky AI (Grok)</span>
+            <span class="grok-badge">Local</span>
+          </div>
+          <button type="button" class="icon-btn" id="grok-close-btn" title="Close AI Panel">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+
+        <!-- Local AI Status Card -->
+        <div class="ai-status-card">
+          <div class="ai-status-row">
+            <span style="font-weight:700;">Status</span>
+            <span id="grok-status-tag" class="ai-endpoint-tag">Scanning local AI...</span>
+          </div>
+          <div class="ai-status-row" style="gap:8px;">
+            <select id="grok-model-select" class="ai-models-select">
+              <option value="">Searching local models...</option>
+            </select>
+            <select id="grok-persona-select" class="grok-persona-select">
+              <option value="grok">Grok / Witty</option>
+              <option value="summarizer">Summarizer</option>
+              <option value="factcheck">Fact-Checker</option>
+              <option value="writer">Ghostwriter</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Quick Action Prompt Pills -->
+        <div class="grok-quick-actions">
+          <button type="button" class="quick-prompt-btn" data-prompt="Summarize what's happening on the timeline right now.">✨ Summarize Feed</button>
+          <button type="button" class="quick-prompt-btn" data-prompt="What are the top discussions and debates right now?">🔍 Deep Dive</button>
+          <button type="button" class="quick-prompt-btn" data-prompt="Give me a witty, humorous take on recent tech news.">🎭 Roast</button>
+        </div>
+
+        <!-- Grok Chat Log -->
+        <div class="grok-log" id="grok-chat-log">
+          <div class="grok-msg ai">
+            <div class="grok-msg-role"><span class="spark small"></span> Grok</div>
+            <div class="grok-msg-content">Hello! I'm LibreSky AI, running locally on your hardware. Ask me to summarize feeds, explain posts, fact-check takes, or refine drafts.</div>
+          </div>
+        </div>
+
+        <!-- Prompt Input Form -->
+        <div class="grok-input-wrap">
+          <textarea id="grok-prompt-input" class="grok-textarea" placeholder="Ask Grok about Bluesky or enter a prompt..."></textarea>
+          <div class="grok-controls-row">
+            <span class="dim" style="font-size:11px;font-family:var(--mono);">Enter sends · Shift+Enter newline</span>
+            <button type="button" class="grok-send-btn" id="grok-send-btn">
+              <span class="spark small"></span> Ask
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Bar -->
+  <nav class="mobile-bottom-bar" aria-label="Mobile Navigation">
+    <button type="button" class="icon-btn" onclick="window.location.hash='timeline'"><svg viewBox="0 0 24 24"><path d="M12 2.1L1 12h3v9h6v-6h4v6h6v-9h3L12 2.1z"/></svg></button>
+    <button type="button" class="icon-btn" onclick="window.location.hash='discover'"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></svg></button>
+    <button type="button" class="icon-btn" onclick="window.location.hash='notifications'"><svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg></button>
+    <button type="button" class="icon-btn" onclick="document.getElementById('grok-sidebar').classList.toggle('collapsed')"><span class="spark small"></span></button>
+    <button type="button" class="icon-btn" onclick="window.dispatchEvent(new CustomEvent('nav:compose'))"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg></button>
+  </nav>
+
+  <!-- Modals -->
+  <div id="modal-overlay" class="modal-overlay" hidden></div>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox" hidden>
+    <button type="button" class="lightbox-close-btn" id="lightbox-close">&times;</button>
+    <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev">&#10094;</button>
+    <button type="button" class="lightbox-nav-btn next" id="lightbox-next">&#10095;</button>
+    <div class="lightbox-img-wrap">
+      <img id="lightbox-img" class="lightbox-img" src="" alt="Fullscreen view">
+    </div>
+    <div id="lightbox-alt" class="lightbox-alt-bar" hidden></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toasts"></div>
+
+  <!-- Main JavaScript Module -->
+  <script type="module" src="./js/app.js"></script>
+</body>
 </html>

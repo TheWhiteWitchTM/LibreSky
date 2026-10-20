@@ -3,6 +3,6 @@ git add -A
 if [ -n "$1" ]; then
   git commit -m "$1"
 else
-  git commit -m "Update"
+  git commit -m "Update LibreSky"
 fi
 git push

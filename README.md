@@ -1,139 +1,126 @@
-# 🦋 LibreSky
+# LibreSky
 
-> **The next-generation Bluesky client engineered for privacy, speed, and aesthetics. Featuring real-time `@` and `#` autocomplete, local AI integration with a Grok-style button, OLED true-black design, and dual-mode deployment for Electron (Linux/Windows) and GitHub Pages.**
+Sovereign Bluesky client with dark default theme and local AI assistant.
 
----
+Mira, [The White Witch™](https://thewhitewitchtm.github.io/whitewitch/). [X](https://x.com/TheWhiteWitchTM) · [thewhitewitchtm@google.com](mailto:thewhitewitchtm@google.com) · [GitHub](https://github.com/TheWhiteWitchTM) · [Bluesky](https://bsky.app/profile/thewhitewitchtm.sociallydead.me) · [MIT License](LICENSE)
 
-## ✨ Key Highlights
-
-- 🌌 **OLED True-Black Aesthetic (`#000000`)**: Designed to be vastly easier on the eyes than standard grey-dark themes, with razor-sharp contrast, cyan & neon blue accents, and readable modern typography.
-- 🤖 **Local AI Engine (Private & Offline-Ready)**:
-  - **Auto-Detection**: Automatically detects local AI instances running on your system (**Ollama** on port `11434`, **LM Studio** on port `1234`, **LocalAI** on port `8080`).
-  - **Grok-style AI Button**: Click the sparkle button on any post to:
-    - ⚡ **Explain Context**: Subtext, news references, and background
-    - 🔍 **Fact-Check**: Critical analysis of claims and logic
-    - 🧵 **Thread TL;DR**: One-click discussion synopsis
-    - 💬 **Draft Reply**: Generate 3 distinct reply angles (witty, agreeable, counter-point)
-    - 🎭 **Roast (Fun Mode)**: Grok-style playful roasts
-    - 🌐 **Instant Translation**: Multilingual translation
-  - **LibreAI Copilot Dock**: Dedicated side panel to chat with your local models and generate real-time timeline digests.
-- ✍️ **Cool Composer with Real-Time Prediction**:
-  - **`@` Mentions Prediction**: Type `@` to instantly query and search accounts via the AT Protocol with avatar preview.
-  - **`#` Hashtag Autocomplete**: Type `#` for instant recommendations of trending and matching tags.
-  - **Syntax Highlighting**: Real-time coloring for mentions, tags, and links.
-  - **AI Polish Toolbar**: One-click actions to make posts punchier, generate hashtags, or condense under 300 characters.
-  - **Circular Progress Limiter**: Dynamic SVG ring showing remaining characters.
-  - **Confetti Micro-Interactions**: Celebrate published posts with smooth canvas confetti!
-- 🔐 **Decentralized Authentication**:
-  - **OAuth2 Flow**: Secure AT Protocol authorization code flow with PKCE.
-  - **App Password Login**: Instant sign-in with your handle and Bluesky App Password.
-  - **Guest Mode**: Explore What's Hot, Discover feeds, and user profiles without credentials.
-- 🖥️ **Cross-Platform**:
-  - **Desktop (Electron)**: Built for **Linux** (`.AppImage`, `.deb`) and **Windows** (`.exe` NSIS installer & portable).
-  - **Web (GitHub Pages)**: Dual-target build ready to be hosted as a static site on GitHub Pages with automated CI/CD workflow included!
+Hosted directly on GitHub Pages with **zero framework overhead** and **zero custom build actions**. Pure, fast, sovereign web client for the AT Protocol with built-in Grok-style local AI.
 
 ---
 
-## 🚀 Quick Start
+## Quick Launch
 
-### Prerequisites
-- Node.js (v18+)
-- npm (v9+)
-- (Optional) [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/) for local AI features.
-
-### 1. Installation
 ```bash
-git clone https://github.com/TheWhiteWitchTM/LibreSky.git
-cd LibreSky
-npm install
+bin/libresky
 ```
 
-### 2. Run in Development Mode
-To run the web version in your browser:
+Or with npm:
 ```bash
-npm run dev
+npm start
 ```
 
-To run the desktop version with Electron:
+This starts a lightweight local server and opens `http://127.0.0.1:4173` in your default browser.
+
+### GitHub Pages
+
+Deployed directly to GitHub Pages at:
+[https://thewhitewitchtm.github.io/LibreSky/](https://thewhitewitchtm.github.io/LibreSky/)
+
+Deploying changes:
 ```bash
-npm run electron:dev
+./ghpush.sh "Commit message"
 ```
 
 ---
 
-## 🤖 Setting Up Local AI
+## Features
 
-LibreSky does not send your data to proprietary cloud servers. It directly connects to your local hardware:
+### 1. Pure Pitch Black Aesthetic
+- Starts pure black (`#000000`) matching MAGIC Studio styling with subtle `#222222` borders and crisp typography.
+- High-contrast, clean sans-serif UI with JetBrains Mono accents.
+- Fast, fluid micro-interactions with glowing gold spark accents.
+- Toggleable light theme option in Settings.
 
-### Option A: Ollama
-1. Install [Ollama](https://ollama.com/).
-2. Pull and run your preferred model:
-   ```bash
-   ollama run llama3.2
-   # Or deepseek-r1, mistral, qwen2.5, phi4
-   ```
-3. LibreSky will automatically detect Ollama at `http://127.0.0.1:11434`.
+### 2. Local AI & Grok Engine
+- Automatically scans your machine on startup for local AI endpoints:
+  - **Ollama**: `http://127.0.0.1:11434`
+  - **LM Studio**: `http://127.0.0.1:1234`
+- Displays the **Grok AI button** (gold spark) in navigation, on post cards, and in the post composer.
+- Shows live connection status and model picker (e.g. `writer:latest`, `coder:latest`, `qwen3.5:4b`).
+- **Grok Assistant Drawer**:
+  - Live streaming chat responses.
+  - Persona selector: Grok / Witty, Objective Summarizer, Fact-Checker, Social Ghostwriter.
+  - Timeline quick prompts: "✨ Summarize Feed", "🔍 Deep Dive", "🎭 Roast The Timeline".
+- **Post AI Tools**:
+  - ✨ Summarize discussion threads into key takeaways.
+  - 🧠 Explain subtext, technical jargon, and cultural context.
+  - 🔍 Fact-check assertions made in a post.
+  - 💬 Draft 3 punchy, engaging reply options.
+  - 🔥 Deliver a witty roast of a post.
+- **Composer AI Tools**:
+  - Polish and punch up drafts.
+  - Condense thoughts to fit under the 300-character limit.
+  - Translate posts into German, Spanish, French, or Japanese.
 
-### Option B: LM Studio
-1. Download [LM Studio](https://lmstudio.ai/).
-2. Load any model of your choice.
-3. In the "Local Server" tab, click **Start Server** (default port `1234`).
-4. LibreSky will automatically connect to LM Studio!
+### 3. Complete Bluesky & AT Protocol Capabilities
+- **Authentication**:
+  - Sign in with Handle / Email + App Password via `com.atproto.server.createSession`.
+  - OAuth client metadata support (`client-metadata.json`).
+  - Supports custom PDS hosts (defaults to `https://bsky.social`).
+  - Guest mode: browse public feeds, threads, profiles, and search without signing in.
+- **Feeds**:
+  - Home Timeline (Following)
+  - Discover / What's Hot feed
+  - Real-time refresh button and infinite pagination
+- **Rich Post Cards**:
+  - Clickable @mentions, #hashtags, and links.
+  - Responsive multi-image grids (1 to 4 images).
+  - High-resolution fullscreen Lightbox viewer with ALT text display.
+  - External link preview cards (thumbnails, title, domain, description).
+  - Quoted post embeds.
+- **Post Interactions**:
+  - Instant Like / Unlike with heart animation.
+  - Repost and Quote Post.
+  - Reply with original post context.
+  - Local Bookmarks / Saved Posts.
+  - Share link / Copy URL.
+- **Thread Conversations**:
+  - Full parent chain hierarchy with vertical connector line.
+  - Focused post with full stats (likes, reposts, quotes).
+  - Nested reply stream.
+- **Profiles**:
+  - Banner header, avatar, display name, handle, bio, join date.
+  - Followers, Following, and Posts count.
+  - Follow / Unfollow toggle.
+  - Filter tabs: Posts, Posts & Replies, Media.
+- **Search & Explore**:
+  - Live keyword and hashtag post search.
+  - Actor / profile search.
+- **Notifications**:
+  - Mentions, likes, reposts, and follows with unread badge counter.
+- **Direct Messages (Chat)**:
+  - Bluesky Chat conversation list and messaging.
 
 ---
 
-## 📦 Building Native Desktop Packages
+## Local AI Setup (Ollama)
 
-### Linux (`.AppImage` & `.deb`)
+To use the local AI features with Ollama:
+
 ```bash
-npm run electron:build:linux
-```
-Output files will be generated in `release/`.
+# Start Ollama
+systemctl --user enable --now ollama
 
-### Windows (`.exe` installer & portable)
-```bash
-npm run electron:build:win
+# Pull recommended writing and coding models
+ollama pull qwen3.5:4b
+ollama pull writer
 ```
+
+If connecting from browser:
+Ensure `OLLAMA_ORIGINS="*"` is enabled in your Ollama environment if using browser cross-origin requests. Running locally via `bin/libresky` serves on localhost for seamless access.
 
 ---
 
-## 🌐 Deploying to GitHub Pages
+## License
 
-LibreSky is fully configured to be hosted as a static web app on GitHub Pages!
-
-1. Push your repository to GitHub:
-   ```bash
-   git push origin main
-   ```
-2. In your GitHub repository:
-   - Go to **Settings** > **Pages**.
-   - Under **Build and deployment**, set **Source** to **GitHub Actions**.
-3. The included workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) will automatically build and publish LibreSky to:
-   ```
-   https://<your-username>.github.io/LibreSky/
-   ```
-
-To build the static web version locally:
-```bash
-npm run build:web
-```
-The output will be in `dist/`.
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-| :--- | :--- |
-| `C` | Open New Post Composer |
-| `R` | Refresh Feed |
-| `Esc` | Close Modal / Exit Thread View |
-| `Ctrl + Enter` / `Cmd + Enter` | Publish Post from Composer |
-| `↑` / `↓` | Navigate Autocomplete Suggestions |
-| `Enter` / `Tab` | Select Autocomplete Mention or Tag |
-
----
-
-## 📄 License
-
-MIT © [TheWhiteWitchTM](https://github.com/TheWhiteWitchTM)
+[MIT License](LICENSE) © 2026 The White Witch
