@@ -52,7 +52,7 @@ import {
 import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, providerById, saveAi } from './ai.js';
 import { accountGone, aiTag, caretToken, caretWord, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
-import { completeWord, rememberWords } from './words.js';
+import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
 import { emojiGroups } from './emoji.js';
 import {
@@ -814,8 +814,10 @@ function paintFreshLink() {
     link.type = 'button';
     link.className = 'fresh-update';
     link.dataset.act = 'fresh-update';
+    const lead = view.querySelector('.home-lead');
     const prompt = view.querySelector('.prompt');
-    if (prompt) prompt.insertAdjacentElement('afterend', link);
+    if (lead) lead.insertAdjacentElement('afterend', link);
+    else if (prompt) prompt.insertAdjacentElement('afterend', link);
     else view.prepend(link);
   }
   if (link.textContent !== label) link.textContent = label;
@@ -881,8 +883,10 @@ function applyFresh() {
   const view = $('view');
   view?.querySelector('.empty')?.remove();
   view?.querySelector('.lang-wait')?.remove();
+  const lead = view?.querySelector('.home-lead');
   const prompt = view?.querySelector('.prompt');
-  if (prompt) prompt.insertAdjacentHTML('afterend', html);
+  if (lead) lead.insertAdjacentHTML('afterend', html);
+  else if (prompt) prompt.insertAdjacentHTML('afterend', html);
   else view?.insertAdjacentHTML('afterbegin', html);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1034,7 +1038,7 @@ async function showHome(active) {
     if (now) paintHomeChrome(now);
   });
   if (lane && !signedIn()) {
-    $('view').innerHTML = emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
+    $('view').innerHTML = homeLead('') + emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
     return;
   }
   showSkeletons();
@@ -1045,7 +1049,7 @@ async function showHome(active) {
     else if (lane.type === 'list') data = await api.getListFeed(lane.value);
     else data = await api.getFeed(lane.value);
     if (token !== generation) return;
-    const banner = following ? homePrompt() : '';
+    const banner = homeLead(following ? homePrompt() : '');
     const raw = data.feed || [];
     const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
@@ -1105,7 +1109,7 @@ async function showBrowse() {
     const items = filterDiscover(raw);
     resetPosts();
     const posted = feedHtml(items);
-    const banner = '<button type="button" class="prompt" data-act="signin"><span>Sign in to see who you follow</span></button>';
+    const banner = homeLead('<button type="button" class="prompt" data-act="signin"><span>Sign in to see who you follow</span></button>');
     const empty = emptyHtml('Nothing here yet', 'Discover is quiet in your content languages. Config can show every language.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
@@ -1129,6 +1133,19 @@ async function showBrowse() {
     if (token !== generation) return;
     $('view').innerHTML = emptyHtml('Could not load Browse', error.message, '<button type="button" class="primary" data-act="retry">Try again</button><button type="button" class="text-btn" data-act="signin">Sign in</button>');
   }
+}
+
+function aiStripHtml() {
+  const saved = loadAi();
+  if (aiReady(saved)) {
+    const label = providerById(saved.provider).label;
+    return `<form class="ai-inline" id="ai-inline"><span class="ai-inline-label">${escapeHtml(label)}</span><input name="ask" maxlength="2000" placeholder="Ask ${escapeHtml(label)}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${escapeHtml(label)}"><button class="primary small" type="submit">Ask</button></form>`;
+  }
+  return `<a class="ai-inline offer" href="#/ai"><strong>Gemini</strong><span>Free with an API key. This is the default assistant on Home and your profile.</span></a>`;
+}
+
+function homeLead(banner) {
+  return `<div class="home-lead">${banner || ''}${aiStripHtml()}</div>`;
 }
 
 function homePrompt() {
@@ -1818,7 +1835,7 @@ async function showProfile(actor, tab) {
     shownProfile = profile;
     const strip = tabStrip(profileTabs(actor, current), { menuAct: 'profile-menu', menuLabel: 'Profile menu', sticky: true });
     forgetStrips($('view'));
-    $('view').innerHTML = profileHtml(profile) + strip + profileShelfHtml(mine) + pinHtml + blank;
+    $('view').innerHTML = profileHtml(profile) + (mine ? aiStripHtml() : '') + strip + profileShelfHtml(mine) + pinHtml + blank;
     watchStrips($('view'));
     $('profile-action').innerHTML = action;
     remember();
@@ -2105,7 +2122,7 @@ function openHomeTabMenu(anchor) {
   if (!active || active.kind === 'following') items.push({ id: 'home-settings', label: 'Home settings' });
   else if (active.kind === 'lane' && active.type === 'feed') items.push({ id: 'feed-settings', label: 'Feed settings' });
   else if (active.kind === 'lane' && active.type === 'list') items.push({ id: 'open-list', label: 'Open list' });
-  openMenu(anchor, items);
+  toggleMenu(anchor, items);
 }
 
 function profileLink(profile) {
@@ -2134,7 +2151,7 @@ function openProfileMenu(anchor) {
   }
   items.push({ id: 'profile-copy', label: 'Copy link' });
   items.push({ id: 'profile-share', label: 'Share' });
-  openMenu(anchor, items);
+  toggleMenu(anchor, items);
 }
 
 async function shareProfile(profile) {
@@ -2220,19 +2237,20 @@ function accountListHtml() {
 const aiDrafts = new Map();
 let aiThread = [];
 let aiSeq = 0;
+let aiPending = '';
 
 function aiSettingsHtml() {
   const saved = loadAi();
-  const provider = saved?.provider || 'grok';
+  const provider = saved?.provider || 'gemini';
   const known = providerById(provider);
   const model = saved?.model || known.model || '';
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
   const keyHint = saved ? 'Saved on this browser. Type a new key to replace it.' : 'Paste the key from that account';
   const status = saved
     ? `${known.label} is saved on this browser${saved.model ? ` · ${saved.model}` : ''}.`
-    : 'No AI account on this browser yet.';
+    : 'Gemini is the default. A free key from Google AI Studio turns on the AI page, Home, and your profile.';
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  return `<p class="dim">Bring your own account. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
+  return `<p class="dim">Gemini is free with a key and is selected first. Any saved account, including Grok, replaces it on the AI page, Home, and your profile. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
     <form id="ai-form" class="ai-form">
       <label>Provider
         <select id="ai-provider">${options}</select>
@@ -2253,7 +2271,7 @@ function aiSettingsHtml() {
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. Gemini uses a key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
 }
 
 function readAiForm() {
@@ -2724,35 +2742,42 @@ function showAi() {
   setChrome({ title: 'AI', nav: 'ai', back: true });
   const saved = loadAi();
   const ready = aiReady(saved);
-  const known = providerById(saved?.provider);
-  const status = ready
-    ? `${known.label} is ready${saved.model ? ` · ${saved.model}` : ''}. A question goes from this browser to that account.`
-    : 'No account yet. Add one in Settings. Nothing is sent until you do.';
+  const known = providerById(saved?.provider || 'gemini');
   const turns = aiThread.map((turn) => (turn.role === 'assistant'
-    ? assistantHtml(turn.content, { kicker: 'Your account' })
+    ? assistantHtml(turn.content, { kicker: known.label })
     : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
-  $('view').innerHTML = `<section class="settings ai-doc">
-    <h2>Your account</h2>
-    <p>${escapeHtml(status)}</p>
-    <p><a class="text-link" href="#/settings">Open AI in Settings</a></p>
-    <h2>@ai and @si</h2>
-    <p>@ai and @si are the same tag. They are not Bluesky accounts, and they do not mention a person.</p>
-    <p>In a chat, a message that contains @ai or @si asks the account you saved. That message is not sent to the other person. The question stays in the box. The answer stays on this screen until you press Send, which posts it into the chat as you. Edit puts the answer in the box. Dismiss drops it.</p>
-    <p>On this page the tag is optional. Ask sends the box to the same account. Those replies stay here until you reload.</p>
-    <p>A tag in a post is only a highlight. Posting does not call the model.</p>
-    <p>Grok, Gemini, OpenAI, or another OpenAI-style account all use the same tags. LibreSky does not keep a copy of the key. A question is sent only when you ask, and only to the provider you chose.</p>
-    <h2>Ask</h2>
-    <div class="messages ai-thread">${turns}</div>
-    <form class="reply-bar ai-ask" id="ai-ask">
-      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask @ai or @si"></textarea></div>
+  const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
+      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${escapeHtml(known.label)}"></textarea></div>
       <button class="primary small" type="submit">Ask</button>
       <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
-    </form>
-  </section>`;
+    </form>`;
+  if (ready) {
+    const empty = turns ? '' : `<p class="dim ai-empty">Ask ${escapeHtml(known.label)} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
+    $('view').innerHTML = `<section class="settings ai-doc ai-live">
+      <p class="ai-ready-line"><strong>${escapeHtml(known.label)}</strong> is on${saved.model ? ` · ${escapeHtml(saved.model)}` : ''}. <a class="text-link" href="#/settings">Settings</a></p>
+      <div class="messages ai-thread">${empty}${turns}</div>
+      ${askForm}
+    </section>`;
+  } else {
+    $('view').innerHTML = `<section class="settings ai-doc">
+      <h2>Gemini</h2>
+      <p>Gemini is the default assistant. A key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> is free. After you save it, this page becomes a chat, and Home and your profile ask it too.</p>
+      <p>A Grok key, an OpenAI key, or any other account you save is used instead. Nothing is sent until a key is saved.</p>
+      <p><a class="text-link" href="#/settings">Add the key in Settings</a></p>
+      <h2>@ai and @si</h2>
+      <p>@ai and @si are the same tag. They are not Bluesky accounts. In a chat, a message that contains the tag asks the account you saved. That message is not sent to the other person. The answer stays on the chat screen until you press Send.</p>
+      <p>A tag in a post is only a highlight. Posting does not call the model.</p>
+    </section>`;
+  }
   const area = $('ai-text');
-  paintFieldHighlight(area, $('ai-highlight'));
-  applyFieldLanguage(area);
-  fitChatInput(area);
+  if (area) {
+    paintFieldHighlight(area, $('ai-highlight'));
+    applyFieldLanguage(area);
+    fitChatInput(area);
+  }
+  const pending = aiPending;
+  aiPending = '';
+  if (pending && ready) askOnPage(pending);
 }
 
 async function askOnPage(text) {
@@ -2763,6 +2788,10 @@ async function askOnPage(text) {
   }
   const area = $('ai-text');
   const button = area?.form?.querySelector('button[type="submit"]');
+  if (area && !area.value.trim()) {
+    area.value = text;
+    paintFieldHighlight(area, $('ai-highlight'));
+  }
   if (area) area.disabled = true;
   if (button) button.disabled = true;
   const seq = ++aiSeq;
@@ -3330,17 +3359,34 @@ function updateCount() {
   scheduleSuggest(area);
 }
 
+function composeTypos(area) {
+  const langs = $('compose')?._langs?.length ? $('compose')._langs : languagePrefs().posts;
+  const caret = document.activeElement === area ? area.selectionStart : null;
+  return new Set(typoWords(area?.value || '', langs, caret));
+}
+
+function paintComposeWarn(typos) {
+  const send = $('compose-send');
+  if (!send) return;
+  const bad = Boolean(typos?.size);
+  send.classList.toggle('warn', bad);
+  if (bad) send.title = 'A word looks misspelled. You can still post.';
+  else send.removeAttribute('title');
+}
+
 function paintFieldHighlight(area, pre) {
   if (!area || !pre) return;
   const value = area.value || '';
   const start = area.selectionStart ?? 0;
   const end = area.selectionEnd ?? 0;
-  const opts = { links: false, breaks: false };
+  const typos = area.id === 'compose-text' ? composeTypos(area) : null;
+  const opts = { links: false, breaks: false, typos };
   const body = document.activeElement === area && end > start
     ? `${richText(value.slice(0, start), null, opts)}<mark class="field-selection">${richText(value.slice(start, end), null, opts)}</mark>${richText(value.slice(end), null, opts)}`
     : richText(value, null, opts);
   pre.innerHTML = `${body}\n`;
   pre.scrollTop = area.scrollTop;
+  if (area.id === 'compose-text') paintComposeWarn(typos);
 }
 
 function hideFloat(node) {
@@ -3867,27 +3913,52 @@ async function publish(event) {
 }
 
 function closeMenu() {
-  $('menu').hidden = true;
+  const menu = $('menu');
+  if (!menu) return;
+  const anchor = menu._anchor;
+  menu.hidden = true;
+  menu._anchor = null;
+  menu._post = null;
+  if (anchor?.isConnected) anchor.setAttribute('aria-expanded', 'false');
+}
+
+function placeMenu(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth || 250;
+  const height = menu.offsetHeight || 0;
+  const gap = 6;
+  let left = rect.right - width;
+  if (left < 8) left = rect.left;
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  let top = rect.bottom + gap;
+  const above = rect.top - height - gap;
+  if (top + height > window.innerHeight - 8 && above >= 8) top = above;
+  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.bottom = 'auto';
 }
 
 function openMenu(anchor, items) {
   const menu = $('menu');
   hideTip();
+  if (menu._anchor && menu._anchor !== anchor && menu._anchor.isConnected) menu._anchor.setAttribute('aria-expanded', 'false');
   menu._post = null;
+  menu._anchor = anchor || null;
   menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
-  const rect = anchor.getBoundingClientRect();
-  const width = menu.offsetWidth || 250;
-  const height = menu.offsetHeight || 0;
-  let left = rect.left;
-  if (left + width > window.innerWidth - 8) left = rect.right - width;
-  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-  let top = rect.bottom + 6;
-  if (top + height > window.innerHeight - 8) top = rect.top - height - 6;
-  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  menu.style.bottom = 'auto';
+  if (anchor?.getBoundingClientRect) placeMenu(menu, anchor);
+  if (anchor) anchor.setAttribute('aria-expanded', 'true');
+}
+
+function toggleMenu(anchor, items) {
+  const menu = $('menu');
+  if (menu && !menu.hidden && anchor && menu._anchor === anchor) {
+    closeMenu();
+    return false;
+  }
+  openMenu(anchor, items);
+  return true;
 }
 
 const MORE_LINKS = [
@@ -3908,7 +3979,7 @@ function openMoreMenu(anchor) {
     { id: 'go-calls', label: 'Calls' },
     { id: 'go-ai', label: 'AI' },
   ];
-  openMenu(anchor, [...overflow, ...MORE_LINKS]);
+  toggleMenu(anchor, [...overflow, ...MORE_LINKS]);
 }
 
 function accountMenuItems() {
@@ -4996,16 +5067,7 @@ async function handleChromeAct(act, event) {
     }
     return true;
   }
-  if (act === 'tab-menu') {
-    event.preventDefault();
-    openHomeTabMenu(button);
-    return true;
-  }
-  if (act === 'profile-menu') {
-    event.preventDefault();
-    openProfileMenu(button);
-    return true;
-  }
+  if (act === 'tab-menu' || act === 'profile-menu' || act === 'nav-more' || act === 'more' || act === 'repost') return true;
   if (act === 'lane-up' || act === 'lane-down' || act === 'lane-remove' || act === 'lane-add') {
     event.preventDefault();
     editLaneDraft(act, button);
@@ -5014,11 +5076,6 @@ async function handleChromeAct(act, event) {
   if (act === 'lane-save') {
     event.preventDefault();
     await saveLaneDraft();
-    return true;
-  }
-  if (act === 'nav-more') {
-    event.preventDefault();
-    openMoreMenu(button);
     return true;
   }
   if (act === 'soon') {
@@ -5400,6 +5457,20 @@ async function onClick(event) {
     return;
   }
   const act = event.target.closest('[data-act]')?.dataset.act;
+  if (act === 'more' || act === 'repost' || act === 'profile-menu' || act === 'tab-menu' || act === 'nav-more') {
+    event.preventDefault();
+    const button = event.target.closest('[data-act]');
+    if (act === 'more' || act === 'repost') {
+      const found = postFrom(event.target);
+      if (found?.post) {
+        if (act === 'more') moreMenu(button, found);
+        else repostMenu(button, found);
+      }
+    } else if (act === 'profile-menu') openProfileMenu(button);
+    else if (act === 'tab-menu') openHomeTabMenu(button);
+    else openMoreMenu(button);
+    return;
+  }
   if (act === 'desktop-download') {
     event.preventDefault();
     const button = event.target.closest('[data-file]');
@@ -5620,8 +5691,6 @@ async function onClick(event) {
     location.hash = `#/${act}/${encodeURIComponent(found.article.dataset.uri)}`;
     return;
   }
-  if (act === 'repost') return repostMenu(event.target.closest('.action'), found);
-  if (act === 'more') return moreMenu(event.target.closest('.more'), found);
   if (act === 'follow') return toggleFollow(event.target.closest('[data-act="follow"]'));
   if (!act && event.target.closest('a, button, .card, .shot, .video')) return;
   const quote = event.target.closest?.('.quote[data-href]');
@@ -5641,10 +5710,10 @@ async function onClick(event) {
 
 function repostMenu(anchor, found) {
   const on = Boolean(found.article.dataset.repost);
-  openMenu(anchor, [
+  if (!toggleMenu(anchor, [
     { id: on ? 'unrepost' : 'repost', label: on ? 'Undo repost' : 'Repost' },
     { id: 'quote', label: 'Quote' },
-  ]);
+  ])) return;
   $('menu')._post = found;
 }
 
@@ -5670,7 +5739,7 @@ function moreMenu(anchor, found) {
     items.push({ id: 'report', label: 'Report post' });
   }
   items.push({ id: 'mute-thread', label: 'Mute thread' });
-  openMenu(anchor, items);
+  if (!toggleMenu(anchor, items)) return;
   $('menu')._post = found;
 }
 
@@ -6441,14 +6510,16 @@ function bind() {
   document.addEventListener('pointerout', scheduleHoverHide);
   $('hovercard')?.addEventListener('pointerover', () => clearTimeout(hoverHideTimer));
   $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
-  document.addEventListener('scroll', () => {
+  window.addEventListener('scroll', (event) => {
     closeHover();
+    if (event.target?.id !== 'menu') closeMenu();
     placeFresh();
   }, true);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && homeWatch.timer) pollHome(homeWatch.token);
   });
   window.addEventListener('resize', () => {
+    closeMenu();
     placeFresh();
     measureHead();
     document.querySelectorAll('.tab-scroller').forEach((scroller) => syncStrip(scroller));
@@ -6466,7 +6537,7 @@ function bind() {
   });
   $('account-btn').addEventListener('click', () => {
     if (!signedIn()) requireSignIn();
-    else openMenu($('account-btn'), accountMenuItems());
+    else toggleMenu($('account-btn'), accountMenuItems());
   });
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('help-close')?.addEventListener('click', () => $('help')?.close());
@@ -6641,6 +6712,18 @@ function bind() {
       const text = input?.value.trim();
       if (!text || input.disabled) return;
       askOnPage(text);
+    }
+    if (event.target.id === 'ai-inline') {
+      event.preventDefault();
+      const text = event.target.querySelector('input')?.value.trim() || '';
+      if (!text) return;
+      if (!aiReady(loadAi())) {
+        location.hash = '#/ai';
+        return;
+      }
+      aiPending = text;
+      if (parseHash()[0] === 'ai') showAi();
+      else location.hash = '#/ai';
     }
     if (event.target.id === 'ai-form') saveAiForm(event);
     if (event.target.id === 'pack-form') {

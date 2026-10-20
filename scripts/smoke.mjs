@@ -9,7 +9,7 @@ import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, caretWo
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { setSoundPrefs, soundPrefs } from '../js/session.js';
-import { completeWord } from '../js/words.js';
+import { completeWord, typoWords } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -607,6 +607,16 @@ assert.deepEqual(caretWord('Say lang', 8), { query: 'lang', start: 4 });
 assert.equal(caretWord('Say language', 7), null);
 assert.equal(caretWord('see https://example', 18), null);
 assert.ok(completeWord('lang', ['en']).includes('language'));
+assert.deepEqual(typoWords('Say teh now', ['en'], null), ['teh']);
+assert.deepEqual(typoWords('Say teh', ['en'], 7), ['teh']);
+assert.deepEqual(typoWords('The weather is nice today', ['en'], null), []);
+assert.ok(typoWords('Say lang', ['en'], 8).length === 0);
+assert.match(richText('Say teh now', null, { links: false, breaks: false, typos: new Set(['teh']) }), /<span class="typo">teh<\/span>/);
+assert.match(index, /class="login-name">LibreSky/);
+assert.match(index, /Browse without signing in/);
+assert.match(appSource, /id="ai-inline"/);
+assert.match(appSource, /classList.toggle\('warn'/);
+assert.match(appSource, /toggleMenu\(anchor, items\)/);
 assert.equal(postInLanguages({ record: { langs: ['en-US'] } }, ['en']), true);
 assert.equal(postInLanguages({ record: { langs: ['ja'] } }, ['en']), false);
 assert.equal(postInLanguages({ record: {} }, ['en']), false);

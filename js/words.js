@@ -1,5 +1,8 @@
+import { englishExtends, englishWord } from './dict-en.js';
+
 const LEARNED_KEY = 'libresky.words';
 const LATIN = /^[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){1,40}$/;
+const EXTRA_SOURCE = `dont doesn't don't cant can't wont won't isnt isn't arent aren't wasnt wasn't werent weren't hasnt hasn't havent haven't hadnt hadn't couldnt couldn't wouldnt wouldn't shouldnt shouldn't thats that's theres there's heres here's whats what's lets let's im i'm ive i've ill i'll youre you're youve you've youll you'll theyre they're theyve they've theyll they'll its it's whos who's hows how's aint ain't yall y'all gotta gonna wanna bluesky bsky libresky gif gifs url urls http https www oauth api apis dm dms fyi imo imho tbh nsfw ok okay yeah yep nope lol lmao omg idk irl brb afk`;
 
 const WORDS = {
   en: `the and you for are but not can all her his was one our out day get has him how its may new now old see two way who did let put say she too use yes yet any big few own why how this that with have from they been more will your what when time just like know them then some into over only also back after first well year much make even most give many well life love good very look take come made work long here want need feel such last over before where those still being right great little world house place while found again three never every those people because through should around another without something between always thought family friend friends message messages picture pictures video videos voice follow following language languages please thanks thank hello morning evening tomorrow yesterday today tonight together really maybe already someone anyone everyone nothing anything everything beautiful important interesting different possible available remember understand question answer story stories music happy sorry welcome check checking complete writing reading talking listening waiting starting coming going living making working trying calling sharing posting reply replies comment comments profile account accounts bluesky image images photo photos link links emoji smile smiles gif gifs hello world`,
@@ -21,6 +24,7 @@ function splitWords(source) {
 }
 
 const LISTS = Object.fromEntries(Object.entries(WORDS).map(([code, source]) => [code, splitWords(source)]));
+const EXTRA = new Set(splitWords(`${EXTRA_SOURCE} ${Object.values(WORDS).join(' ')}`).map((word) => word.toLowerCase().replace(/’/g, "'")));
 
 function learnedWords() {
   try {
@@ -74,4 +78,93 @@ export function completeWord(prefix, langs) {
     out.push(applyCase(query, word));
   });
   return out.slice(0, 6);
+}
+
+function activeCodes(langs) {
+  const codes = [...new Set((langs || []).map((code) => String(code || '').slice(0, 2).toLowerCase()).filter(Boolean))];
+  return codes.length ? codes : ['en'];
+}
+
+function oneEdit(a, b) {
+  if (a === b) return false;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    let diff = 0;
+    for (let i = 0; i < la; i += 1) if (a[i] !== b[i] && ++diff > 1) return false;
+    return diff === 1;
+  }
+  const shorter = la < lb ? a : b;
+  const longer = la < lb ? b : a;
+  let i = 0;
+  let j = 0;
+  let diff = 0;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) {
+      i += 1;
+      j += 1;
+    } else {
+      if (++diff > 1) return false;
+      j += 1;
+    }
+  }
+  return true;
+}
+
+function knownWord(lower, ctx) {
+  if (!lower) return true;
+  if (ctx.learned.has(lower) || EXTRA.has(lower)) return true;
+  const plain = lower.replace(/['-]/g, '');
+  if (plain !== lower && (EXTRA.has(plain) || ctx.learned.has(plain))) return true;
+  if (ctx.english && (englishWord(lower) || (plain !== lower && plain.length >= 3 && englishWord(plain)))) return true;
+  if (ctx.pools.some((word) => word === lower)) return true;
+  const parts = lower.split(/['-]/).filter((part) => part.length >= 3);
+  if (parts.length > 1 && parts.every((part) => knownWord(part, ctx))) return true;
+  return false;
+}
+
+function extendsKnown(lower, ctx) {
+  if (lower.length < 4) return false;
+  const max = lower.length + 6;
+  const hit = (word) => {
+    const value = String(word || '').toLowerCase();
+    return value.length > lower.length && value.length <= max && value.startsWith(lower);
+  };
+  if ([...EXTRA, ...ctx.learned, ...ctx.pools].some(hit)) return true;
+  return ctx.english && englishExtends(lower);
+}
+
+export function typoWords(text, langs, caret) {
+  const source = String(text || '');
+  const at = caret == null || Number.isNaN(Number(caret)) ? null : Math.max(0, Math.min(source.length, Number(caret)));
+  const codes = activeCodes(langs);
+  const ctx = {
+    english: codes.includes('en'),
+    pools: codes.filter((code) => code !== 'en').flatMap((code) => (LISTS[code] || []).map((word) => word.toLowerCase())),
+    learned: new Set(learnedWords().map((word) => word.toLowerCase().replace(/’/g, "'"))),
+  };
+  const urls = [];
+  const urlRe = /https?:\/\/\S+/gi;
+  let urlMatch = urlRe.exec(source);
+  while (urlMatch) {
+    urls.push([urlMatch.index, urlMatch.index + urlMatch[0].length]);
+    urlMatch = urlRe.exec(source);
+  }
+  const bad = [];
+  const re = /[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){2,40}/g;
+  let match = re.exec(source);
+  while (match) {
+    const word = match[0];
+    const start = match.index;
+    const end = start + word.length;
+    const prev = start ? source[start - 1] : '';
+    const lower = word.toLowerCase().replace(/’/g, "'");
+    const caretHere = at != null && at >= start && at <= end;
+    if (word === word.toLowerCase() && !/[@#./]/.test(prev) && !urls.some(([from, to]) => start >= from && start < to) && !knownWord(lower, ctx)) {
+      if (!(caretHere && extendsKnown(lower, ctx)) && (ctx.english || ctx.pools.some((item) => oneEdit(item, lower)))) bad.push(lower);
+    }
+    match = re.exec(source);
+  }
+  return bad;
 }

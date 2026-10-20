@@ -152,12 +152,15 @@
   <button type="button" class="fab" data-act="compose" aria-label="Post"><svg class="ico" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg></button>
 
   <dialog id="login">
-    <div class="login-features" aria-label="LibreSky features">
-      <span>Edit</span>
-      <span>AI</span>
-      <span>Voice</span>
-      <span>Video</span>
-      <span>Chat</span>
+    <div class="login-hero">
+      <p class="login-name">LibreSky<span>A Bluesky client</span></p>
+      <div class="login-features" aria-label="LibreSky features">
+        <span>Edit</span>
+        <span>AI</span>
+        <span>Voice</span>
+        <span>Video</span>
+        <span>Chat</span>
+      </div>
     </div>
     <form id="login-form">
       <div class="gate-brand">
@@ -171,7 +174,7 @@
       </label>
       <p class="form-error" id="login-error" hidden></p>
       <button class="primary" id="login-oauth" type="submit">Sign in with Bluesky</button>
-      <button class="text-btn" id="login-browse" type="button">Browse</button>
+      <button class="browse-btn" id="login-browse" type="button">Browse without signing in</button>
       <button class="text-btn" id="login-signup" type="button">Create a Bluesky account</button>
       <button class="text-btn" id="login-app-toggle" type="button">Use an app password</button>
       <div id="app-password-box" hidden>

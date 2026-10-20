@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-20-browse';
+const CACHE = 'libresky-2026-10-20-spell';
 
 const SHELL = [
   './',
@@ -14,6 +14,7 @@ const SHELL = [
   './js/util.js',
   './js/lang.js',
   './js/words.js',
+  './js/dict-en.js',
   './js/prefs.js',
   './js/vendor/auth.js',
   './manifest.webmanifest',

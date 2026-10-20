@@ -3,8 +3,8 @@ const AI_KEY = 'libresky.ai';
 export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by tagging @ai or @si. Those tags are not Bluesky accounts. Reply in plain text, usually one short paragraph, and stay under 700 characters unless the question needs more.';
 
 export const AI_PROVIDERS = [
-  { id: 'grok', label: 'Grok', model: 'grok-4.7', base: 'https://api.x.ai/v1', kind: 'responses' },
   { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', kind: 'gemini' },
+  { id: 'grok', label: 'Grok', model: 'grok-4.7', base: 'https://api.x.ai/v1', kind: 'responses' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-5-mini', base: 'https://api.openai.com/v1', kind: 'chat' },
   { id: 'custom', label: 'Other', model: '', kind: 'chat' },
 ];

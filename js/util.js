@@ -89,8 +89,24 @@ export function hostOf(url) {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function textHtml(value, breaks) {
-  const html = escapeHtml(value);
+function textHtml(value, breaks, typos) {
+  let html = '';
+  if (!typos || !typos.size) html = escapeHtml(value);
+  else {
+    const re = /[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){2,40}/g;
+    let last = 0;
+    let match = re.exec(value);
+    while (match) {
+      html += escapeHtml(value.slice(last, match.index));
+      const word = match[0];
+      const body = escapeHtml(word);
+      const key = word.toLowerCase().replace(/’/g, "'");
+      html += typos.has(key) ? `<span class="typo">${body}</span>` : body;
+      last = match.index + word.length;
+      match = re.exec(value);
+    }
+    html += escapeHtml(value.slice(last));
+  }
   return breaks === false ? html : html.replace(/\n/g, '<br>');
 }
 
@@ -187,6 +203,7 @@ export function richText(text, facets, options = {}) {
   if (!source) return '';
   const links = options.links !== false;
   const breaks = options.breaks !== false;
+  const typos = options.typos || null;
   const bytes = encoder.encode(source);
   const marks = (facets || [])
     .map((facet) => ({
@@ -203,11 +220,11 @@ export function richText(text, facets, options = {}) {
   let cursor = 0;
   for (const mark of marks) {
     if (mark.start < cursor) continue;
-    html += textHtml(decoder.decode(bytes.slice(cursor, mark.start)), breaks);
+    html += textHtml(decoder.decode(bytes.slice(cursor, mark.start)), breaks, typos);
     html += featureHtml(decoder.decode(bytes.slice(mark.start, mark.end)), mark.features, links, breaks);
     cursor = mark.end;
   }
-  html += textHtml(decoder.decode(bytes.slice(cursor)), breaks);
+  html += textHtml(decoder.decode(bytes.slice(cursor)), breaks, typos);
   return html;
 }
 
