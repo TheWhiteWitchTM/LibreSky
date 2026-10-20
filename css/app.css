@@ -168,6 +168,9 @@ img { max-width: 100%; }
   font-size: 20px;
   letter-spacing: -0.02em;
 }
+#title-tools { display: flex; align-items: center; gap: 6px; flex: none; }
+#title-tools:empty { display: none; }
+#title-tools .call-btn { height: 32px; }
 .tip {
   display: inline-flex;
   align-items: center;
@@ -217,6 +220,7 @@ img { max-width: 100%; }
 }
 .search-page { padding: 12px 16px 0; }
 .search-page .search { margin: 0; }
+.pack-entry { display: inline-flex; margin: 8px 0 0; padding-left: 0; }
 .explore-tabs {
   display: flex;
   margin: 8px -16px 0;
@@ -455,7 +459,7 @@ a.facet:hover { text-decoration: underline; }
 .person strong, .person .handle, .person .snip { display: block; }
 .person-link { flex: 1; min-width: 0; }
 .person .follow, .profile-actions { flex: none; }
-.profile-actions { display: flex; gap: 8px; align-items: center; }
+.profile-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 .directory { padding: 4px 12px 8px; }
 .manage-row { align-items: flex-start; }
 .manage-row .row-actions { flex-wrap: wrap; justify-content: flex-end; max-width: min(230px, 52%); }
@@ -509,7 +513,7 @@ a.facet:hover { text-decoration: underline; }
 .profile { padding-bottom: 8px; }
 .banner { height: 200px; background: linear-gradient(120deg, #0085ff, #6bc1ff); overflow: hidden; }
 .banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.profile-row { display: flex; justify-content: space-between; align-items: flex-end; padding: 0 16px; }
+.profile-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; padding: 0 16px; }
 .profile h2 { margin: 8px 16px 0; font-size: 22px; }
 .profile .handle, .bio, .counts { margin: 2px 16px; }
 .bio { white-space: pre-wrap; }
@@ -1065,6 +1069,16 @@ kbd { font-family: ui-monospace, monospace; border: 1px solid var(--border); bor
 @media (max-width: 520px) {
   .tip span { display: none; }
   .tip { width: 32px; padding: 0; }
+  #title-tools .call-btn { position: relative; width: 32px; padding: 0; justify-content: center; }
+  #title-tools .call-btn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
 }
 @media (max-width: 720px) {
   .shell { display: block; }

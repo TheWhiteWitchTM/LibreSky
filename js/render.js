@@ -449,17 +449,25 @@ function callButton(act, label, glyph, peer) {
   return `<button type="button" class="call-btn${prominent ? ' video' : ''}" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
 }
 
-export function chatHeaderHtml(actor, options = {}) {
+function deletedAccount(actor) {
+  const handle = String(actor?.handle || '').trim().toLowerCase();
+  const name = String(actor?.displayName || '').trim().toLowerCase();
+  if (handle === 'invalid.handle' || handle === 'handle.invalid' || handle.endsWith('.invalid')) return true;
+  if (name === 'account deleted' || name === 'deleted account') return true;
+  return false;
+}
+
+export function callToolsHtml(peer) {
+  if (!peer) return '';
+  return `${callButton('call-audio', 'Voice call', 'phone', peer)}${callButton('call-video', 'Video call', 'video', peer)}`;
+}
+
+export function chatHeaderHtml(actor) {
   if (!actor) return '';
-  const gone = accountGone(actor);
+  const gone = deletedAccount(actor);
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
-  const handle = gone ? 'This account was deleted' : `@${actor.handle || ''}`;
-  const voiceAct = !gone && options.calls ? 'call-audio' : 'calls-page';
-  const videoAct = !gone && options.calls ? 'call-video' : 'calls-page';
-  const calls = gone
-    ? ''
-    : `${callButton(voiceAct, 'Voice call', 'phone', actor.did)}${callButton(videoAct, 'Video call', 'video', actor.did)}`;
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a><span class="chat-tools">${calls}</span></div>`;
+  const handle = gone ? 'This account was deleted' : (actor.handle ? `@${actor.handle}` : '');
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a></div>`;
 }
 
 export function packHtml(pack) {

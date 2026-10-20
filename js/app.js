@@ -3,6 +3,7 @@ import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setup
 import {
   actorHtml,
   callBannerHtml,
+  callToolsHtml,
   chatHeaderHtml,
   convoHtml,
   drainPosts,
@@ -39,7 +40,7 @@ import {
   setPassword,
   signedIn,
 } from './session.js';
-import { accountGone, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, ownUnread, parseHash, profileHash, richText } from './util.js';
+import { accountGone, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseHash, profileHash, richText } from './util.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -104,6 +105,11 @@ const MORE_NAV = new Set(['feeds', 'feed', 'lists', 'list', 'settings', 'packs',
 function setChrome({ title, back = false, tabs = [], nav = '' }) {
   $('title').textContent = title;
   $('back').hidden = !back;
+  const tools = $('title-tools');
+  if (tools) {
+    tools.innerHTML = '';
+    delete tools.dataset.peer;
+  }
   const bar = $('tabs');
   if (!tabs.length) {
     bar.hidden = true;
@@ -426,7 +432,7 @@ async function showSearch(query, options = {}) {
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><a class="text-btn pack-entry" href="#/packs">Starter packs</a><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -553,6 +559,40 @@ function stopChatTimer() {
   chatTimer = 0;
 }
 
+function otherMember(convo, messages) {
+  const mine = myDid();
+  const listed = (convo?.members || []).find((member) => member?.did && member.did !== mine);
+  if (listed) return listed;
+  for (const message of messages || []) {
+    const did = messageSender(message);
+    if (!did || did === mine) continue;
+    const sender = message.sender;
+    if (sender && typeof sender === 'object') return sender.did ? sender : { ...sender, did };
+    return { did };
+  }
+  return null;
+}
+
+function deletedPeer(actor) {
+  const handle = String(actor?.handle || '').trim().toLowerCase();
+  const name = String(actor?.displayName || '').trim().toLowerCase();
+  if (handle === 'invalid.handle' || handle === 'handle.invalid' || handle.endsWith('.invalid')) return true;
+  if (name === 'account deleted' || name === 'deleted account') return true;
+  return false;
+}
+
+function paintCallTools(actor) {
+  const tools = $('title-tools');
+  if (!tools) return;
+  if (!actor?.did || deletedPeer(actor)) {
+    tools.innerHTML = '';
+    delete tools.dataset.peer;
+    return;
+  }
+  tools.dataset.peer = actor.did;
+  tools.innerHTML = callToolsHtml(actor.did);
+}
+
 function paintCallBanner(messages, peerDid) {
   const offer = incomingCall(messages, myDid(), peerDid);
   const current = $('view')?.querySelector('.call-banner');
@@ -623,11 +663,11 @@ async function showMessages(convoId) {
       api.getConvoView(convoId).catch(() => null),
     ]);
     if (token !== generation) return;
-    const other = (convoWrap?.convo?.members || []).find((member) => member.did !== myDid()) || null;
-    if (other) $('title').textContent = other.displayName || `@${other.handle}`;
     const messages = (data.messages || []).slice().reverse();
-    const calls = canCall();
-    $('view').innerHTML = `${chatHeaderHtml(other, { calls, video: calls })}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button></form>`;
+    const other = otherMember(convoWrap?.convo, messages);
+    if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
+    paintCallTools(other);
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button></form>`;
     paintCallBanner(messages, other?.did || '');
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -1019,7 +1059,10 @@ function profileAction(profile) {
     : `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
   const block = `<button type="button" class="${blocking ? 'danger' : 'text-btn'}" data-act="block-profile" data-did="${escapeHtml(profile.did)}" data-blocking="${escapeHtml(blocking)}">${blocking ? 'Blocked' : 'Block'}</button>`;
   const report = `<button type="button" class="text-btn" data-act="report-profile" data-did="${escapeHtml(profile.did)}">Report</button>`;
-  return `<span class="profile-actions">${follow}${block}${report}</span>`;
+  const message = blocking
+    ? ''
+    : `<button type="button" class="text-btn" data-act="message-profile" data-did="${escapeHtml(profile.did)}">Message</button>${callToolsHtml(profile.did)}`;
+  return `<span class="profile-actions">${follow}${message}${block}${report}</span>`;
 }
 
 async function showPeople(actor, kind) {
@@ -1819,7 +1862,6 @@ function openMoreMenu(anchor) {
   openMenu(anchor, [
     { id: 'go-lists', label: 'Lists' },
     { id: 'go-feeds', label: 'Feeds' },
-    { id: 'go-packs', label: 'Starter packs' },
     { id: 'go-bookmarks', label: 'Bookmarks' },
     { id: 'go-settings', label: 'Settings' },
     { id: 'go-about', label: 'About' },
@@ -2322,11 +2364,32 @@ async function handleChromeAct(act, event) {
   }
   if (act === 'call-audio' || act === 'call-video') {
     event.preventDefault();
-    if (button?.classList.contains('soon') || button?.getAttribute('aria-disabled') === 'true') return true;
     if (!signedIn()) return requireSignIn(), true;
-    const peer = button?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
-    const convoId = parseHash()[1];
-    startCall({ convoId, peerDid: peer, media: act === 'call-video' ? 'video' : 'audio' });
+    if (!canCall()) {
+      toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      return true;
+    }
+    const peer = button?.dataset.peer || $('title-tools')?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
+    const media = act === 'call-video' ? 'video' : 'audio';
+    try {
+      const [page, id] = parseHash();
+      const convoId = page === 'messages' && id ? id : await convoIdFor(peer);
+      if (!convoId || !peer) throw new Error('Could not open that conversation.');
+      await startCall({ convoId, peerDid: peer, media });
+    } catch (error) {
+      toast(error?.message || 'The call could not start.');
+    }
+    return true;
+  }
+  if (act === 'message-profile') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    try {
+      const id = await convoIdFor(button?.dataset.did || '');
+      location.hash = `#/messages/${encodeURIComponent(id)}`;
+    } catch (error) {
+      toast(error.message);
+    }
     return true;
   }
   if (act === 'call-accept') {
@@ -2765,7 +2828,6 @@ async function onMenu(event) {
   if (!id) return;
   if (id === 'go-lists') return void (location.hash = '#/lists');
   if (id === 'go-feeds') return void (location.hash = '#/feeds');
-  if (id === 'go-packs') return void (location.hash = '#/packs');
   if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
   if (id === 'go-settings' || id === 'settings-go') return void (location.hash = '#/settings');
   if (id === 'go-about') return openAbout();
@@ -2989,6 +3051,14 @@ async function deletePost(found) {
     found.article.remove();
     toast('Deleted');
   } catch (error) { toast(error.message); }
+}
+
+async function convoIdFor(peerDid) {
+  if (!peerDid) throw new Error('Could not open that conversation.');
+  const data = await api.convoForMember(peerDid);
+  const id = data.convo?.id;
+  if (!id) throw new Error('Could not open that conversation.');
+  return id;
 }
 
 async function newChat() {
