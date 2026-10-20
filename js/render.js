@@ -434,7 +434,7 @@ export function convoHtml(convo, me) {
   const remove = gone
     ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
-  return `<div class="person convo${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
+  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${remove}</span></div>`;
 }
 
 function callLine(parsed) {
@@ -468,8 +468,7 @@ export function assistantHtml(text, { id = '', kicker = 'Your account', actions 
 }
 
 function callButton(act, label, glyph, peer) {
-  const prominent = label.startsWith('Video');
-  return `<button type="button" class="call-btn${prominent ? ' video' : ''}" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
+  return `<button type="button" class="call-btn" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
 }
 
 function deletedAccount(actor) {
@@ -482,17 +481,24 @@ function deletedAccount(actor) {
 
 export function callToolsHtml(peer) {
   if (!peer) return '';
-  return `${callButton('call-audio', 'Voice call', 'phone', peer)}${callButton('call-video', 'Video call', 'video', peer)}`;
+  return `<span class="call-pair">${callButton('call-audio', 'Voice call', 'phone', peer)}${callButton('call-video', 'Video call', 'video', peer)}</span>`;
+}
+
+export function callStartHtml() {
+  const button = (media, label, glyph) => `<button class="call-btn" type="submit" data-media="${media}" data-tip="${label} call" aria-label="${label} call">${icon(glyph)}<span>${label}</span></button>`;
+  return `<form id="call-start" class="call-start"><input id="call-handle" placeholder="Call any handle" autocomplete="off" spellcheck="false" autocapitalize="off"><span class="call-pair">${button('audio', 'Voice', 'phone')}${button('video', 'Video', 'video')}</span></form>`;
 }
 
 export function callConvoHtml(convo, me) {
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
   const gone = accountGone(other);
   const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');
-  const handle = gone ? 'This account was deleted' : (other.handle ? `@${other.handle}` : '');
+  const text = gone ? 'This account was deleted' : messagePreview(convo.lastMessage);
+  const unread = convoUnread(convo, me);
+  const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const tools = !gone && other.did ? callToolsHtml(other.did) : '';
   const href = convo.id ? `#/messages/${encodeURIComponent(convo.id)}` : '#/messages';
-  return `<div class="person call-row${gone ? ' gone' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></a><span class="row-actions">${tools}</span></div>`;
+  return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
 }
 
 export function chatHeaderHtml(actor) {
@@ -500,7 +506,20 @@ export function chatHeaderHtml(actor) {
   const gone = deletedAccount(actor);
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
   const handle = gone ? 'This account was deleted' : (actor.handle ? `@${actor.handle}` : '');
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a></div>`;
+  const tools = !gone && actor.did ? `<span class="chat-tools">${callToolsHtml(actor.did)}</span>` : '';
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>${tools}</div>`;
+}
+
+export function hoverCardHtml(profile, self = '') {
+  const name = profile?.displayName || profile?.handle || 'Account';
+  const banner = safeUrl(profile?.banner || '');
+  const following = profile?.viewer?.following || '';
+  const mine = Boolean(profile?.did && self && profile.did === self);
+  const follow = !mine && profile?.did
+    ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(profile.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
+    : '';
+  const bio = profile?.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : '';
+  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
 }
 
 export function packHtml(pack) {

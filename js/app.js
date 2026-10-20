@@ -4,8 +4,10 @@ import {
   actorHtml,
   callBannerHtml,
   callConvoHtml,
+  callStartHtml,
   callToolsHtml,
   chatHeaderHtml,
+  hoverCardHtml,
   convoHtml,
   drainPosts,
   emptyHtml,
@@ -43,7 +45,9 @@ import {
   signedIn,
 } from './session.js';
 import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, providerById, saveAi } from './ai.js';
-import { accountGone, aiTag, caretToken, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseHash, profileHash, richText } from './util.js';
+import { accountGone, aiTag, caretToken, caretWord, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseHash, profileHash, richText } from './util.js';
+import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
+import { completeWord, rememberWords } from './words.js';
 
 const posts = new Map();
 const me = { profile: null };
@@ -73,6 +77,12 @@ let tipTimer = 0;
 let pickerMode = '';
 let gifSeq = 0;
 let gifTimer = 0;
+let hoverTimer = 0;
+let hoverHideTimer = 0;
+let hoverSeq = 0;
+let hoverActor = '';
+let hoverWait = '';
+const hoverProfiles = new Map();
 
 function $(id) { return document.getElementById(id); }
 
@@ -153,6 +163,17 @@ function pagerFor(cursor, more) {
     }
   }, { rootMargin: '600px' });
   pager.observe(sentinel);
+}
+
+function filterDiscover(items) {
+  const wanted = languagePrefs().content;
+  if (!wanted.length) return items || [];
+  return (items || []).filter((item) => postInLanguages(item?.post || item, wanted));
+}
+
+function languageButtons(kind, selected) {
+  const on = new Set(selected || []);
+  return LANGUAGES.map(([code, name]) => `<button type="button" class="lang-pick" data-act="lang-toggle" data-lang-kind="${kind}" data-lang="${code}" aria-pressed="${on.has(code) ? 'true' : 'false'}"><span>${code.toUpperCase()}</span>${escapeHtml(name)}</button>`).join('');
 }
 
 function muted(post) {
@@ -414,14 +435,25 @@ async function showHome(mode) {
     const data = following ? await api.getTimeline(null) : await api.getFeed(api.WHATS_HOT);
     if (token !== generation) return;
     const banner = following ? homePrompt() : '';
+    const items = following ? data.feed : filterDiscover(data.feed);
     resetPosts();
-    $('view').innerHTML = banner + (feedHtml(data.feed) || emptyHtml('No posts yet', 'Follow a few people and they will show up here.'));
+    const posted = feedHtml(items);
+    const empty = emptyHtml('No posts yet', following ? 'Follow a few people and they will show up here.' : 'Nothing in your content languages yet. Settings can show every language.');
+    const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
+    $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
     remember();
     document.documentElement.dataset.ready = '1';
     const more = async (cursor) => {
       const page = following ? await api.getTimeline(cursor) : await api.getFeed(api.WHATS_HOT, cursor);
       if (token !== generation) return;
-      paintFeed(page.feed, { append: true });
+      const nextItems = following ? page.feed : filterDiscover(page.feed);
+      if (!(nextItems || []).length && !page.cursor && !$('view')?.querySelector('.post')) {
+        $('view').innerHTML = empty;
+        pagerFor(null, more);
+        return;
+      }
+      paintFeed(nextItems, { append: true });
+      if ((nextItems || []).length || !page.cursor) $('view')?.querySelector('.lang-wait')?.remove();
       pagerFor(page.cursor, more);
     };
     pagerFor(data.cursor, more);
@@ -666,10 +698,11 @@ async function showMessages(convoId) {
     const messages = (data.messages || []).slice().reverse();
     const other = otherMember(convoWrap?.convo, messages);
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
-    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}<div class="messages">${messages.map((message) => messageHtml(message, myDid())).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
     paintCallBanner(messages, other?.did || '');
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
+    applyFieldLanguage(area);
     fitChatInput(area);
     area?.focus();
     const scroller = $('view').querySelector('.messages');
@@ -1248,6 +1281,13 @@ function showSettings() {
       <button type="button" data-theme-set="light" aria-pressed="${theme === 'light'}">Light</button>
       <button type="button" data-theme-set="dark" aria-pressed="${theme === 'dark'}">Dark</button>
     </div>
+    <h2>Languages</h2>
+    <p class="dim">Discover shows posts written in the content languages you turn on. Turn them all off to see every language. Post languages are saved on the posts you write, up to three. Tab finishes a word, an @name, or a #tag while you type.</p>
+    <input id="lang-find" class="lang-find" placeholder="Find a language" autocomplete="off">
+    <h3>Content</h3>
+    <div class="lang-grid" id="content-langs">${languageButtons('content', languagePrefs().content)}</div>
+    <h3>Posts</h3>
+    <div class="lang-grid" id="post-langs">${languageButtons('posts', languagePrefs().posts)}</div>
     <h2>AI</h2>
     ${aiSettingsHtml()}
     <h2>Muted words</h2>
@@ -1256,7 +1296,7 @@ function showSettings() {
     <div class="chips">${words.map((word) => `<button type="button" class="chip" data-unmute="${escapeHtml(word)}" aria-label="Remove ${escapeHtml(word)}"><span>${escapeHtml(word)}</span><span class="chip-x" aria-hidden="true">×</span></button>`).join('')}</div>
     <h2>Keyboard</h2>
     <ul class="keys">
-      <li><kbd>n</kbd> New post</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>n</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
       <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
     </ul>
@@ -1355,11 +1395,12 @@ function showAi() {
     <form class="reply-bar ai-ask" id="ai-ask">
       <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask @ai or @si"></textarea></div>
       <button class="primary small" type="submit">Ask</button>
-      <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
+      <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
     </form>
   </section>`;
   const area = $('ai-text');
   paintFieldHighlight(area, $('ai-highlight'));
+  applyFieldLanguage(area);
   fitChatInput(area);
 }
 
@@ -1394,10 +1435,6 @@ async function askOnPage(text) {
     }
     if (button?.isConnected) button.disabled = false;
   }
-}
-
-function callStartHtml() {
-  return `<form id="call-start" class="add-row call-start"><input id="call-handle" placeholder="Call any handle" autocomplete="off" spellcheck="false" autocapitalize="off"><button class="primary small" type="submit" data-media="audio">Voice</button><button class="primary small" type="submit" data-media="video">Video</button></form>`;
 }
 
 async function showCalls() {
@@ -1586,6 +1623,7 @@ async function showEngagement(kind, uri) {
 function route() {
   closeMenu();
   hideSuggest();
+  closeHover();
   stopChatTimer();
   pager?.disconnect();
   selected = -1;
@@ -1632,21 +1670,58 @@ function openComposer({ reply = null, quote = null, text = '' } = {}) {
   const replies = $('reply-control');
   if (replies) replies.hidden = Boolean(reply);
   if (!reply && $('compose-replies')) $('compose-replies').value = 'everyone';
+  if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
   dialog._files = [];
   dialog._card = null;
   dialog._gif = null;
+  dialog._video = null;
+  dialog._langs = languagePrefs().posts.slice();
   dialog._dismissedUrl = '';
   closePicker();
   $('compose-previews').innerHTML = '';
+  const videoBox = $('compose-video');
+  if (videoBox) {
+    videoBox.hidden = true;
+    videoBox.innerHTML = '';
+  }
   const linkBox = $('compose-link');
   if (linkBox) {
     linkBox.hidden = true;
     linkBox.innerHTML = '';
   }
+  paintComposeAvatar();
+  paintLangChip();
+  applyFieldLanguage(area);
   updateCount();
   scheduleLinkPreview();
   if (!dialog.open) dialog.showModal();
   area.focus();
+}
+
+function paintComposeAvatar() {
+  const node = $('compose-avatar');
+  const profile = me.profile || {};
+  if (!node) return;
+  const name = profile.displayName || profile.handle || 'You';
+  node.dataset.initial = (String(name).trim().charAt(0) || 'L').toUpperCase();
+  const src = profile.avatar || '';
+  node.innerHTML = src ? `<img src="${escapeHtml(src)}" alt="" onerror="this.remove()">` : '';
+}
+
+function paintLangChip() {
+  const button = $('compose-lang');
+  if (!button) return;
+  const codes = ($('compose')?._langs || languagePrefs().posts).slice(0, 3);
+  const label = codes.map((code) => code.toUpperCase()).join(' · ') || 'EN';
+  button.textContent = label;
+  button.setAttribute('aria-label', `Post languages ${label}`);
+}
+
+function applyFieldLanguage(area) {
+  if (!area) return;
+  const code = ($('compose')?.open && area.id === 'compose-text' ? $('compose')._langs : languagePrefs().posts)[0] || 'en';
+  area.lang = code;
+  area.spellcheck = true;
 }
 
 let linkEpoch = 0;
@@ -1656,12 +1731,20 @@ function updateCount() {
   const area = $('compose-text');
   const value = area?.value || '';
   const left = 300 - graphemeLength(value);
-  $('compose-count').textContent = String(left);
-  $('compose-count').classList.toggle('over', left < 0);
   const files = $('compose')._files || [];
   const card = $('compose')._card;
   const gif = $('compose')._gif;
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif);
+  const video = $('compose')._video;
+  const count = $('compose-count');
+  const used = Math.min(300, Math.max(0, 300 - left));
+  if (count) {
+    count.style.setProperty('--p', String((used / 300) * 100));
+    const figure = count.querySelector('b');
+    if (figure) figure.textContent = String(left);
+    else count.textContent = String(left);
+  }
+  count?.classList.toggle('over', left < 0);
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video);
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -1672,15 +1755,60 @@ function paintFieldHighlight(area, pre) {
   pre.scrollTop = area.scrollTop;
 }
 
+function hideFloat(node) {
+  if (!node) return;
+  if (typeof node.hidePopover === 'function' && node.matches(':popover-open')) {
+    try { node.hidePopover(); } catch { /* already closed */ }
+  }
+  node.hidden = true;
+}
+
+function showFloat(node) {
+  if (!node) return;
+  node.hidden = false;
+  if (typeof node.showPopover === 'function') {
+    try {
+      if (!node.matches(':popover-open')) node.showPopover();
+    } catch { /* the layer stays in the page */ }
+  }
+}
+
 function hideSuggest() {
   const box = $('suggest');
   if (!box) return;
   box.innerHTML = '';
   suggestArea = null;
-  if (typeof box.hidePopover === 'function' && box.matches(':popover-open')) {
-    try { box.hidePopover(); } catch { /* already closed */ }
-  }
-  box.hidden = true;
+  hideFloat(box);
+  hideGhost();
+}
+
+function hideGhost() {
+  const ghost = $('type-ghost');
+  if (!ghost) return;
+  ghost.textContent = '';
+  hideFloat(ghost);
+}
+
+function paintGhost(area) {
+  const ghost = $('type-ghost');
+  const box = $('suggest');
+  if (!ghost || !area || !box || box.hidden) return hideGhost();
+  const token = caretToken(area.value, area.selectionStart) || caretWord(area.value, area.selectionStart);
+  const insert = box.querySelector('.suggest-row.on')?.dataset.insert || '';
+  const query = token?.query || '';
+  if (!token || !insert || !query || !insert.toLowerCase().startsWith(query.toLowerCase())) return hideGhost();
+  const rest = insert.slice(query.length);
+  if (!rest) return hideGhost();
+  const style = getComputedStyle(area);
+  ghost.textContent = rest;
+  ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing'].forEach((key) => {
+    ghost.style[key] = style[key];
+  });
+  let point;
+  try { point = caretPoint(area); } catch { return hideGhost(); }
+  ghost.style.left = `${point.x}px`;
+  ghost.style.top = `${point.top}px`;
+  showFloat(ghost);
 }
 
 function caretPoint(area) {
@@ -1763,16 +1891,24 @@ function aiSuggestRows(query) {
 function paintSuggest(area, rows) {
   const box = $('suggest');
   if (!box || !rows.length) return hideSuggest();
-  box.innerHTML = rows.join('');
+  box.innerHTML = `<p class="suggest-hint">Tab completes</p>${rows.join('')}`;
   box.querySelectorAll('button').forEach((button, index) => button.classList.toggle('on', index === 0));
   suggestArea = area;
   showSuggest(box, area);
+  paintGhost(area);
+}
+
+function wordSuggestRows(area) {
+  const word = caretWord(area.value, area.selectionStart);
+  if (!word) return [];
+  const langs = area.id === 'compose-text' && $('compose')?._langs?.length ? $('compose')._langs : languagePrefs().posts;
+  return completeWord(word.query, langs).map((item, index) => suggestRow(index, item, escapeHtml(item)));
 }
 
 async function refreshSuggest(area) {
   if (!area?.isConnected) return hideSuggest();
   const token = caretToken(area.value, area.selectionStart);
-  if (!token) return hideSuggest();
+  if (!token) return paintSuggest(area, wordSuggestRows(area));
   const leads = token.sigil === '@' ? aiSuggestRows(token.query) : [];
   if (token.query.length < 1) return paintSuggest(area, leads);
   const seq = ++suggestSeq;
@@ -1800,12 +1936,13 @@ function suggestRow(index, insert, body) {
 
 function applySuggest(insert) {
   const area = suggestArea;
-  if (!area) return;
-  const token = caretToken(area.value, area.selectionStart);
+  if (!area || !insert) return;
+  const token = caretToken(area.value, area.selectionStart) || caretWord(area.value, area.selectionStart);
   if (!token) return hideSuggest();
-  const next = `${area.value.slice(0, token.start)}${insert} ${area.value.slice(area.selectionStart)}`;
-  area.value = next;
-  const caret = token.start + insert.length + 1;
+  const after = area.value.slice(area.selectionStart);
+  const gap = after.startsWith(' ') || after.startsWith('\n') ? '' : ' ';
+  area.value = `${area.value.slice(0, token.start)}${insert}${gap}${after}`;
+  const caret = token.start + insert.length + gap.length;
   area.setSelectionRange(caret, caret);
   hideSuggest();
   area.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1818,14 +1955,17 @@ function onSuggestKey(event) {
   const items = [...box.querySelectorAll('button')];
   if (!items.length) return false;
   const current = items.findIndex((button) => button.classList.contains('on'));
+  const token = caretToken(event.target.value, event.target.selectionStart);
+  if (!token && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return false;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
     event.stopPropagation();
     const next = event.key === 'ArrowDown' ? Math.min(items.length - 1, current + 1) : Math.max(0, current - 1);
     items.forEach((button, index) => button.classList.toggle('on', index === (next < 0 ? 0 : next)));
+    paintGhost(suggestArea);
     return true;
   }
-  if (event.key === 'Enter' || event.key === 'Tab') {
+  if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && token)) {
     event.preventDefault();
     event.stopPropagation();
     applySuggest((items[Math.max(current, 0)] || items[0]).dataset.insert || '');
@@ -1851,6 +1991,10 @@ function paintLinkPreview() {
   const card = dialog?._card;
   const images = (dialog?._files || []).length > 0;
   if (!box) return;
+  if (dialog?._video) {
+    box.hidden = true;
+    return;
+  }
   if (!card || (images && card.kind !== 'quote')) {
     box.hidden = true;
     return;
@@ -1863,7 +2007,7 @@ async function refreshLinkPreview() {
   const dialog = $('compose');
   const box = $('compose-link');
   if (!dialog?.open || !box) return;
-  if (dialog._gif) return;
+  if (dialog._gif || dialog._video) return;
   const url = firstUrl($('compose-text').value);
   if (!url || dialog.dataset.quote || dialog._dismissedUrl === url) {
     dialog._card = null;
@@ -1968,6 +2112,10 @@ async function addFiles(list) {
     toast('Remove the GIF before adding images.');
     return;
   }
+  if ($('compose')._video) {
+    toast('Remove the video before adding images.');
+    return;
+  }
   const bucket = $('compose')._files || [];
   for (const file of list) {
     if (bucket.length >= 4) break;
@@ -1989,9 +2137,10 @@ async function publish(event) {
   let text = $('compose-text').value.trim();
   const files = dialog._files || [];
   const gif = dialog._gif;
+  const draftVideo = dialog._video;
   if (graphemeLength(text) > 300) return;
-  if (gif && files.length) {
-    toast('Remove the images or the GIF before posting.');
+  if ((gif && files.length) || (gif && draftVideo) || (files.length && draftVideo)) {
+    toast('Use images, a video, or a GIF, not more than one.');
     return;
   }
   if (gif && dialog.dataset.quote) {
@@ -2004,6 +2153,16 @@ async function publish(event) {
     const images = [];
     for (const item of files) {
       images.push({ alt: item.alt, blob: await api.uploadBlob(item.file) });
+    }
+    let video = null;
+    if (draftVideo?.file) {
+      const blob = await api.uploadVideo(draftVideo.file, {
+        onProgress: (label) => {
+          if ($('compose-send')) $('compose-send').textContent = label;
+        },
+      });
+      video = { blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio };
+      if ($('compose-send')) $('compose-send').textContent = 'Posting…';
     }
     let reply = null;
     if (dialog.dataset.reply) {
@@ -2023,7 +2182,7 @@ async function publish(event) {
         thumb = null;
       }
       link = api.externalEmbed({ url: gif.url, title: gif.title || 'GIF', description: '', thumb });
-    } else if (url && dialog._dismissedUrl !== url && !quote) {
+    } else if (url && !video && dialog._dismissedUrl !== url && !quote) {
       if (!card || card.sourceUrl !== url) {
         try { card = await api.inspectLink(url); } catch { card = null; }
       }
@@ -2043,8 +2202,9 @@ async function publish(event) {
         link = api.externalEmbed({ ...card, url: card.url || url, thumb });
       }
     }
-    if (!text && !images.length && !quote && !link) return;
-    const created = await api.createPost({ text, images, reply, quote, link });
+    if (!text && !images.length && !video && !quote && !link) return;
+    rememberWords(text);
+    const created = await api.createPost({ text, images, video, reply, quote, link, langs: dialog._langs || languagePrefs().posts });
     let gateWarning = '';
     const gate = $('compose-replies')?.value || 'everyone';
     if (!reply && gate !== 'everyone' && created?.uri) {
@@ -2238,11 +2398,272 @@ async function refreshGifs(query) {
   }
 }
 
+function renderVideo() {
+  const box = $('compose-video');
+  const video = $('compose')._video;
+  if (!box) return;
+  if (!video) {
+    box.hidden = true;
+    box.innerHTML = '';
+    updateCount();
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<div class="video-draft"><video src="${escapeHtml(video.url)}" controls muted playsinline></video><input id="video-alt" value="${escapeHtml(video.alt || '')}" placeholder="Alt text" maxlength="1000"><button type="button" class="card-dismiss" data-act="dismiss-video" aria-label="Remove video">×</button></div>`;
+  updateCount();
+}
+
+function videoMeta(url) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    const finish = (meta) => {
+      video.removeAttribute('src');
+      video.load();
+      resolve(meta);
+    };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const width = video.videoWidth || 0;
+      const height = video.videoHeight || 0;
+      finish({
+        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        aspectRatio: width && height ? { width, height } : null,
+      });
+    };
+    video.onerror = () => finish({ duration: 0, aspectRatio: null });
+    video.src = url;
+  });
+}
+
+async function addVideo(file) {
+  const dialog = $('compose');
+  if (!file || !dialog) return;
+  if ((dialog._files || []).length || dialog._gif) {
+    toast('Remove the images or GIF before adding a video.');
+    return;
+  }
+  const allowed = /^video\/(mp4|webm|quicktime)$/.test(file.type) || /\.(mp4|webm|mov)$/i.test(file.name || '');
+  if (!allowed) {
+    toast('Use an MP4, WebM, or MOV video.');
+    return;
+  }
+  if (file.size > 50 * 1024 * 1024) {
+    toast('Videos need to be under 50 MB.');
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const meta = await videoMeta(url);
+  if (meta.duration > 180) {
+    URL.revokeObjectURL(url);
+    toast('Videos need to be under 3 minutes.');
+    return;
+  }
+  if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
+  dialog._video = { file, url, alt: '', aspectRatio: meta.aspectRatio };
+  dialog._card = null;
+  closePicker();
+  renderVideo();
+  paintLinkPreview();
+}
+
+function openLinkPicker() {
+  pickerMode = 'link';
+  const box = $('compose-picker');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `<div class="picker"><p class="picker-label">Add a link</p><div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">The link stays in the post and shows a preview.</p></div>`;
+  $('link-url')?.focus();
+}
+
+function addComposerLink() {
+  let url = $('link-url')?.value.trim() || '';
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  try { new URL(url); } catch {
+    toast('Enter a full link.');
+    return;
+  }
+  const area = $('compose-text');
+  if (!area) return;
+  const start = area.selectionStart ?? area.value.length;
+  const before = area.value.slice(0, start);
+  const after = area.value.slice(start);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const tail = after && !/^\s/.test(after) ? ' ' : '';
+  area.value = `${before}${lead}${url}${tail}${after}`;
+  const caret = before.length + lead.length + url.length + tail.length;
+  area.setSelectionRange(caret, caret);
+  closePicker();
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  scheduleLinkPreview();
+  area.focus();
+}
+
+function openPostLangPicker() {
+  pickerMode = 'post-lang';
+  const box = $('compose-picker');
+  if (!box) return;
+  const selected = $('compose')._langs || languagePrefs().posts;
+  box.hidden = false;
+  box.innerHTML = `<div class="picker"><p class="picker-label">Post languages</p><input id="post-lang-find" class="lang-find" placeholder="Find a language" autocomplete="off"><p class="picker-note">Up to three. Tab completes words in these languages.</p><div class="lang-grid">${languageButtons('posts', selected)}</div></div>`;
+  box.querySelector('#post-lang-find')?.focus();
+}
+
+function toggleLanguage(kind, code) {
+  if (kind !== 'content' && kind !== 'posts') return;
+  const prefs = languagePrefs();
+  const list = prefs[kind].slice();
+  const index = list.indexOf(code);
+  if (index >= 0) {
+    if (kind === 'posts' && list.length <= 1) {
+      toast('Keep at least one post language.');
+      return;
+    }
+    list.splice(index, 1);
+  } else if (list.length >= (kind === 'posts' ? 3 : 8)) {
+    toast(kind === 'posts' ? 'A post can have 3 languages.' : 'You can pick 8 content languages.');
+    return;
+  } else list.push(code);
+  const next = saveLanguagePrefs({ ...prefs, [kind]: list });
+  document.querySelectorAll(`[data-lang-kind="${kind}"][data-lang="${code}"]`).forEach((button) => {
+    button.setAttribute('aria-pressed', next[kind].includes(code) ? 'true' : 'false');
+  });
+  const dialog = $('compose');
+  if (kind === 'posts' && dialog) {
+    dialog._langs = next.posts.slice();
+    paintLangChip();
+    applyFieldLanguage($('compose-text'));
+  }
+  if (kind === 'content' && parseHash()[0] === 'discover') route();
+}
+
+function filterLanguageButtons(input) {
+  const q = input.value.trim().toLowerCase();
+  const root = input.closest('.picker, .settings') || document;
+  root.querySelectorAll('.lang-pick').forEach((button) => {
+    button.hidden = Boolean(q) && !button.textContent.toLowerCase().includes(q);
+  });
+}
+
+function actorFromLink(node) {
+  const link = node?.closest?.('a[href^="#/profile/"]');
+  if (!link || link.closest('#hovercard, #menu, #suggest')) return null;
+  const raw = (link.getAttribute('href') || '').replace(/^#/, '');
+  const parts = raw.split('/').filter(Boolean).map((part) => {
+    try { return decodeURIComponent(part); } catch { return part; }
+  });
+  if (parts[0] !== 'profile' || !parts[1] || parts[2]) return null;
+  return { id: parts[1], link };
+}
+
+function placeHover(card, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const width = Math.min(320, window.innerWidth - 16);
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+  left = Math.max(8, left);
+  card.style.width = `${width}px`;
+  card.style.left = `${left}px`;
+  card.style.right = 'auto';
+  showFloat(card);
+  const height = card.offsetHeight || 220;
+  let top = rect.bottom + 8;
+  if (top + height > window.innerHeight - 8 && rect.top - height - 8 > 8) top = rect.top - height - 8;
+  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+  card.style.top = `${top}px`;
+}
+
+function closeHover() {
+  clearTimeout(hoverTimer);
+  clearTimeout(hoverHideTimer);
+  hoverActor = '';
+  hoverWait = '';
+  const card = $('hovercard');
+  if (!card) return;
+  card.innerHTML = '';
+  hideFloat(card);
+}
+
+async function openHover(found) {
+  const card = $('hovercard');
+  if (!card || !found) return;
+  hoverActor = found.id;
+  const cached = hoverProfiles.get(found.id);
+  card.innerHTML = cached
+    ? hoverCardHtml(cached, myDid())
+    : `<div class="hover-body"><strong>@${escapeHtml(found.id)}</strong><p class="dim">Loading…</p></div>`;
+  placeHover(card, found.link);
+  if (cached) return;
+  const seq = ++hoverSeq;
+  try {
+    const profile = await api.getProfile(found.id);
+    if (profile?.did) hoverProfiles.set(profile.did, profile);
+    if (profile?.handle) hoverProfiles.set(profile.handle, profile);
+    hoverProfiles.set(found.id, profile);
+    if (seq !== hoverSeq || hoverActor !== found.id) return;
+    card.innerHTML = hoverCardHtml(profile, myDid());
+    if (found.link?.isConnected) placeHover(card, found.link);
+  } catch {
+    if (seq !== hoverSeq || hoverActor !== found.id) return;
+    card.innerHTML = `<div class="hover-body"><p class="dim">Could not load this account.</p></div>`;
+  }
+}
+
+function scheduleHover(event) {
+  if (event.pointerType && event.pointerType !== 'mouse') return;
+  if (window.matchMedia('(hover: none)').matches) return;
+  const found = actorFromLink(event.target);
+  if (!found) return;
+  clearTimeout(hoverHideTimer);
+  const card = $('hovercard');
+  const open = card && !card.hidden;
+  if (open && hoverActor === found.id) return;
+  if (!open && hoverWait === found.id) return;
+  clearTimeout(hoverTimer);
+  hoverWait = found.id;
+  if (open && hoverActor) {
+    hoverWait = '';
+    openHover(found);
+    return;
+  }
+  const anchor = found;
+  hoverTimer = setTimeout(() => {
+    if (hoverWait !== anchor.id) return;
+    hoverWait = '';
+    if (!anchor.link?.isConnected) return;
+    openHover(anchor);
+  }, 380);
+}
+
+function scheduleHoverHide(event) {
+  const card = $('hovercard');
+  const next = event.relatedTarget;
+  const nextId = actorFromLink(next)?.id || '';
+  if (next && (card?.contains(next) || (nextId && (nextId === hoverActor || nextId === hoverWait)))) return;
+  hoverWait = '';
+  clearTimeout(hoverTimer);
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = setTimeout(closeHover, 220);
+}
+
+function syncFollow(did, uri) {
+  const escape = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
+  document.querySelectorAll(`[data-act="follow"][data-did="${escape(did)}"]`).forEach((button) => {
+    button.dataset.following = uri || '';
+    button.classList.toggle('on', Boolean(uri));
+    button.textContent = uri ? 'Following' : 'Follow';
+  });
+  hoverProfiles.forEach((profile) => {
+    if (profile?.did !== did) return;
+    profile.viewer = { ...(profile.viewer || {}), following: uri || '' };
+  });
+}
+
 function chooseGif(gif) {
   const dialog = $('compose');
   if (!dialog || !gif?.url) return;
-  if ((dialog._files || []).length) {
-    toast('Remove the images to attach a GIF.');
+  if ((dialog._files || []).length || dialog._video) {
+    toast('Remove the images or video to attach a GIF.');
     return;
   }
   if (dialog.dataset.quote) {
@@ -2292,6 +2713,7 @@ function chatLines() {
 }
 
 async function deliverChat(convoId, text) {
+  rememberWords(text);
   const sent = await api.sendMessage(convoId, text);
   const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
   if (!message.sender) message.sender = { did: myDid() };
@@ -2679,11 +3101,23 @@ async function handleChromeAct(act, event) {
     location.hash = '#/calls';
     return true;
   }
-  if (act === 'emoji' || act === 'gif') {
+  if (act === 'emoji' || act === 'gif' || act === 'link' || act === 'post-lang') {
     event.preventDefault();
     if (pickerMode === act) closePicker();
     else if (act === 'emoji') openEmojiPicker();
-    else openGifPicker();
+    else if (act === 'gif') openGifPicker();
+    else if (act === 'link') openLinkPicker();
+    else openPostLangPicker();
+    return true;
+  }
+  if (act === 'add-link') {
+    event.preventDefault();
+    addComposerLink();
+    return true;
+  }
+  if (act === 'lang-toggle') {
+    event.preventDefault();
+    toggleLanguage(button?.dataset.langKind || '', button?.dataset.lang || '');
     return true;
   }
   if (act === 'add-account') {
@@ -2955,6 +3389,15 @@ async function onClick(event) {
   if (event.target.closest('[data-act="image"], .shot, .action, .more, .follow, .card, .facet')) {
     /* buttons handle themselves below */
   }
+  if (act === 'dismiss-video') {
+    event.preventDefault();
+    const dialog = $('compose');
+    if (dialog?._video?.url) URL.revokeObjectURL(dialog._video.url);
+    if (dialog) dialog._video = null;
+    renderVideo();
+    scheduleLinkPreview();
+    return;
+  }
   if (act === 'dismiss-gif') {
     event.preventDefault();
     const dialog = $('compose');
@@ -2965,6 +3408,7 @@ async function onClick(event) {
       box.innerHTML = '';
     }
     updateCount();
+    scheduleLinkPreview();
     return;
   }
   if (act === 'dismiss-link') {
@@ -3439,13 +3883,9 @@ async function toggleFollow(button) {
   try {
     if (existing) {
       await api.deleteRecord(existing);
-      button.dataset.following = '';
-      button.classList.remove('on');
-      button.textContent = 'Follow';
+      syncFollow(did, '');
     } else {
-      button.dataset.following = (await api.follow(did)).uri;
-      button.classList.add('on');
-      button.textContent = 'Following';
+      syncFollow(did, (await api.follow(did)).uri);
     }
   } catch (error) { toast(error.message); }
 }
@@ -3756,10 +4196,16 @@ function onKey(event) {
 
 function bind() {
   document.body.addEventListener('click', onClick);
+  document.addEventListener('pointerover', scheduleHover);
+  document.addEventListener('pointerout', scheduleHoverHide);
+  $('hovercard')?.addEventListener('pointerover', () => clearTimeout(hoverHideTimer));
+  $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
+  document.addEventListener('scroll', () => closeHover(), true);
   $('menu').addEventListener('click', onMenu);
   document.addEventListener('click', (event) => {
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
-    if (!event.target.closest('#suggest, #compose-text, #chat-text')) hideSuggest();
+    if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
+    if (!event.target.closest('#hovercard') && !actorFromLink(event.target)) closeHover();
   });
   document.addEventListener('keydown', onKey);
   $('back').addEventListener('click', () => {
@@ -3832,11 +4278,26 @@ function bind() {
     const area = $('compose-text');
     if (pre) pre.scrollTop = area.scrollTop;
     const box = $('suggest');
-    if (box && !box.hidden && suggestArea === area) showSuggest(box, area);
+    if (box && !box.hidden && suggestArea === area) {
+      showSuggest(box, area);
+      paintGhost(area);
+    }
   });
   $('compose').addEventListener('close', () => {
     hideSuggest();
     closePicker();
+    const video = $('compose')._video;
+    if (video?.url) URL.revokeObjectURL(video.url);
+    $('compose')._video = null;
+  });
+  $('compose-picker')?.addEventListener('input', (event) => {
+    if (event.target.id === 'post-lang-find') filterLanguageButtons(event.target);
+  });
+  $('compose-picker')?.addEventListener('keydown', (event) => {
+    if (event.target.id === 'link-url' && event.key === 'Enter') {
+      event.preventDefault();
+      addComposerLink();
+    }
   });
   $('compose-picker')?.addEventListener('click', (event) => {
     const emoji = event.target.closest('[data-emoji]');
@@ -3853,6 +4314,14 @@ function bind() {
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
     $('compose-files').value = '';
+  });
+  $('compose-video-file')?.addEventListener('change', () => {
+    const file = $('compose-video-file').files?.[0];
+    $('compose-video-file').value = '';
+    if (file) addVideo(file);
+  });
+  $('compose-video')?.addEventListener('input', (event) => {
+    if (event.target.id === 'video-alt' && $('compose')._video) $('compose')._video.alt = event.target.value;
   });
   $('compose-previews').addEventListener('input', (event) => {
     const index = event.target.dataset.alt;
@@ -3969,6 +4438,10 @@ function bind() {
       event.target.dataset.auto = '0';
       return;
     }
+    if (event.target.id === 'lang-find') {
+      filterLanguageButtons(event.target);
+      return;
+    }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     fitChatInput(event.target);
     paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
@@ -3978,7 +4451,10 @@ function bind() {
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
     const box = $('suggest');
-    if (box && !box.hidden && suggestArea === event.target) showSuggest(box, event.target);
+    if (box && !box.hidden && suggestArea === event.target) {
+      showSuggest(box, event.target);
+      paintGhost(event.target);
+    }
   }, true);
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());

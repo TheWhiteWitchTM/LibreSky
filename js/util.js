@@ -219,6 +219,20 @@ export function caretToken(text, caret) {
   return { sigil: match[2], query: match[3], start: at - match[3].length - 1 };
 }
 
+export function caretWord(text, caret) {
+  const source = String(text || '');
+  const at = Math.max(0, Math.min(source.length, Number(caret) || 0));
+  if (caretToken(source, at)) return null;
+  const next = source.slice(at, at + 1);
+  if (/[A-Za-z\u00C0-\u024F'’-]/u.test(next)) return null;
+  const match = source.slice(0, at).match(/(^|[^A-Za-z\u00C0-\u024F'’-])([A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'’-]{1,40})$/u);
+  if (!match) return null;
+  const start = at - match[2].length;
+  const prev = start ? source[start - 1] : '';
+  if (/[./@#]/.test(prev)) return null;
+  return { query: match[2], start };
+}
+
 export function messageSender(message) {
   if (!message || typeof message !== 'object') return '';
   if (typeof message.sender === 'string') return message.sender;

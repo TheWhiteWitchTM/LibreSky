@@ -971,7 +971,52 @@ export function externalEmbed({ url, title, description, thumb }) {
   return { $type: 'app.bsky.embed.external', external };
 }
 
-export async function createPost({ text, images = [], reply = null, quote = null, link = null }) {
+const VIDEO_SERVICE = 'https://video.bsky.app';
+
+export async function uploadVideo(file, { signal, onProgress } = {}) {
+  onProgress?.('Uploading video…');
+  const exp = Math.floor(Date.now() / 1000) + 60 * 30;
+  const auth = await xrpc('com.atproto.server.getServiceAuth', {
+    params: { aud: 'did:web:video.bsky.app', lxm: 'app.bsky.video.uploadVideo', exp },
+    auth: 'required',
+    signal,
+  });
+  const token = auth?.token;
+  if (!token) throw new Error('This account cannot upload video.');
+  const url = new URL(`${VIDEO_SERVICE}/xrpc/app.bsky.video.uploadVideo`);
+  url.searchParams.set('did', currentDid());
+  url.searchParams.set('name', file.name || 'video.mp4');
+  const uploaded = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': file.type || 'video/mp4',
+    },
+    body: file,
+    signal,
+  });
+  const started = await read(uploaded);
+  const jobId = started.jobId || started.jobStatus?.jobId;
+  if (!jobId) throw new Error('Video upload did not start.');
+  onProgress?.('Processing video…');
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error('Video upload was cancelled.');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const statusRes = await fetch(`${VIDEO_SERVICE}/xrpc/app.bsky.video.getJobStatus?jobId=${encodeURIComponent(jobId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+    const status = await read(statusRes);
+    const job = status.jobStatus || status;
+    const state = String(job.state || '');
+    if ((state === 'JOB_STATE_COMPLETED' || state === 'completed') && job.blob) return job.blob;
+    if (state === 'JOB_STATE_FAILED' || state === 'failed') throw new Error(job.error || 'Video processing failed.');
+  }
+  throw new Error('Video processing took too long. Try a shorter video.');
+}
+
+export async function createPost({ text, images = [], video = null, reply = null, quote = null, link = null, langs = null }) {
   const record = {
     $type: 'app.bsky.feed.post',
     text,
@@ -979,8 +1024,16 @@ export async function createPost({ text, images = [], reply = null, quote = null
   };
   const facets = await facetsFor(text);
   if (facets.length) record.facets = facets;
-  const lang = (navigator.language || '').slice(0, 2).toLowerCase();
-  if (/^[a-z]{2}$/.test(lang)) record.langs = [lang];
+  const chosen = (Array.isArray(langs) ? langs : [])
+    .map((code) => String(code || '').trim().toLowerCase())
+    .filter((code) => /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(code))
+    .filter((code, index, all) => all.indexOf(code) === index)
+    .slice(0, 3);
+  if (chosen.length) record.langs = chosen;
+  else {
+    const lang = (navigator.language || '').slice(0, 2).toLowerCase();
+    if (/^[a-z]{2}$/.test(lang)) record.langs = [lang];
+  }
   if (reply) {
     record.reply = {
       root: reply.root,
@@ -993,13 +1046,22 @@ export async function createPost({ text, images = [], reply = null, quote = null
       images: images.map((image) => ({ alt: image.alt || '', image: image.blob })),
     }
     : null;
-  if (imageEmbed && quote) {
+  const videoEmbed = video?.blob
+    ? {
+      $type: 'app.bsky.embed.video',
+      video: video.blob,
+      alt: String(video.alt || '').slice(0, 2000),
+      ...(video.aspectRatio?.width && video.aspectRatio?.height ? { aspectRatio: video.aspectRatio } : {}),
+    }
+    : null;
+  const media = imageEmbed || videoEmbed;
+  if (media && quote) {
     record.embed = {
       $type: 'app.bsky.embed.recordWithMedia',
       record: { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } },
-      media: imageEmbed,
+      media,
     };
-  } else if (imageEmbed) record.embed = imageEmbed;
+  } else if (media) record.embed = media;
   else if (quote) {
     record.embed = { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } };
   } else if (link) record.embed = link;

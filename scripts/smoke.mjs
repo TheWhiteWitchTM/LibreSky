@@ -3,9 +3,11 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
+import { assistantHtml, callConvoHtml, callStartHtml, callToolsHtml, chatHeaderHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, resetPosts, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
+import { accountGone, aiTag, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, ownUnread, pageCard as pageSummary, parseCallMessage, richText, trimLink, xStatusParts } from '../js/util.js';
+import { postInLanguages } from '../js/lang.js';
+import { completeWord } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -293,7 +295,7 @@ assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
 const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
 assert.match(appSource, /<textarea id="chat-text"/);
 assert.match(appSource, /data-act="follow-back"/);
-assert.match(appSource, /id="call-start"/);
+assert.match(appSource, /callStartHtml\(\)/);
 assert.match(appSource, /listRecords\('app\.bsky\.graph\.follow'/);
 const domainProfile = profileHtml({ handle: 'app.sociallydead.me', displayName: 'sociallydead.me', did: 'did:plc:test' });
 assert.match(domainProfile, /aria-label="Verified domain"/);
@@ -411,6 +413,14 @@ const ownChat = convoHtml({
 assert.doesNotMatch(ownChat, /class="pill"/);
 assert.deepEqual(caretToken('hi @ja', 6), { sigil: '@', query: 'ja', start: 3 });
 assert.equal(caretToken('hi @jay ', 8), null);
+assert.deepEqual(caretWord('Say lang', 8), { query: 'lang', start: 4 });
+assert.equal(caretWord('Say language', 7), null);
+assert.equal(caretWord('see https://example', 18), null);
+assert.ok(completeWord('lang', ['en']).includes('language'));
+assert.equal(postInLanguages({ record: { langs: ['en-US'] } }, ['en']), true);
+assert.equal(postInLanguages({ record: { langs: ['ja'] } }, ['en']), false);
+assert.equal(postInLanguages({ record: {} }, ['en']), false);
+assert.equal(postInLanguages({ record: { langs: ['ja'] } }, []), true);
 const callText = parseCallMessage('Started a voice call https://thewhitewitchtm.github.io/LibreSky/#/c/2222222222222');
 assert.equal(callText.kind, 'offer');
 assert.equal(callText.media, 'audio');
@@ -435,11 +445,19 @@ assert.doesNotMatch(started, /class="bubble/);
 assert.doesNotMatch(started, /example\.com/);
 const callRow = callConvoHtml({
   id: 'room',
+  unreadCount: 2,
   members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:you', handle: 'you.bsky.social', displayName: 'You' }],
+  lastMessage: { text: 'new from you', sender: { did: 'did:you' } },
 }, 'did:me');
 assert.match(callRow, /data-act="call-audio"/);
 assert.match(callRow, /data-act="call-video"/);
+assert.match(callRow, /class="pill"/);
+assert.match(callRow, /new from you/);
 assert.match(callRow, /#\/messages\/room/);
+assert.match(callStartHtml(), /id="call-start"/);
+assert.match(callStartHtml(), /data-media="audio"/);
+assert.match(callStartHtml(), /data-media="video"/);
+assert.doesNotMatch(callStartHtml(), /class="primary/);
 const chunk = messageHtml({ id: 'm2', text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' } }, 'did:me');
 assert.match(chunk, /hidden/);
 assert.doesNotMatch(chunk, /Call data/);
@@ -459,13 +477,18 @@ assert.match(liveCalls, /data-act="call-audio"/);
 assert.match(liveCalls, /data-act="call-video"/);
 assert.match(liveCalls, /Voice/);
 assert.match(liveCalls, /Video/);
-assert.match(liveCalls, /class="call-btn video"/);
+assert.match(liveCalls, /class="call-pair"/);
+assert.doesNotMatch(liveCalls, /call-btn video/);
 assert.doesNotMatch(liveCalls, /calls-page/);
 assert.doesNotMatch(liveCalls, /aria-disabled/);
 const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' });
 assert.match(quietCalls, /chat-head/);
 assert.match(quietCalls, /Ada/);
-assert.doesNotMatch(quietCalls, /call-btn/);
+assert.match(quietCalls, /class="call-pair"/);
+const card = hoverCardHtml({ did: 'did:ada', handle: 'ada.bsky.social', displayName: 'Ada', description: 'Hello', followersCount: 3, followsCount: 1 }, 'did:me');
+assert.match(card, /data-act="follow"/);
+assert.match(card, /Hello/);
+assert.doesNotMatch(hoverCardHtml({ did: 'did:me', handle: 'me.bsky.social' }, 'did:me'), /data-act="follow"/);
 const goneCalls = chatHeaderHtml({ did: 'did:gone', handle: 'handle.invalid' });
 assert.match(goneCalls, /Deleted account/);
 assert.doesNotMatch(goneCalls, /call-btn/);
