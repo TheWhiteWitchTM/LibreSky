@@ -1504,7 +1504,7 @@ async function showMessages(convoId) {
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button>${styleButtons()}</div>`;
-    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter sends">Send</button>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -2902,7 +2902,7 @@ function showAi() {
     : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
   const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
       <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"></textarea></div>
-      <button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter asks">Ask</button>
+      <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks">Ask</button></span>
       <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
     </form>`;
   if (ready) {
@@ -3755,7 +3755,11 @@ function paintComposeWarn(typos) {
   if (!send) return;
   const bad = Boolean(typos?.size);
   send.classList.toggle('warn', bad);
-  send.title = bad ? 'A word looks misspelled. You can still post. Shift+Enter sends.' : 'Shift+Enter sends';
+  send.removeAttribute('title');
+  const tip = bad ? 'A word looks misspelled. You can still post. Shift+Enter sends.' : 'Shift+Enter sends';
+  send.dataset.tip = tip;
+  const host = send.closest('.tip-wrap');
+  if (host) host.dataset.tip = tip;
 }
 
 function paintFieldHighlight(area, pre, options = {}) {
@@ -4867,10 +4871,19 @@ function paintEmojiList(query) {
     : '<p class="picker-note">No emoji matched.</p>';
 }
 
+function pickerShell(title, { search = '', body = '', tall = false } = {}) {
+  const kind = tall ? ' picker-tall' : '';
+  return `<div class="picker${kind}"><div class="picker-head"><p class="picker-title">${escapeHtml(title)}</p><button type="button" class="picker-x" data-act="close-picker" aria-label="Close" data-tip="Close">${icon('close')}</button></div>${search}<div class="picker-scroll">${body}</div></div>`;
+}
+
 function openEmojiPicker(button, query = '') {
   const box = preparePicker('emoji', button);
   if (!box) return;
-  box.innerHTML = `<div class="picker"><input id="emoji-find" placeholder="Search emoji" autocomplete="off" value="${escapeHtml(query)}"><div id="emoji-groups"></div></div>`;
+  box.innerHTML = pickerShell('Emoji', {
+    tall: true,
+    search: `<input id="emoji-find" placeholder="Search emoji" autocomplete="off" value="${escapeHtml(query)}">`,
+    body: '<div id="emoji-groups"></div>',
+  });
   paintEmojiList(query);
   pickerArea()?.focus();
 }
@@ -4902,7 +4915,11 @@ function gifMedia(item, names) {
 function openGifPicker(button) {
   const box = preparePicker('gif', button);
   if (!box) return;
-  box.innerHTML = `<div class="picker"><input id="gif-q" placeholder="Search KLIPY" autocomplete="off"><p class="picker-note">GIFs by KLIPY</p><div id="gif-grid" class="gif-grid"></div></div>`;
+  box.innerHTML = pickerShell('GIF', {
+    tall: true,
+    search: '<input id="gif-q" placeholder="Search GIFs" autocomplete="off">',
+    body: '<p class="picker-note">GIFs by KLIPY</p><div id="gif-grid" class="gif-grid"></div>',
+  });
   const input = $('gif-q');
   input?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') event.preventDefault();
@@ -5017,7 +5034,9 @@ async function addVideo(file) {
 function openLinkPicker(button) {
   const box = preparePicker('link', button);
   if (!box) return;
-  box.innerHTML = `<div class="picker"><p class="picker-label">Add a link</p><div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. Delete the line to remove the preview.</p></div>`;
+  box.innerHTML = pickerShell('Link', {
+    body: '<div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. Delete the line to remove the preview.</p>',
+  });
   $('link-url')?.focus();
 }
 
@@ -5045,7 +5064,10 @@ function openPostLangPicker(button) {
   const box = preparePicker('post-lang', button);
   if (!box) return;
   const selected = $('compose')._langs || languagePrefs().posts;
-  box.innerHTML = `<div class="picker"><p class="picker-label">Post languages</p><input id="post-lang-find" class="lang-find" placeholder="Find a language" autocomplete="off"><p class="picker-note">Up to three. Tab completes words in these languages.</p><div class="lang-grid">${languageButtons('posts', selected)}</div></div>`;
+  box.innerHTML = pickerShell('Languages', {
+    search: '<input id="post-lang-find" placeholder="Find a language" autocomplete="off">',
+    body: `<p class="picker-note">Up to three. Tab completes words in these languages.</p><div class="lang-grid">${languageButtons('posts', selected)}</div>`,
+  });
   box.querySelector('#post-lang-find')?.focus();
 }
 
@@ -5700,6 +5722,13 @@ async function handleChromeAct(act, event) {
   if (act === 'calls-page') {
     event.preventDefault();
     location.hash = '#/calls';
+    return true;
+  }
+  if (act === 'close-picker') {
+    event.preventDefault();
+    const area = pickerArea();
+    closePicker();
+    area?.focus();
     return true;
   }
   if (act === 'emoji' || act === 'gif' || act === 'link' || act === 'post-lang') {
@@ -7815,6 +7844,14 @@ function bind() {
     if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text' || target?.id === 'ai-text') return;
     hideSuggest();
   }, true);
+  document.addEventListener('pointerdown', (event) => {
+    if (!pickerMode) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('#compose-picker, #chat-picker, #compose-text, #chat-text')) return;
+    if (target.closest('[data-act="emoji"], [data-act="gif"], [data-act="link"], [data-act="post-lang"]')) return;
+    closePicker();
+  });
   bindTips();
   window.addEventListener('hashchange', route);
   document.querySelectorAll('[data-nav]').forEach((link) => {
@@ -7828,12 +7865,13 @@ function bind() {
   });
 }
 
-const TIP_SELECTOR = 'button, a.nav-link, a.tip, .tabbar a, label.icon-btn';
+const TIP_SELECTOR = '[data-tip], button, a.nav-link, a.tip, a.time, .tabbar a, label.icon-btn';
 
 function tipLabel(node) {
-  if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return '';
+  if (!node || node.getAttribute('aria-disabled') === 'true') return '';
   const explicit = node.dataset.tip || '';
   if (explicit) return explicit;
+  if (node.disabled) return '';
   const label = node.getAttribute('aria-label') || '';
   if (!label) return '';
   const visible = (node.innerText || '').replace(/\s+/g, ' ').trim();

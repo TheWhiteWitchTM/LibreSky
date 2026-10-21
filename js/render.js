@@ -295,7 +295,7 @@ export function postHtml(item, options = {}) {
         <div class="post-top">
           <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
-          <a class="time" href="${postHash(post)}" title="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
+          <a class="time" href="${postHash(post)}" data-tip="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
           <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read aloud">${icon('speaker')}<span class="sr-name" aria-hidden="true">Read aloud</span></button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}<span class="sr-name" aria-hidden="true">More</span></button></span>
         </div>
