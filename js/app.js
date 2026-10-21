@@ -1501,7 +1501,7 @@ async function showMessages(convoId) {
       ? `<div class="request-banner"><p>This is a message request. Accept it to keep the chat, or delete it.</p><span class="row-actions"><button type="button" class="primary small" data-act="accept-convo" data-convo="${escapeHtml(convoId)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${escapeHtml(convoId)}">Delete</button></span></div>`
       : '';
     $('view').dataset.convoStatus = requested ? 'request' : 'accepted';
-    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit">Send</button><p class="chat-hint"><span class="chat-hint-keys">Enter sends. Shift+Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line.</span></p></form>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter sends">Send</button><p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -2698,7 +2698,7 @@ function displaySettingsHtml() {
     ${switchRow('a11y.reader', 'Screen reader layout', access.reader, 'Focus rings, link underlines, and button names.')}
     <h2>Keyboard</h2>
     <ul class="keys">
-      <li><kbd>n</kbd> or <kbd>Shift</kbd> <kbd>Enter</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>n</kbd> New post</li><li><kbd>Shift</kbd> <kbd>Enter</kbd> Send while writing a post or chat. From the timeline, a new post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
       <li><kbd>Shift</kbd> <kbd>↑</kbd> Top of the page</li>
       <li><kbd>a</kbd> Read the selected post aloud</li>
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
@@ -2899,8 +2899,8 @@ function showAi() {
     : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
   const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
       <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"></textarea></div>
-      <button class="primary small" type="submit">Ask</button>
-      <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
+      <button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter asks">Ask</button>
+      <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
     </form>`;
   if (ready) {
     const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
@@ -3749,8 +3749,7 @@ function paintComposeWarn(typos) {
   if (!send) return;
   const bad = Boolean(typos?.size);
   send.classList.toggle('warn', bad);
-  if (bad) send.title = 'A word looks misspelled. You can still post.';
-  else send.removeAttribute('title');
+  send.title = bad ? 'A word looks misspelled. You can still post. Shift+Enter sends.' : 'Shift+Enter sends';
 }
 
 function paintFieldHighlight(area, pre, options = {}) {
@@ -3966,6 +3965,18 @@ function applySuggest(insert) {
   hideSuggest();
   area.dispatchEvent(new Event('input', { bubbles: true }));
   area.focus();
+}
+
+function shiftEnterSends(event) {
+  if (event.key !== 'Enter' || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+  if (event.repeat || event.isComposing || event.keyCode === 229) return false;
+  const area = event.target;
+  const form = area?.form;
+  const button = form?.querySelector('button[type="submit"]');
+  if (!form || !button || area.disabled || button.disabled) return false;
+  event.preventDefault();
+  form.requestSubmit(button);
+  return true;
 }
 
 function onSuggestKey(event) {
@@ -7214,7 +7225,10 @@ function bind() {
     if (!dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit) saveDraft($('compose-text').value);
     scheduleLinkPreview();
   });
-  $('compose-text').addEventListener('keydown', onSuggestKey);
+  $('compose-text').addEventListener('keydown', (event) => {
+    if (onSuggestKey(event)) return;
+    shiftEnterSends(event);
+  });
   $('compose-text').addEventListener('keyup', () => scheduleSuggest($('compose-text')));
   $('compose-text').addEventListener('click', () => scheduleSuggest($('compose-text')));
   $('compose-text').addEventListener('scroll', () => {
@@ -7443,10 +7457,7 @@ function bind() {
     }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     if (onSuggestKey(event)) return;
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
-    if (matchMedia('(pointer: coarse)').matches) return;
-    event.preventDefault();
-    if (!event.target.disabled) event.target.form?.requestSubmit();
+    shiftEnterSends(event);
   });
   $('view').addEventListener('input', (event) => {
     if (event.target.id === 'ai-model') {
