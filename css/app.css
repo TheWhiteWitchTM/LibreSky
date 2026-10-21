@@ -249,14 +249,15 @@ img { max-width: 100%; }
   height: 14px;
   margin: 0 auto;
   border-radius: 1px;
-  background: linear-gradient(#9f1239, #4c1020);
+  background: linear-gradient(#e11d48, #4c1020);
 }
 .alpha-door-card {
   display: block;
   padding: 8px 10px 12px;
+  border: 1px solid rgba(225, 29, 72, 0.55);
   border-radius: 10px 10px 18px 18px;
-  background: linear-gradient(#fffaf3, #f4e2c8);
-  color: #7a1430;
+  background: linear-gradient(#3a121c, #16080d);
+  color: #f6ecee;
   text-align: center;
   font-family: Palatino, "Palatino Linotype", Georgia, serif;
   font-style: normal;
@@ -264,9 +265,7 @@ img { max-width: 100%; }
   font-size: 13px;
   line-height: 1.15;
   letter-spacing: 0;
-  box-shadow:
-    0 14px 24px rgba(60, 10, 24, 0.28),
-    inset 0 0 0 1.5px rgba(122, 20, 48, 0.38);
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.35);
 }
 .alpha-door-card::before {
   content: "";
@@ -275,12 +274,12 @@ img { max-width: 100%; }
   height: 18px;
   margin: 2px auto 6px;
   border-radius: 50%;
-  background: radial-gradient(circle, transparent 4px, #7a1430 5px 7px, #fffaf3 8px);
-  box-shadow: 0 0 0 1px rgba(122, 20, 48, 0.28);
+  background: radial-gradient(circle, transparent 4px, #e11d48 5px 7px, #3a121c 8px);
+  box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.45);
 }
 .alpha-door-kicker {
   display: block;
-  color: #9a6840;
+  color: #f0a0b4;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.32em;
@@ -298,7 +297,7 @@ img { max-width: 100%; }
 .alpha-door-note {
   display: block;
   margin-top: 4px;
-  color: #8d5348;
+  color: #d7b8c0;
   font-size: 11px;
   font-style: italic;
   font-weight: 600;
@@ -308,16 +307,16 @@ img { max-width: 100%; }
   width: 100%;
   margin-top: 8px;
   padding: 6px 8px;
-  border: 1px solid rgba(122, 20, 48, 0.38);
+  border: 1px solid rgba(225, 29, 72, 0.65);
   border-radius: 999px;
-  background: transparent;
-  color: #7a1430;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f6ecee;
   font-family: Palatino, "Palatino Linotype", Georgia, serif;
   font-size: 13px;
   font-weight: 700;
 }
-.alpha-item:hover { background: rgba(122, 20, 48, 0.08); }
-.alpha-item[aria-pressed="true"] { background: #7a1430; color: #fffaf3; }
+.alpha-item:hover { background: rgba(225, 29, 72, 0.28); }
+.alpha-item[aria-pressed="true"] { background: #9f1239; border-color: transparent; color: #fff; }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .alpha-wrap:hover .alpha-door,
   .alpha-wrap:focus-within .alpha-door,
@@ -1529,6 +1528,7 @@ dialog {
   padding: 0;
   background: var(--bg);
   color: var(--text);
+  color-scheme: inherit;
   box-shadow: var(--shadow);
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
@@ -2624,7 +2624,12 @@ body.ringing { padding-bottom: 120px; }
   gap: 6px;
 }
 .ai-check .ico { width: 16px; height: 16px; }
-#debug-log { width: min(560px, calc(100vw - 24px)); }
+#debug-log {
+  width: min(560px, calc(100vw - 24px));
+  border: 1px solid color-mix(in srgb, var(--border) 55%, var(--text-2));
+  background: color-mix(in srgb, var(--bg) 86%, var(--text) 14%);
+  color: var(--text);
+}
 .debug-lead { margin: 0 16px 12px; }
 .debug-body {
   display: flex;
