@@ -114,11 +114,8 @@ const collapsedEmoji = new Set();
 const styleHold = new Map();
 let gifSeq = 0;
 let gifTimer = 0;
-let hoverTimer = 0;
-let hoverHideTimer = 0;
 let hoverSeq = 0;
 let hoverActor = '';
-let hoverWait = '';
 const hoverProfiles = new Map();
 let homeLanes = [];
 let homeLanesDid = '';
@@ -5089,61 +5086,61 @@ function filterLanguageButtons(input) {
   });
 }
 
-function hoverBlocked(node) {
-  return Boolean(node?.closest?.('.app-top, .tabbar, .account, #account-btn, [data-no-hover]'));
-}
-
-function actorFromLink(node) {
-  const link = node?.closest?.('a[href^="#/profile/"]');
-  if (!link || hoverBlocked(link) || link.closest('#hovercard, #menu, #suggest')) return null;
-  const raw = (link.getAttribute('href') || '').replace(/^#/, '');
-  const parts = raw.split('/').filter(Boolean).map((part) => {
-    try { return decodeURIComponent(part); } catch { return part; }
-  });
-  if (parts[0] !== 'profile' || !parts[1] || parts[2]) return null;
-  return { id: parts[1], link };
-}
-
 function placeHover(card, anchor) {
   const rect = anchor.getBoundingClientRect();
+  const row = anchor.closest?.('.person, .chat-head');
+  const rowRect = row?.getBoundingClientRect();
+  const avoidTop = rowRect ? rowRect.top : rect.top;
+  const avoidBottom = rowRect ? rowRect.bottom : rect.bottom;
   const width = Math.min(320, window.innerWidth - 16);
   card.style.width = `${width}px`;
   card.style.right = 'auto';
   showFloat(card);
   const height = card.offsetHeight || 220;
-  let left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-  let top = rect.bottom + 10;
-  if (top + height > window.innerHeight - 8) top = rect.top - height - 10;
-  const overlaps = (x, y) => y < rect.bottom + 4 && y + height > rect.top - 4 && x < rect.right && x + width > rect.left;
-  const parkBeside = () => {
-    const beside = rect.right + 10;
-    if (beside + width <= window.innerWidth - 8) left = beside;
-    else left = Math.max(8, rect.left - width - 10);
-    top = Math.max(8, Math.min(rect.top, window.innerHeight - height - 8));
-  };
-  if (overlaps(left, top)) parkBeside();
-  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-  if (overlaps(left, top)) parkBeside();
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  const below = avoidBottom + 8;
+  const above = avoidTop - height - 8;
+  let top = below;
+  if (below + height > window.innerHeight - 8 && above >= 8) top = above;
+  else if (below + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+  if (top < 8) top = 8;
   card.style.left = `${left}px`;
   card.style.top = `${top}px`;
 }
 
 function closeHover() {
-  clearTimeout(hoverTimer);
-  clearTimeout(hoverHideTimer);
   hoverActor = '';
-  hoverWait = '';
+  document.querySelectorAll('[data-act="account-card"][aria-expanded="true"]').forEach((node) => {
+    node.setAttribute('aria-expanded', 'false');
+  });
   const card = $('hovercard');
   if (!card) return;
+  card._anchor = null;
   card.innerHTML = '';
   hideFloat(card);
 }
 
+function toggleAccountCard(button) {
+  if (!button) return;
+  const id = button.dataset.actor || '';
+  if (!id) return;
+  const card = $('hovercard');
+  if (card && !card.hidden && card._anchor === button) {
+    closeHover();
+    return;
+  }
+  openHover({ id, link: button });
+}
+
 async function openHover(found) {
   const card = $('hovercard');
-  if (!card || !found || hoverBlocked(found.link)) return closeHover();
+  if (!card || !found?.link || found.link.closest('#hovercard, #menu, #suggest')) return closeHover();
   hoverActor = found.id;
+  card._anchor = found.link;
+  document.querySelectorAll('[data-act="account-card"][aria-expanded="true"]').forEach((node) => {
+    if (node !== found.link) node.setAttribute('aria-expanded', 'false');
+  });
+  found.link.setAttribute('aria-expanded', 'true');
   const cached = hoverProfiles.get(found.id);
   card.innerHTML = cached
     ? hoverCardHtml(cached, myDid())
@@ -5156,56 +5153,13 @@ async function openHover(found) {
     if (profile?.did) hoverProfiles.set(profile.did, profile);
     if (profile?.handle) hoverProfiles.set(profile.handle, profile);
     hoverProfiles.set(found.id, profile);
-    if (seq !== hoverSeq || hoverActor !== found.id) return;
+    if (seq !== hoverSeq || hoverActor !== found.id || card._anchor !== found.link) return;
     card.innerHTML = hoverCardHtml(profile, myDid());
     if (found.link?.isConnected) placeHover(card, found.link);
   } catch {
-    if (seq !== hoverSeq || hoverActor !== found.id) return;
+    if (seq !== hoverSeq || hoverActor !== found.id || card._anchor !== found.link) return;
     card.innerHTML = `<div class="hover-body"><p class="dim">Could not load this account.</p></div>`;
   }
-}
-
-function scheduleHover(event) {
-  if (event.pointerType && event.pointerType !== 'mouse') return;
-  if (window.matchMedia('(hover: none)').matches) return;
-  if (hoverBlocked(event.target)) {
-    hoverWait = '';
-    clearTimeout(hoverTimer);
-    if (hoverActor) closeHover();
-    return;
-  }
-  const found = actorFromLink(event.target);
-  if (!found) return;
-  clearTimeout(hoverHideTimer);
-  const card = $('hovercard');
-  const open = card && !card.hidden;
-  if (open && hoverActor === found.id) return;
-  if (!open && hoverWait === found.id) return;
-  clearTimeout(hoverTimer);
-  hoverWait = found.id;
-  if (open && hoverActor) {
-    hoverWait = '';
-    openHover(found);
-    return;
-  }
-  const anchor = found;
-  hoverTimer = setTimeout(() => {
-    if (hoverWait !== anchor.id) return;
-    hoverWait = '';
-    if (!anchor.link?.isConnected) return;
-    openHover(anchor);
-  }, 380);
-}
-
-function scheduleHoverHide(event) {
-  const card = $('hovercard');
-  const next = event.relatedTarget;
-  const nextId = actorFromLink(next)?.id || '';
-  if (next && (card?.contains(next) || (nextId && (nextId === hoverActor || nextId === hoverWait)))) return;
-  hoverWait = '';
-  clearTimeout(hoverTimer);
-  clearTimeout(hoverHideTimer);
-  hoverHideTimer = setTimeout(closeHover, 220);
 }
 
 function syncFollow(did, uri) {
@@ -6125,6 +6079,11 @@ async function onClick(event) {
     return;
   }
   const act = event.target.closest('[data-act]')?.dataset.act;
+  if (act === 'account-card') {
+    event.preventDefault();
+    toggleAccountCard(event.target.closest('[data-act="account-card"]'));
+    return;
+  }
   if (act === 'more' || act === 'repost' || act === 'profile-menu' || act === 'tab-menu' || act === 'nav-more') {
     event.preventDefault();
     const button = event.target.closest('[data-act]');
@@ -7213,6 +7172,12 @@ function onKey(event) {
       closeMenu();
       return;
     }
+    const hover = $('hovercard');
+    if (hover && !hover.hidden) {
+      event.preventDefault();
+      closeHover();
+      return;
+    }
     const open = [...document.querySelectorAll('dialog[open]')];
     const dialog = open[open.length - 1];
     if (!dialog || dialog.id === 'call') return;
@@ -7325,10 +7290,6 @@ function bind() {
   }, true);
   const loginDownloads = $('login-downloads');
   if (loginDownloads) loginDownloads.innerHTML = downloadsHtml(true);
-  document.addEventListener('pointerover', scheduleHover);
-  document.addEventListener('pointerout', scheduleHoverHide);
-  $('hovercard')?.addEventListener('pointerover', () => clearTimeout(hoverHideTimer));
-  $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
   window.addEventListener('scroll', (event) => {
     closeHover();
     if (event.target?.id !== 'menu') closeMenu();
@@ -7357,7 +7318,7 @@ function bind() {
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
-    if (!event.target.closest('#hovercard') && !actorFromLink(event.target)) closeHover();
+    if (!event.target.closest('#hovercard, [data-act="account-card"]')) closeHover();
   });
   document.addEventListener('keydown', onKey);
   $('back').addEventListener('click', () => goBack());

@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
@@ -143,6 +143,8 @@ assert.match(spoken, /class="facet tag"/);
 assert.match(spoken, /note-kicker">Related post/);
 assert.match(spoken, /data-href="#\/profile\/d\.bsky\.social\/post\/reply"/);
 assert.match(notesHtml, /data-href=/);
+assert.match(notesHtml, /data-act="account-card"/);
+assert.match(notesHtml, /href="#\/profile\/a\.bsky\.social"/);
 const mediaNotes = [
   {
     reason: 'like',
@@ -244,6 +246,7 @@ const shared = messageHtml({
 assert.match(shared, /a shared post/);
 assert.match(shared, /class="quote"/);
 assert.match(shared, /data-href=/);
+assert.match(shared, /data-act="account-card"/);
 assert.doesNotMatch(shared, /<a class="quote"/);
 const attachedPost = postHtml({
   post: {
@@ -424,6 +427,8 @@ assert.match(rendered, /class="action repost"/);
 assert.match(rendered, /data-act="share"/);
 assert.match(rendered, /class="action-group like/);
 assert.match(rendered, /class="name"/);
+assert.match(rendered, /data-act="account-card"/);
+assert.doesNotMatch(rendered, /<a class="avatar-link"/);
 const savedPost = postHtml({
   post: {
     uri: 'at://did:x/app.bsky.feed.post/1',
@@ -872,6 +877,20 @@ const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', dis
 assert.match(quietCalls, /chat-head/);
 assert.match(quietCalls, /Ada/);
 assert.match(quietCalls, /class="call-pair"/);
+assert.match(quietCalls, /data-act="account-card"/);
+assert.match(quietCalls, /href="#\/profile\/ada\.bsky\.social"/);
+const personRow = actorHtml({
+  did: 'did:ada',
+  handle: 'ada.bsky.social',
+  displayName: 'Ada',
+  description: 'Cats and clouds',
+}, { follow: true, self: 'did:me' });
+const personLink = personRow.match(/<a class="person-link"[\s\S]*?<\/a>/);
+assert.ok(personLink);
+assert.doesNotMatch(personLink[0], /data-act="follow"/);
+assert.doesNotMatch(personLink[0], /data-act="account-card"/);
+assert.match(personRow, /data-act="account-card"/);
+assert.match(personRow, /data-act="follow"/);
 const card = hoverCardHtml({ did: 'did:ada', handle: 'ada.bsky.social', displayName: 'Ada', description: 'Hello', followersCount: 3, followsCount: 1 }, 'did:me');
 assert.match(card, /data-act="follow"/);
 assert.match(card, /Hello/);

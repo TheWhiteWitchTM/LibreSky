@@ -40,6 +40,15 @@ export function avatar(url, label, size) {
   return `<span class="avatar ${size || ''}" data-initial="${initial}">${src ? `<img src="${attr(src)}" alt="" onerror="this.remove()">` : ''}</span>`;
 }
 
+function accountIcon(actor, size, extraClass = '') {
+  const id = typeof actor === 'string' ? actor : (actor?.handle || actor?.did || '');
+  const name = (typeof actor === 'string' ? actor : (actor?.displayName || actor?.handle)) || 'Account';
+  const face = avatar(typeof actor === 'string' ? '' : actor?.avatar, name, size);
+  if (!id) return face;
+  const classes = ['avatar-btn', extraClass].filter(Boolean).join(' ');
+  return `<button type="button" class="${classes}" data-act="account-card" data-actor="${attr(id)}" aria-label="${attr(`Show ${name}`)}" aria-expanded="false">${face}</button>`;
+}
+
 function counts(post) {
   return {
     reply: post.replyCount || 0,
@@ -222,8 +231,11 @@ function quote(view, linked = true) {
     const facets = record.value?.facets || record.record?.facets;
     bag.set(record.uri, { post: { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author } });
     const postHref = postHash({ uri: record.uri, author });
-    const headInner = `${avatar(author.avatar, author.displayName || author.handle, 'sm')}<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span>`;
-    const head = linked ? `<a class="quote-head" href="${attr(postHref)}">${headInner}</a>` : `<span class="quote-head">${headInner}</span>`;
+    const face = accountIcon(author, 'sm');
+    const line = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span>`;
+    const head = linked
+      ? `<span class="quote-head">${face}<a href="${attr(postHref)}">${line}</a></span>`
+      : `<span class="quote-head">${face}${line}</span>`;
     const data = linked ? ` data-href="${attr(postHref)}"` : '';
     return `<div class="quote"${data}>${head}<span class="quote-text">${richText(text, facets)}</span></div>`;
   }
@@ -278,7 +290,7 @@ export function postHtml(item, options = {}) {
     ${pinned ? `<p class="pinned-label">${icon('pin')} Pinned</p>` : ''}
     ${repostBy ? `<a class="repost-line" href="${profileHash(repostBy)}">${icon('repost')}<span>${escapeHtml(repostBy.displayName || repostBy.handle)} reposted</span></a>` : ''}
     <div class="post-row">
-      <a class="avatar-link" href="${profileHash(author)}">${avatar(author.avatar, author.displayName || author.handle)}</a>
+      ${accountIcon(author, '', 'avatar-link')}
       <div class="post-main">
         <div class="post-top">
           <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
@@ -389,7 +401,7 @@ export function actorHtml(actor, options = {}) {
     ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(actor.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
     : '';
   const actions = `${follow}${options.extra || ''}`;
-  return `<div class="person">${avatar(actor.avatar, name)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${actions ? `<span class="row-actions">${actions}</span>` : ''}</div>`;
+  return `<div class="person">${accountIcon(actor)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${actions ? `<span class="row-actions">${actions}</span>` : ''}</div>`;
 }
 
 const NOTE_VERB = {
@@ -444,10 +456,7 @@ function peopleLabel(authors) {
 }
 
 function avatarStack(authors) {
-  return `<span class="avatar-stack">${authors.slice(0, 8).map((actor) => {
-    const name = actor?.displayName || actor?.handle || '';
-    return `<a href="${profileHash(actor)}" aria-label="${attr(name)}">${avatar(actor?.avatar, name, 'sm')}</a>`;
-  }).join('')}</span>`;
+  return `<span class="avatar-stack">${authors.slice(0, 8).map((actor) => accountIcon(actor, 'sm')).join('')}</span>`;
 }
 
 function noteGlyph(reason) {
@@ -765,7 +774,7 @@ export function chatHeaderHtml(actor) {
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
   const handle = gone ? 'This account was deleted' : (actor.handle ? `@${actor.handle}` : '');
   const tools = !gone && actor.did ? `<span class="chat-tools">${callToolsHtml(actor.did)}</span>` : '';
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}"><a class="chat-with" href="${profileHash(actor)}">${avatar(actor.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>${tools}</div>`;
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor)}<a class="chat-with" href="${profileHash(actor)}"><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>${tools}</div>`;
 }
 
 export function hoverCardHtml(profile, self = '') {
