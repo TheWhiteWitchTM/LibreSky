@@ -51,7 +51,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, providerById, saveAi } from './ai.js';
-import { accountGone, aiTag, caretToken, caretWord, convoUnread, escapeHtml, firstUrl, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, toShortUrl, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -1082,7 +1082,7 @@ async function showHome(active) {
     const empty = following
       ? emptyHtml('No posts yet', 'Follow a few people, or add a list with the … on the tabs.')
       : discover
-        ? emptyHtml('No posts yet', 'Nothing in your content languages yet. Config can show every language.')
+        ? emptyHtml('No posts yet', 'Nothing in your content languages yet. The Settings page can show every language.')
         : emptyHtml('Nothing here', raw.length && lane.type === 'feed' ? 'Posts are hidden by this feed’s settings. The … menu can show more.' : 'There are no posts to show.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
@@ -1136,7 +1136,7 @@ async function showBrowse() {
     resetPosts();
     const posted = feedHtml(items);
     const banner = homeLead('<button type="button" class="prompt" data-act="signin"><span>Sign in to see who you follow</span></button>');
-    const empty = emptyHtml('Nothing here yet', 'Discover is quiet in your content languages. Config can show every language.');
+    const empty = emptyHtml('Nothing here yet', 'Discover is quiet in your content languages. The Settings page can show every language.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
     $('view').innerHTML = banner + (posted || (data.cursor ? waiting : empty));
     remember();
@@ -1242,7 +1242,7 @@ async function paintSearchResults(token, query) {
     resetPosts();
     const matchedPosts = visibleSearchPosts(postData.posts);
     const postsHtml = feedHtml(matchedPosts.map((post) => ({ post })));
-    const hiddenNote = !postsHtml && (postData.posts || []).length ? '<p class="dim search-note">Posts are hidden by search settings. Config can show more.</p>' : '';
+    const hiddenNote = !postsHtml && (postData.posts || []).length ? '<p class="dim search-note">Posts are hidden by search settings. Config on this page can show more.</p>' : '';
     remember();
     const peopleBlock = people ? `<h2 class="section-label">People</h2><div class="people">${people}</div>` : '';
     const packsBlock = packs ? `<h2 class="section-label">Starter packs</h2><div class="packs">${packs}</div>` : '';
@@ -2433,8 +2433,8 @@ function feedSettingsBody(feedId, { heading = true, title = 'Home' } = {}) {
   const prefix = feedId === 'home' ? 'home' : 'feed';
   const head = heading ? `<h2>${escapeHtml(title)}</h2>` : '';
   const note = feedId === 'home'
-    ? 'Saved as Bluesky home preferences, so the official app can use the same choices.'
-    : 'Saved as this feed’s Bluesky preferences.';
+    ? 'Page scoped. Saved as Bluesky home preferences, so the official app can use the same choices.'
+    : 'Page scoped. Saved as this feed’s Bluesky preferences.';
   return `${head}<p class="dim">${note}</p>
     ${switchRow(`${prefix}.showReplies`, 'Show replies', !prefs.hideReplies, 'Off hides every reply.')}
     ${switchRow(`${prefix}.showOutside`, 'Replies outside people you follow', !prefs.hideRepliesByUnfollowed, 'Off keeps a reply when you follow the person being replied to.')}
@@ -2451,7 +2451,7 @@ function threadSettingsHtml({ heading = true } = {}) {
   const sorts = [['oldest', 'Oldest'], ['newest', 'Newest'], ['most-likes', 'Most likes']];
   if (!sorts.some(([id]) => id === prefs.sort)) sorts.push([prefs.sort, prefs.sort === 'hotness' ? 'Hot' : 'Random']);
   const head = heading ? '<h2>Threads</h2>' : '';
-  return `${head}<p class="dim">Saved as Bluesky thread preferences. The official app uses this reply order.</p>
+  return `${head}<p class="dim">Page scoped. Saved as Bluesky thread preferences. The official app uses this reply order.</p>
     <div class="segmented">${sorts.map(([id, label]) => `<button type="button" data-thread-sort="${id}" aria-pressed="${prefs.sort === id ? 'true' : 'false'}">${label}</button>`).join('')}</div>
     ${switchRow('thread.followed', 'Prioritize people you follow', prefs.prioritizeFollowedUsers)}`;
 }
@@ -2459,7 +2459,7 @@ function threadSettingsHtml({ heading = true } = {}) {
 function searchSettingsHtml({ heading = true } = {}) {
   const prefs = searchPrefs();
   const head = heading ? '<h2>Search</h2>' : '';
-  return `${head}<p class="dim">Search stores these on your account with AT Protocol, in app.libresky.settings. Bluesky has no shared search-settings record. Config opens this page.</p>
+  return `${head}<p class="dim">Page scoped. Search stores these on your account with AT Protocol, in app.libresky.settings. Bluesky has no shared search-settings record.</p>
     <div class="segmented"><button type="button" data-sort="latest" aria-pressed="${prefs.sort !== 'top'}">Latest</button><button type="button" data-sort="top" aria-pressed="${prefs.sort === 'top'}">Top</button></div>
     ${switchRow('search.following', 'People you follow', prefs.following)}
     ${switchRow('search.hideReplies', 'Hide replies', prefs.hideReplies)}
@@ -2702,6 +2702,7 @@ function showSettings() {
   const sounds = soundPrefs();
   const tabs = SETTINGS_TABS.map(([id, label]) => `<button type="button" role="tab" id="settings-tab-${id}" data-settings-tab="${id}" aria-selected="${settingsTab === id ? 'true' : 'false'}" aria-controls="settings-${id}" tabindex="${settingsTab === id ? '0' : '-1'}">${label}</button>`).join('');
   $('view').innerHTML = `<section class="settings">
+    <p class="dim">Config and Help are page scoped. On Home, Search, a feed, or a thread, Config opens that page. This page holds the rest.</p>
     <div class="settings-tabs" role="tablist" aria-label="Settings">${tabs}</div>
     ${settingsPanel('you', `<h2>Accounts</h2>
     <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8.</p>
@@ -3407,6 +3408,18 @@ function editFingerprint(dialog) {
   });
 }
 
+function ensureTrailingLink(text, url) {
+  const clean = String(url || '').trim();
+  const source = String(text ?? '').replace(/\s+$/u, '');
+  if (!clean) return source;
+  const short = toShortUrl(clean);
+  const breakAt = source.lastIndexOf('\n');
+  const head = breakAt >= 0 ? source.slice(0, breakAt).replace(/\r$/u, '') : '';
+  const line = (breakAt >= 0 ? source.slice(breakAt + 1) : source).trim();
+  if (line === clean || line === short || trimLink(line) === clean) return head ? `${head}\n${clean}` : clean;
+  return source ? `${source}\n${clean}` : clean;
+}
+
 function openComposer({ reply = null, quote = null, text = '', edit = null } = {}) {
   if (!signedIn()) return requireSignIn();
   clearComposeTypos();
@@ -3423,7 +3436,11 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   else if (quoteSource) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quoteSource.author?.handle || '')}</strong></p><p>${escapeHtml((quoteSource.record?.text || '').slice(0, 160))}</p>`;
   else context.innerHTML = '';
   const area = $('compose-text');
-  area.value = source ? source.text : (text || (!replySource && !quoteSource ? loadDraft() : ''));
+  const keepExternal = source?.external?.url && !quoteSource && !gifEmbed(source.external) ? source.external : null;
+  area.value = source
+    ? ensureTrailingLink(source.text, keepExternal?.url || '')
+    : (text || (!replySource && !quoteSource ? loadDraft() : ''));
+  dialog._linkWatch = trailingUrl(area.value);
   const replies = $('reply-control');
   if (replies) replies.hidden = Boolean(replySource);
   if (!replySource && $('compose-replies')) $('compose-replies').value = source?.gate || 'everyone';
@@ -3436,6 +3453,7 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   dialog._langs = source?.langs?.length ? source.langs.slice() : languagePrefs().posts.slice();
   dialog._dismissedUrl = '';
   dialog._keptExternal = null;
+  dialog._linkMiss = '';
   if (source?.external?.url && !quoteSource) {
     const external = source.external;
     if (gifEmbed(external)) {
@@ -3445,15 +3463,15 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
         thumb: external.thumbUrl || external.url,
         thumbBlob: external.thumbBlob || null,
       };
-    } else {
-      dialog._keptExternal = external;
+    } else if (keepExternal) {
+      dialog._keptExternal = keepExternal;
       dialog._card = {
         kind: 'external',
-        url: external.url,
-        title: external.title || external.url,
-        description: external.description || '',
-        image: external.thumbUrl || '',
-        sourceUrl: external.url,
+        url: keepExternal.url,
+        title: keepExternal.title || keepExternal.url,
+        description: keepExternal.description || '',
+        image: keepExternal.thumbUrl || '',
+        sourceUrl: keepExternal.url,
         kept: true,
       };
     }
@@ -3610,16 +3628,55 @@ function toggleDictate() {
 let linkEpoch = 0;
 let linkTimer = 0;
 
+function syncComposerLink(dialog, value) {
+  if (!dialog || dialog._gif || dialog._video) return;
+  const url = trailingUrl(value);
+  if (dialog._linkWatch === url) return;
+  const previous = dialog._linkWatch || '';
+  dialog._linkWatch = url;
+  if (!previous || previous === url) return;
+  if (dialog._card && dialog._card.sourceUrl !== url) dialog._card = null;
+  if (dialog._keptExternal && dialog._keptExternal.url !== url) dialog._keptExternal = null;
+  if (dialog._linkMiss && dialog._linkMiss !== url) dialog._linkMiss = '';
+  linkEpoch += 1;
+  const box = $('compose-link');
+  if (!box) return;
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
+function linkCanAttach(dialog, url) {
+  if (!dialog || !url) return false;
+  if (dialog._gif || dialog._video) return false;
+  if (dialog.dataset.quote || dialog._attach) return false;
+  if (dialog._dismissedUrl === url || dialog._linkMiss === url) return false;
+  return true;
+}
+
+// Last-line card URLs are left out. Every other link counts as its short form.
+function composerBody(dialog, value) {
+  const url = trailingUrl(value);
+  if (dialog?._linkMiss && dialog._linkMiss !== url) dialog._linkMiss = '';
+  if (!linkCanAttach(dialog, url)) return value;
+  const images = (dialog._files || []).length > 0;
+  const card = dialog._card;
+  if (card?.sourceUrl === url && card.kind === 'external' && images) return value;
+  return withoutTrailingUrl(value);
+}
+
 function updateCount() {
+  const dialog = $('compose');
   const area = $('compose-text');
   const value = area?.value || '';
-  const left = 300 - graphemeLength(value);
-  const files = $('compose')._files || [];
-  const card = $('compose')._card;
-  const gif = $('compose')._gif;
-  const video = $('compose')._video;
-  const attached = Boolean($('compose')?._attach?.uri);
-  const quoted = Boolean($('compose')?.dataset.quote);
+  syncComposerLink(dialog, value);
+  const body = composerBody(dialog, value);
+  const left = 300 - graphemeLength(applyShortLinks(body).text);
+  const files = dialog?._files || [];
+  const gif = dialog?._gif;
+  const video = dialog?._video;
+  const attached = Boolean(dialog?._attach?.uri);
+  const quoted = Boolean(dialog?.dataset.quote);
+  const holdingLink = body !== value && Boolean(trailingUrl(value));
   const count = $('compose-count');
   const used = Math.min(300, Math.max(0, 300 - left));
   if (count) {
@@ -3629,7 +3686,7 @@ function updateCount() {
     else count.textContent = String(left);
   }
   count?.classList.toggle('over', left < 0);
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !card && !gif && !video && !attached && !quoted);
+  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !holdingLink && !gif && !video && !attached && !quoted);
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -3955,46 +4012,47 @@ async function refreshLinkPreview() {
   const box = $('compose-link');
   if (!dialog?.open || !box) return;
   if (dialog._gif || dialog._video) return;
-  const url = firstUrl($('compose-text').value);
-  if (url && dialog._keptExternal && url !== dialog._keptExternal.url) dialog._keptExternal = null;
+  const url = trailingUrl($('compose-text').value);
   if (!url || dialog.dataset.quote || dialog._attach || dialog._dismissedUrl === url) {
-    if (!url && dialog._card?.kept && !dialog.dataset.quote && !dialog._attach) {
-      paintLinkPreview();
-      return;
-    }
-    if (dialog._card?.kept) dialog._keptExternal = null;
+    linkEpoch += 1;
     dialog._card = null;
+    dialog._keptExternal = null;
     box.hidden = true;
     box.innerHTML = '';
     updateCount();
     return;
   }
+  if (dialog._keptExternal && dialog._keptExternal.url !== url) dialog._keptExternal = null;
   if (dialog._card?.sourceUrl === url) {
     paintLinkPreview();
+    updateCount();
     return;
   }
   const token = ++linkEpoch;
-  box.hidden = false;
-  box.innerHTML = `<div class="card"><span class="card-body"><span class="domain">${escapeHtml(hostOf(url))}</span><strong>Loading preview…</strong></span></div>`;
+  const images = (dialog._files || []).length > 0;
+  if (!images) {
+    box.hidden = false;
+    box.innerHTML = `<div class="card"><span class="card-body"><span class="domain">${escapeHtml(hostOf(url))}</span><strong>Loading preview…</strong></span></div>`;
+  }
   let card = null;
   try { card = await api.inspectLink(url); } catch { card = null; }
   if (token !== linkEpoch || !dialog.open) return;
+  if (trailingUrl($('compose-text').value) !== url || dialog._dismissedUrl === url || dialog.dataset.quote || dialog._attach) return;
   if (!card) {
     dialog._card = null;
+    dialog._keptExternal = null;
+    dialog._linkMiss = url;
     box.hidden = true;
     box.innerHTML = '';
     updateCount();
     return;
   }
   card.sourceUrl = url;
+  if (dialog._keptExternal?.url === url) card.kept = true;
+  dialog._linkMiss = '';
   dialog._card = card;
   paintLinkPreview();
   updateCount();
-}
-
-function dropUrl(text, url) {
-  if (!url) return text;
-  return text.replace(url, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function imageCandidates(imageUrl) {
@@ -4092,7 +4150,6 @@ async function publish(event) {
   const files = dialog._files || [];
   const gif = dialog._gif;
   const draftVideo = dialog._video;
-  if (graphemeLength(text) > 300) return;
   if ((gif && files.length) || (gif && draftVideo) || (files.length && draftVideo)) {
     toast('Use images, a video, or a GIF, not more than one.');
     return;
@@ -4109,6 +4166,38 @@ async function publish(event) {
     if (editing && dialog._editBase && editFingerprint(dialog) === dialog._editBase) {
       dialog.close();
       toast('Nothing changed');
+      return;
+    }
+    let quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
+    if (dialog._attach?.uri && dialog._attach?.cid) {
+      quote = { uri: dialog._attach.uri, cid: dialog._attach.cid };
+    }
+    let link = null;
+    const url = trailingUrl(text);
+    let card = dialog._card;
+    let linkPlan = null;
+    if (gif && !files.length && !quote) linkPlan = { kind: 'gif' };
+    else if (url && !draftVideo && dialog._dismissedUrl !== url && !quote && dialog._linkMiss !== url) {
+      if (!card || card.sourceUrl !== url) {
+        try { card = await api.inspectLink(url); } catch { card = null; }
+        if (card) card.sourceUrl = url;
+      }
+      if (card?.kind === 'quote' && card.post?.uri) {
+        quote = { uri: card.post.uri, cid: card.post.cid };
+        text = withoutTrailingUrl(text).trim();
+      } else if (card?.kind === 'external' && !files.length) {
+        linkPlan = { kind: 'external', card };
+        text = withoutTrailingUrl(text).trim();
+      } else if (!card) {
+        dialog._card = null;
+        dialog._keptExternal = null;
+        dialog._linkMiss = url;
+      }
+    }
+    if (graphemeLength(applyShortLinks(text).text) > 300) {
+      toast(url && trailingUrl(text) === url
+        ? 'That link stays in the post, so this is over 300 characters.'
+        : 'This post is over 300 characters.');
       return;
     }
     const images = [];
@@ -4133,14 +4222,7 @@ async function publish(event) {
       const raw = JSON.parse(dialog.dataset.reply);
       reply = { root: raw.root, parent: { uri: raw.uri, cid: raw.cid } };
     }
-    let quote = dialog.dataset.quote ? JSON.parse(dialog.dataset.quote) : null;
-    if (dialog._attach?.uri && dialog._attach?.cid) {
-      quote = { uri: dialog._attach.uri, cid: dialog._attach.cid };
-    }
-    let link = null;
-    const url = firstUrl(text);
-    let card = dialog._card;
-    if (gif && !images.length && !quote) {
+    if (linkPlan?.kind === 'gif') {
       let thumb = gif.thumbBlob || null;
       if (!thumb) {
         try {
@@ -4151,33 +4233,19 @@ async function publish(event) {
         }
       }
       link = api.externalEmbed({ url: gif.url, title: gif.title || 'GIF', description: '', thumb });
-    } else if (url && !video && dialog._dismissedUrl !== url && !quote) {
-      if (!card || card.sourceUrl !== url) {
-        try { card = await api.inspectLink(url); } catch { card = null; }
-      }
-      if (card?.kind === 'quote' && card.post?.uri) {
-        quote = { uri: card.post.uri, cid: card.post.cid };
-        text = dropUrl(text, card.sourceUrl || url);
-      } else if (card?.kind === 'external' && !images.length) {
-        let thumb = card.kept && dialog._keptExternal?.thumbBlob ? dialog._keptExternal.thumbBlob : null;
-        if (!thumb && card.image) {
-          try {
-            const file = await thumbFile(card.image);
-            if (file) thumb = await api.uploadBlob(file);
-          } catch {
-            thumb = null;
-          }
+    } else if (linkPlan?.kind === 'external') {
+      const external = linkPlan.card;
+      let thumb = dialog._keptExternal?.url === url && dialog._keptExternal.thumbBlob ? dialog._keptExternal.thumbBlob : null;
+      if (!thumb && external.kept && dialog._keptExternal?.thumbBlob) thumb = dialog._keptExternal.thumbBlob;
+      if (!thumb && external.image) {
+        try {
+          const file = await thumbFile(external.image);
+          if (file) thumb = await api.uploadBlob(file);
+        } catch {
+          thumb = null;
         }
-        link = api.externalEmbed({ ...card, url: card.url || url, thumb });
       }
-    }
-    if (!link && dialog._keptExternal?.url && !images.length && !video && !quote && !gif) {
-      link = api.externalEmbed({
-        url: dialog._keptExternal.url,
-        title: dialog._keptExternal.title,
-        description: dialog._keptExternal.description,
-        thumb: dialog._keptExternal.thumbBlob || null,
-      });
+      link = api.externalEmbed({ ...external, url: external.url || url, thumb });
     }
     if (!text && !images.length && !video && !quote && !link) return;
     rememberWords(text);
@@ -4735,7 +4803,7 @@ function openLinkPicker() {
   const box = $('compose-picker');
   if (!box) return;
   box.hidden = false;
-  box.innerHTML = `<div class="picker"><p class="picker-label">Add a link</p><div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">The link stays in the post and shows a preview.</p></div>`;
+  box.innerHTML = `<div class="picker"><p class="picker-label">Add a link</p><div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. Delete the line to remove the preview.</p></div>`;
   $('link-url')?.focus();
 }
 
@@ -4749,13 +4817,9 @@ function addComposerLink() {
   }
   const area = $('compose-text');
   if (!area) return;
-  const start = area.selectionStart ?? area.value.length;
-  const before = area.value.slice(0, start);
-  const after = area.value.slice(start);
-  const lead = before && !/\s$/.test(before) ? ' ' : '';
-  const tail = after && !/^\s/.test(after) ? ' ' : '';
-  area.value = `${before}${lead}${url}${tail}${after}`;
-  const caret = before.length + lead.length + url.length + tail.length;
+  const current = area.value.replace(/\s+$/u, '');
+  if (trailingUrl(current) !== url) area.value = current ? `${current}\n${url}` : url;
+  const caret = area.value.length;
   area.setSelectionRange(caret, caret);
   closePicker();
   area.dispatchEvent(new Event('input', { bubbles: true }));
@@ -4971,7 +5035,40 @@ function openAbout() {
 
 function openHelp() {
   const dialog = $('help');
+  const scope = $('help-scope');
+  const title = $('title')?.textContent?.trim() || 'this page';
+  if (scope) scope.textContent = `Help and Config are page scoped. You are on ${title}.`;
   if (dialog && !dialog.open) dialog.showModal();
+}
+
+function openPageConfig() {
+  const [a, b, c] = parseHash();
+  const active = homeActive();
+  if (active && (active.kind === 'following' || active.kind === 'discover')) {
+    openTune('home');
+    return;
+  }
+  if (active?.kind === 'lane' && active.type === 'list') {
+    if (active.value) location.hash = `#/list/${encodeURIComponent(active.value)}`;
+    return;
+  }
+  if (active?.kind === 'lane' && active.type === 'feed') {
+    openTune('feed', active.value);
+    return;
+  }
+  if (a === 'feed' && b) {
+    openTune('feed', b);
+    return;
+  }
+  if (a === 'search') {
+    openTune('search');
+    return;
+  }
+  if (a === 'profile' && c === 'post') {
+    openTune('thread');
+    return;
+  }
+  location.hash = '#/settings';
 }
 
 function openLegal(which) {
@@ -5382,6 +5479,11 @@ async function handleChromeAct(act, event) {
   if (act === 'help') {
     event.preventDefault();
     openHelp();
+    return true;
+  }
+  if (act === 'config') {
+    event.preventDefault();
+    openPageConfig();
     return true;
   }
   if (act === 'help-about') {
@@ -5863,9 +5965,11 @@ async function onClick(event) {
   if (act === 'dismiss-link') {
     event.preventDefault();
     const dialog = $('compose');
-    if (dialog._card?.kept) dialog._keptExternal = null;
-    dialog._dismissedUrl = dialog._card?.sourceUrl || firstUrl($('compose-text').value);
+    dialog._dismissedUrl = dialog._card?.sourceUrl || trailingUrl($('compose-text').value);
+    dialog._keptExternal = null;
     dialog._card = null;
+    dialog._linkMiss = '';
+    linkEpoch += 1;
     const box = $('compose-link');
     if (box) {
       box.hidden = true;
@@ -7058,6 +7162,10 @@ function bind() {
     $('compose')._video = null;
     $('compose')._attach = null;
     $('compose')._keptExternal = null;
+    $('compose')._card = null;
+    $('compose')._linkMiss = '';
+    $('compose')._linkWatch = '';
+    linkEpoch += 1;
     $('compose').dataset.edit = '';
     const send = $('compose-send');
     if (send) send.textContent = 'Post';

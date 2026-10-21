@@ -1,5 +1,5 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
-import { bskyPostParts, httpUrlRe, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
+import { applyShortLinks, bskyPostParts, httpUrlRe, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -1137,13 +1137,27 @@ export async function uploadVideo(file, { signal, onProgress } = {}) {
   throw new Error('Video processing took too long. Try a shorter video.');
 }
 
+function mergeFacets(found, extra) {
+  const facets = [...(found || [])];
+  const overlaps = (start, end) => facets.some((facet) => facet.index.byteStart < end && start < facet.index.byteEnd);
+  for (const facet of extra || []) {
+    const start = facet?.index?.byteStart;
+    const end = facet?.index?.byteEnd;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start >= end || overlaps(start, end)) continue;
+    facets.push(facet);
+  }
+  facets.sort((a, b) => a.index.byteStart - b.index.byteStart || a.index.byteEnd - b.index.byteEnd);
+  return facets;
+}
+
 export async function createPost({ text, images = [], video = null, reply = null, quote = null, link = null, langs = null }) {
+  const prepared = applyShortLinks(text);
   const record = {
     $type: 'app.bsky.feed.post',
-    text,
+    text: prepared.text,
     createdAt: new Date().toISOString(),
   };
-  const facets = await facetsFor(text);
+  const facets = mergeFacets(await facetsFor(prepared.text), prepared.links);
   if (facets.length) record.facets = facets;
   const chosen = (Array.isArray(langs) ? langs : [])
     .map((code) => String(code || '').trim().toLowerCase())

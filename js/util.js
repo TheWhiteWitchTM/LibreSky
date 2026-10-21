@@ -355,6 +355,79 @@ export function firstUrl(text) {
   return trimLink(match[0]);
 }
 
+// Bluesky counts and stores the short display form. The facet keeps the full URI.
+export function toShortUrl(url) {
+  try {
+    const urlp = new URL(url);
+    if (urlp.protocol !== 'http:' && urlp.protocol !== 'https:') return url;
+    const path = (urlp.pathname === '/' ? '' : urlp.pathname) + urlp.search + urlp.hash;
+    if (path.length > 15) return `${urlp.host}${path.slice(0, 13)}...`;
+    return `${urlp.host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+function lastLine(text) {
+  const source = String(text ?? '').replace(/\s+$/u, '');
+  if (!source) return { source: '', line: '', head: '' };
+  const breakAt = source.lastIndexOf('\n');
+  const head = breakAt >= 0 ? source.slice(0, breakAt).replace(/\r$/u, '') : '';
+  const line = (breakAt >= 0 ? source.slice(breakAt + 1) : source).trim();
+  return { source, line, head, breakAt };
+}
+
+// A last line that is only one http(s) URL, plus punctuation trimLink would drop.
+export function trailingUrl(text) {
+  const { line } = lastLine(text);
+  if (!line) return '';
+  const match = httpUrlRe().exec(line);
+  if (!match || match.index !== 0 || line.slice(match[0].length)) return '';
+  const uri = trimLink(match[0]);
+  if (!uri || trimLink(line) !== uri) return '';
+  return uri;
+}
+
+export function withoutTrailingUrl(text) {
+  const source = String(text ?? '');
+  if (!trailingUrl(source)) return source;
+  const { head, breakAt } = lastLine(source);
+  if (breakAt < 0) return '';
+  return head;
+}
+
+export function applyShortLinks(text) {
+  const source = String(text ?? '');
+  const re = httpUrlRe();
+  let out = '';
+  let last = 0;
+  const links = [];
+  let match = re.exec(source);
+  while (match) {
+    const raw = trimLink(match[0]);
+    const start = match.index;
+    const matchEnd = start + match[0].length;
+    out += source.slice(last, start);
+    if (raw) {
+      const short = toShortUrl(raw);
+      if (short === raw) out += raw;
+      else {
+        const byteStart = encoder.encode(out).length;
+        out += short;
+        links.push({
+          index: { byteStart, byteEnd: encoder.encode(out).length },
+          features: [{ $type: 'app.bsky.richtext.facet#link', uri: raw }],
+        });
+      }
+      out += source.slice(start + raw.length, matchEnd);
+    } else out += match[0];
+    last = matchEnd;
+    match = re.exec(source);
+  }
+  out += source.slice(last);
+  return { text: out, links };
+}
+
 function tagAttr(tag, name) {
   const match = String(tag).match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>]+))`, 'i'));
   return match ? (match[1] ?? match[2] ?? match[3] ?? '') : '';
