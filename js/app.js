@@ -2705,7 +2705,8 @@ function displaySettingsHtml() {
     ${switchRow('a11y.reader', 'Screen reader layout', access.reader, 'Focus rings, link underlines, and button names.')}
     <h2>Keyboard</h2>
     <ul class="keys">
-      <li><kbd>n</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>n</kbd> or <kbd>Shift</kbd> <kbd>Enter</kbd> New post</li><li><kbd>Tab</kbd> Complete a word, @name, or #tag</li><li><kbd>j</kbd> <kbd>k</kbd> Next and previous post</li>
+      <li><kbd>Shift</kbd> <kbd>↑</kbd> Top of the page</li>
       <li><kbd>a</kbd> Read the selected post aloud</li>
       <li><kbd>l</kbd> Like</li><li><kbd>r</kbd> Reply</li><li><kbd>t</kbd> Repost</li>
       <li><kbd>b</kbd> Bookmark</li><li><kbd>s</kbd> Share</li><li><kbd>Enter</kbd> Open post</li><li><kbd>/</kbd> Search</li>
@@ -6019,6 +6020,11 @@ async function onClick(event) {
     return;
   }
   if (act === 'signin') return requireSignIn();
+  if (act === 'to-top') {
+    event.preventDefault();
+    scrollToTop();
+    return;
+  }
   if (act === 'compose') return openComposer();
   if (act === 'search-settings') {
     event.preventDefault();
@@ -6974,6 +6980,12 @@ function dismissComposer(mode) {
   dialog.close();
 }
 
+function scrollToTop() {
+  document.querySelectorAll('#view .post.selected').forEach((post) => post.classList.remove('selected'));
+  selected = -1;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function onKey(event) {
   if (event.key === 'Escape') {
     const appMenu = $('app-menu');
@@ -7005,6 +7017,19 @@ function onKey(event) {
   const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
   if (typing || document.querySelector('dialog[open]')) return;
   const postsOnPage = () => [...document.querySelectorAll('#view .post.feed-post')];
+  const plainShift = event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing;
+  if (plainShift && event.key === 'ArrowUp') {
+    if (event.repeat) return;
+    event.preventDefault();
+    scrollToTop();
+    return;
+  }
+  if (plainShift && event.key === 'Enter') {
+    if (event.repeat) return;
+    event.preventDefault();
+    openComposer();
+    return;
+  }
   if (event.key === 'n') return openComposer();
   if (event.key === '/') {
     event.preventDefault();

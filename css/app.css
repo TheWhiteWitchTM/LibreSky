@@ -508,6 +508,15 @@ img { max-width: 100%; }
 }
 .sticky-head:has(#tabs[hidden]) { display: none; }
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.to-top {
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  flex: none;
+}
+.to-top .ico { width: 18px; height: 18px; }
+.to-top:hover { background: var(--hover); }
 .head-post {
   display: inline-flex;
   align-items: center;
