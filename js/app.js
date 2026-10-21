@@ -54,7 +54,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
+import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, draftRewriteMessages, fitDraft, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -3855,7 +3855,7 @@ async function showCalls() {
   setChrome({ title: 'Calls', nav: 'calls' });
   const ready = canCall();
   const note = ready
-    ? 'Voice and video connect two LibreSky windows. Enter a handle to call someone new, or pick someone you already chat with. An incoming call can be accepted or declined.'
+    ? 'Voice and video connect two LibreSky windows. Mute and the camera stay on your side, and the time shows once you are connected. Enter a handle to call someone new, or pick someone you already chat with. An incoming call can be accepted or declined.'
     : 'This page is not a secure context, or this browser has no WebRTC, so a call cannot start here. Open LibreSky over https, or on http://127.0.0.1.';
   if (!signedIn()) {
     $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${emptyHtml('Calls', 'Sign in to start a voice or video call.', '<button type="button" class="primary" data-act="signin">Sign in</button>')}`;
@@ -4320,6 +4320,7 @@ function ensureTrailingLink(text, url) {
 function openComposer({ reply = null, quote = null, text = '', edit = null } = {}) {
   if (!signedIn()) return requireSignIn();
   clearComposeTypos();
+  hideAiDraft();
   const dialog = $('compose');
   const source = edit?.record ? editDraft(edit) : null;
   const replySource = source?.reply || reply;
@@ -6332,6 +6333,79 @@ function appendAssistant(text) {
   if (list) list.scrollTop = list.scrollHeight;
 }
 
+let aiDraftSeq = 0;
+
+function hideAiDraft() {
+  const box = $('compose-ai');
+  if (box) box.hidden = true;
+  const node = $('compose-ai-text');
+  if (node) node.textContent = '';
+  const use = box?.querySelector('[data-act="use-ai-draft"]');
+  if (use) use.disabled = false;
+}
+
+function showAiDraft(text, pending = false) {
+  const box = $('compose-ai');
+  const node = $('compose-ai-text');
+  if (!box || !node) return;
+  node.textContent = text;
+  const use = box.querySelector('[data-act="use-ai-draft"]');
+  if (use) use.disabled = pending;
+  box.hidden = false;
+}
+
+async function rewriteDraft() {
+  const dialog = $('compose');
+  const area = $('compose-text');
+  if (!dialog?.open) return;
+  const body = (area?.value || '').trim();
+  if (!body) {
+    toast('Write a draft first. AI Assist rewrites what is in the box.');
+    area?.focus();
+    return;
+  }
+  const saved = loadAi();
+  if (!aiReady(saved)) {
+    toast('AI Assist could not start. Add a key in Settings.');
+    return;
+  }
+  const button = dialog.querySelector('[data-act="compose-ai"]');
+  const seq = ++aiDraftSeq;
+  if (button) button.disabled = true;
+  showAiDraft('Reading…', true);
+  try {
+    const answer = await askAi(
+      saved,
+      draftRewriteMessages(body),
+      AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined,
+      'Draft',
+    );
+    if (seq !== aiDraftSeq || !$('compose')?.open) return;
+    const fitted = fitDraft(answer);
+    if (!fitted) throw new Error('The account sent an empty reply.');
+    showAiDraft(fitted);
+  } catch (error) {
+    if (seq !== aiDraftSeq) return;
+    hideAiDraft();
+    toast(error?.message || 'The account did not answer.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+function useAiDraft() {
+  const raw = $('compose-ai-text')?.textContent || '';
+  const fitted = fitDraft(raw);
+  const area = $('compose-text');
+  if (!area || !fitted || raw === 'Reading…') return;
+  area.value = fitted;
+  area._before = fitted;
+  hideAiDraft();
+  updateCount();
+  paintStyleButtons(area);
+  area.focus();
+}
+
 async function askInChat(input, text) {
   const saved = loadAi();
   if (!aiReady(saved)) {
@@ -6768,6 +6842,22 @@ async function handleChromeAct(act, event) {
     event.preventDefault();
     const area = button?.closest('#chat-form') ? $('chat-text') : $('compose-text');
     applyComposerStyle(area, button?.dataset.style || '', button?._range);
+    return true;
+  }
+  if (act === 'compose-ai') {
+    event.preventDefault();
+    rewriteDraft();
+    return true;
+  }
+  if (act === 'use-ai-draft') {
+    event.preventDefault();
+    useAiDraft();
+    return true;
+  }
+  if (act === 'dismiss-ai-draft') {
+    event.preventDefault();
+    hideAiDraft();
+    $('compose-text')?.focus();
     return true;
   }
   if (act === 'add-link') {
@@ -8624,6 +8714,7 @@ function bind() {
   });
   $('compose-text').addEventListener('input', (event) => {
     const area = $('compose-text');
+    if (event.isTrusted) hideAiDraft();
     if (!event.isComposing) {
       if (event.isTrusted) applyHeldStyles(area);
       else area._before = area.value;

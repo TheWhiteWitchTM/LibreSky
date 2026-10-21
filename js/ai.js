@@ -1,4 +1,5 @@
 import { currentDid } from './session.js';
+import { graphemeLength } from './util.js';
 
 const AI_KEY = 'libresky.ai';
 const AI_MAP = 'libresky.aiAccounts';
@@ -10,6 +11,43 @@ export const AI_PREF_TYPE = 'app.bsky.actor.defs#libreskyAi';
 const memory = new Map();
 
 export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by tagging @ai or @si. Those tags are not Bluesky accounts. Reply in plain text, usually one short paragraph, and stay under 700 characters unless the question needs more.';
+
+export const AI_DRAFT_LIMIT = 300;
+
+export const AI_DRAFT_SYSTEM = 'You rewrite a Bluesky post for LibreSky. Keep the author\'s meaning, language, and names. Return only the post text. Stay under 300 characters. Do not add hashtags, a preamble, or quotation marks.';
+
+const DRAFT_LEAD = /^(?:here(?:'|’)s(?: the)?(?: rewritten)?(?: post| draft)?|here is(?: the)?(?: rewritten)?(?: post| draft)?|rewritten(?: post| draft)?|rewrite|draft|post)\s*:\s*/i;
+
+export function draftRewriteMessages(text) {
+  return [
+    { role: 'system', content: AI_DRAFT_SYSTEM },
+    { role: 'user', content: String(text || '').trim() },
+  ];
+}
+
+function trimGraphemes(value, limit) {
+  if (graphemeLength(value) <= limit) return value;
+  const parts = typeof Intl !== 'undefined' && Intl.Segmenter
+    ? [...new Intl.Segmenter().segment(value)].map((part) => part.segment)
+    : [...value];
+  let cut = parts.slice(0, limit).join('');
+  const space = cut.lastIndexOf(' ');
+  if (space > Math.floor(limit * 0.6)) cut = cut.slice(0, space);
+  return cut.trim();
+}
+
+export function fitDraft(text, limit = AI_DRAFT_LIMIT) {
+  let value = String(text || '').replace(/\r/g, '').trim();
+  const fence = value.match(/^```[a-z]*\n?([\s\S]*?)\n?```$/i);
+  if (fence) value = fence[1].trim();
+  value = value.replace(DRAFT_LEAD, '').trim();
+  const wrapped = (value.startsWith('"') && value.endsWith('"'))
+    || (value.startsWith('“') && value.endsWith('”'))
+    || (value.startsWith("'") && value.endsWith("'") && graphemeLength(value) > 2);
+  if (wrapped) value = value.slice(1, -1).trim();
+  value = value.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return trimGraphemes(value, limit);
+}
 
 export const AI_TIMEOUT_MS = 90000;
 

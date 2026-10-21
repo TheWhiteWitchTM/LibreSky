@@ -1,0 +1,15 @@
+You are improving LibreSky at /home/andreas/Projects/LibreSky. This is an unattended update. Finish it in one pass.
+
+Read CHANGES.md, README.md, js/call.js, and js/ai.js. Pick one real improvement to AI Assist or to voice and video calls. Prefer a gap that X, the Bluesky app, or other Bluesky clients already cover. Keep the change small enough to finish and test. Match the surrounding code. Do not add dependencies. Do not store an app password, a token, or any other secret in the repo or the client.
+
+Add a new dated section at the top of the entries in CHANGES.md, in the same voice as that file. Update README.md, CORPORATE.md, and llms.txt so they stay true. If index.html describes the feature you changed, update that copy too. Bump the cache name in sw.js when HTML, CSS, or JS changes. Do not invent features.
+
+Run npm run smoke. Fix failures you caused.
+
+Commit only the files you changed for this update. Do not commit secrets or files you did not mean to change. Push to the existing branch.
+
+Post once, only after the smoke test and the push succeed. Use scripts/post-update.py. The text starts with the siren emoji, stays under 300 characters, says what changed in plain language, and includes https://thewhitewitchtm.github.io/LibreSky/ . The script attaches the repo banner. Never print BSKY_PASSWORD or the contents of ~/.config/thewhitewitch/bsky.env. Do not say that anyone could not sleep. That line was only for the first note.
+
+After the post succeeds, run scripts/mark-release-seen.py with the exact new CHANGES.md heading, so the morning release note does not post the same update again.
+
+Do not change other repositories.

@@ -22,4 +22,4 @@ A setup guide will land here when the edition is ready to run. The public client
 
 [![LibreSky. Highlighted features: Edit, AI, Voice, Video, and Chat.](assets/banner.png)](README.md)
 
-[LibreSky](README.md) is the client you can use now. Home, Discover, search, chat, calls, and `@ai` are live there. Corporate is the one coming next.
+[LibreSky](README.md) is the client you can use now. Home, Discover, search, chat, calls, and `@ai` are live there. A call can mute and turn the camera off, and the post box can rewrite a draft. Corporate is the one coming next.

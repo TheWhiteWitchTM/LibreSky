@@ -70,6 +70,91 @@ function setStatus(text) {
   if (node) node.textContent = text;
 }
 
+export function formatCallClock(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) / 1000) || 0);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const sec = String(seconds).padStart(2, '0');
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${sec}`;
+  return `${minutes}:${sec}`;
+}
+
+export function setKindEnabled(stream, kind, enabled) {
+  const tracks = typeof stream?.getTracks === 'function'
+    ? stream.getTracks().filter((track) => track && track.kind === kind)
+    : [];
+  tracks.forEach((track) => { track.enabled = Boolean(enabled); });
+  return tracks.length > 0;
+}
+
+let clockTimer = 0;
+let connectedAt = 0;
+
+function paintCallControls() {
+  const mute = $('call-mute');
+  const camera = $('call-camera');
+  const local = $('call-local');
+  const muted = Boolean(session?.muted);
+  const cameraOff = Boolean(session?.cameraOff);
+  const video = session?.media === 'video';
+  if (mute) {
+    mute.hidden = !session;
+    mute.setAttribute('aria-pressed', muted ? 'true' : 'false');
+    mute.setAttribute('aria-label', muted ? 'Unmute microphone' : 'Mute microphone');
+    mute.dataset.tip = muted ? 'Unmute' : 'Mute';
+  }
+  if (camera) {
+    camera.hidden = !video;
+    camera.setAttribute('aria-pressed', cameraOff ? 'true' : 'false');
+    camera.setAttribute('aria-label', cameraOff ? 'Turn camera on' : 'Turn camera off');
+    camera.dataset.tip = cameraOff ? 'Camera on' : 'Camera off';
+  }
+  if (local) local.classList.toggle('is-off', cameraOff);
+}
+
+function startClock() {
+  if (clockTimer || !session) return;
+  connectedAt = Date.now();
+  const node = $('call-clock');
+  if (node) {
+    node.hidden = false;
+    node.textContent = formatCallClock(0);
+  }
+  clockTimer = setInterval(() => {
+    const clock = $('call-clock');
+    if (!session || !clock) return;
+    clock.textContent = formatCallClock(Date.now() - connectedAt);
+  }, 1000);
+}
+
+function stopClock() {
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = 0;
+  connectedAt = 0;
+  const node = $('call-clock');
+  if (node) {
+    node.hidden = true;
+    node.textContent = formatCallClock(0);
+  }
+}
+
+export function toggleCallMute() {
+  if (!session?.stream) return false;
+  session.muted = !session.muted;
+  setKindEnabled(session.stream, 'audio', !session.muted);
+  paintCallControls();
+  return session.muted;
+}
+
+export function toggleCallCamera() {
+  if (!session?.stream || session.media !== 'video') return false;
+  session.cameraOff = !session.cameraOff;
+  setKindEnabled(session.stream, 'video', !session.cameraOff);
+  paintCallControls();
+  return session.cameraOff;
+}
+
 function showStage(media) {
   const dialog = $('call');
   const remote = $('call-remote');
@@ -82,6 +167,7 @@ function showStage(media) {
   if (voice) voice.hidden = video;
   if (title) title.textContent = video ? 'Video call' : 'Voice call';
   if (dialog) dialog.dataset.media = video ? 'video' : 'audio';
+  paintCallControls();
   if (dialog && !dialog.open) dialog.showModal();
 }
 
@@ -123,10 +209,14 @@ function attach(pc, media) {
       audio.play().catch(() => {});
     }
     setStatus('Connected');
+    startClock();
   });
   pc.addEventListener('connectionstatechange', () => {
     if (!session || session.pc !== pc) return;
-    if (pc.connectionState === 'connected') setStatus('Connected');
+    if (pc.connectionState === 'connected') {
+      setStatus('Connected');
+      startClock();
+    }
     if (pc.connectionState === 'disconnected') setStatus('Reconnecting…');
     if (pc.connectionState === 'failed') {
       notify('The call could not connect. Some networks block it.');
@@ -269,7 +359,7 @@ export async function startCall({ convoId, peerDid, media }) {
   try {
     stream = await mediaStream(media);
     const pc = new RTCPeerConnection({ iceServers: ICE });
-    session = { pc, stream, convoId, peerDid, media, announced: false, recordUri: '', rkey: '', startedAt: Date.now() };
+    session = { pc, stream, convoId, peerDid, media, announced: false, recordUri: '', rkey: '', startedAt: Date.now(), muted: false, cameraOff: false };
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
     if (local && media === 'video') local.srcObject = stream;
@@ -294,6 +384,8 @@ export async function startCall({ convoId, peerDid, media }) {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
     session = null;
+    stopClock();
+    paintCallControls();
     const dialog = $('call');
     if (dialog?.open) dialog.close();
     notify(error?.message || 'The call could not start.');
@@ -336,7 +428,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     stream = await mediaStream(media || 'audio');
     const chosen = media === 'video' ? 'video' : 'audio';
     const pc = new RTCPeerConnection({ iceServers: ICE });
-    session = { pc, stream, convoId, peerDid, media: chosen, announced: false, recordUri: '', rkey, startedAt: Date.now() };
+    session = { pc, stream, convoId, peerDid, media: chosen, announced: false, recordUri: '', rkey, startedAt: Date.now(), muted: false, cameraOff: false };
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
     if (local && chosen === 'video') local.srcObject = stream;
@@ -360,6 +452,8 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
     session = null;
+    stopClock();
+    paintCallControls();
     const dialog = $('call');
     if (dialog?.open) dialog.close();
     notify(error?.message || 'The call could not be answered.');
@@ -389,8 +483,13 @@ export async function hangUp(tell = true) {
   const local = $('call-local');
   const audio = $('call-audio');
   if (remote) remote.srcObject = null;
-  if (local) local.srcObject = null;
+  if (local) {
+    local.srcObject = null;
+    local.classList.remove('is-off');
+  }
   if (audio) audio.srcObject = null;
+  stopClock();
+  paintCallControls();
   const dialog = $('call');
   if (dialog?.open) dialog.close();
   if (tell && current?.announced && current.convoId) {
@@ -399,4 +498,9 @@ export async function hangUp(tell = true) {
     api.markConvoRead(current.convoId).catch(() => {});
   }
   if (current?.recordUri) api.deleteRecord(current.recordUri).catch(() => {});
+}
+
+if (typeof document !== 'undefined') {
+  document.getElementById('call-mute')?.addEventListener('click', () => { toggleCallMute(); });
+  document.getElementById('call-camera')?.addEventListener('click', () => { toggleCallCamera(); });
 }

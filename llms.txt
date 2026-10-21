@@ -1,15 +1,15 @@
 # LibreSky
 
-> A free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Ask @ai in the same window.
+> A free Bluesky client in the browser. Edit posts, search what people are saying, chat, and start a voice or video call. Mute and the camera stay on your side. Ask @ai in the same window, or rewrite a draft from the post box.
 
 LibreSky is open source under the MIT license. Sign in with a Bluesky account. The password stays with Bluesky. Voice and video calls run between two open LibreSky windows. Linux, Windows, and Mac builds are on the download page inside the app.
 
 ## Features
 
 - Edit posts
-- AI with @ai and @si
-- Voice calls
-- Video calls
+- AI with @ai and @si, and a rewrite in the post box
+- Voice calls, with mute and a timer
+- Video calls, and the camera can turn off
 - Chat
 - Home, Discover, and search
 - Notifications, bookmarks, and profiles

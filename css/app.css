@@ -2031,6 +2031,20 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   color: var(--blue);
 }
 .compose-dock .icon-btn:hover { background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.compose-dock .icon-btn:disabled { opacity: 0.4; }
+.compose-ai {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--blue) 8%, var(--bg));
+}
+.compose-ai[hidden] { display: none; }
+.compose-ai p { margin: 0; white-space: pre-wrap; }
+.compose-ai-actions { display: flex; gap: 8px; align-items: center; }
 .compose-dock .icon-btn[aria-expanded="true"],
 .compose-dock .icon-btn[aria-pressed="true"],
 .chat-tools .icon-btn[aria-expanded="true"],
@@ -2647,8 +2661,29 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
 .lane-move .ico { width: 16px; height: 16px; }
 .lanes-save { width: 100%; margin-top: 16px; }
 #call { width: min(420px, calc(100vw - 24px)); }
-.call-stage { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.call-stage { position: relative; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 #call-title { margin: 0; font-size: 20px; text-align: center; }
+.call-clock {
+  margin: -4px 0 0;
+  text-align: center;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.call-clock[hidden] { display: none; }
+.call-controls { display: flex; justify-content: center; align-items: center; gap: 10px; }
+.call-toggle {
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+.call-toggle[hidden] { display: none; }
+.call-toggle .slash { display: none; stroke: var(--danger); }
+.call-toggle[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--bg);
+}
+.call-toggle[aria-pressed="true"] .slash { display: block; }
 .call-voice {
   display: grid;
   place-items: center;
@@ -2661,7 +2696,8 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
 }
 .call-voice .ico { width: 48px; height: 48px; }
 .call-stage video { width: 100%; max-height: 50vh; border-radius: 12px; background: #000; }
-#call-local { position: absolute; right: 24px; bottom: 88px; width: 120px; max-height: 90px; border: 2px solid #fff; }
+#call-local { position: absolute; right: 24px; bottom: 148px; width: 120px; max-height: 90px; border: 2px solid #fff; }
+#call-local.is-off { opacity: 0.35; }
 .call-stage .danger { align-self: center; min-width: 140px; }
 body.ringing { padding-bottom: 120px; }
 .incoming-call {

@@ -2,10 +2,12 @@
 
 The paint is still wet. This is the record of the alpha you can [open today](https://thewhitewitchtm.github.io/LibreSky/).
 
-Dates follow the days the work landed in the repository. The app is the source of truth. A longer tour lives in the [README](README.md).
+Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
 ## 22 October 2026
 
+- A call can mute the microphone, turn the camera off, and show how long it has been connected. Mute and the camera stay on your side of the call.
+- The post box can ask AI Assist to rewrite the draft. Use this keeps the rewrite. Dismiss leaves the draft. The draft is sent only to the provider you picked.
 - Opening a message request shows the preview Bluesky already sent, even when the message list comes back empty. Accept and delete stay on that screen.
 - AI Assist answers with a free public model when no key is saved. Settings lists Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, and Pollinations, each with a link to get a key.
 

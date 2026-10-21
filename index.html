@@ -312,6 +312,13 @@
         </select>
       </label>
       <div id="compose-picker" hidden></div>
+      <div id="compose-ai" class="compose-ai" hidden>
+        <p id="compose-ai-text"></p>
+        <div class="compose-ai-actions">
+          <button type="button" class="primary small" data-act="use-ai-draft">Use this</button>
+          <button type="button" class="text-btn" data-act="dismiss-ai-draft">Dismiss</button>
+        </div>
+      </div>
       <div class="compose-dock">
         <div class="tool-row">
           <label class="icon-btn" aria-label="Add images" data-tip="Images">
@@ -333,6 +340,9 @@
           </button>
           <button type="button" class="icon-btn" data-act="attach" aria-label="Attach a feed, list, or starter pack" data-tip="Feed, list, or pack">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5.2h16v2.1H4V5.2zm0 5.7h16v2.1H4v-2.1zm0 5.8h10.2v2.1H4V16.7z"/></svg>
+          </button>
+          <button type="button" class="icon-btn" data-act="compose-ai" aria-label="Rewrite with AI" data-tip="Rewrite with AI">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8 13.6 8 19 9.2 13.6 10.8 12 16.2 10.4 10.8 5 9.2 10.4 8 12 2.8zm6.2 9.2.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></svg>
           </button>
           <button type="button" class="icon-btn style-btn" data-act="style" data-style="bold" aria-pressed="false" aria-label="Bold" data-tip="Bold">B</button>
           <button type="button" class="icon-btn style-btn" data-act="style" data-style="italic" aria-pressed="false" aria-label="Italic" data-tip="Italic">I</button>
@@ -497,6 +507,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <p>Posts, Replies, Media, and Likes use that same row as Home. Feeds, lists, and starter packs you attach are added on that row. The … there is the menu for that profile.</p>
       <h3>Writing</h3>
       <p>The mic beside Post types what you say into the box. Tap it again to stop. Chrome and Edge can dictate.</p>
+      <p>The spark on the writing bar asks AI Assist to rewrite the draft. Use this keeps the rewrite. Dismiss leaves your words. The draft is sent only to the provider you picked.</p>
       <p>A link on its own as the last line becomes the preview and does not count toward the 300 characters. Delete that line and the preview goes with it. Other links stay in the post and count as a short form.</p>
       <h3>Top of the page</h3>
       <p>The LibreSky mark sits at the very left. The menu beside it holds Help, Config, and Downloads, and Support development sits under a line of its own. Help and Config are page scoped. A red alpha sits next to that menu. Open it for Debug, which keeps AI Assist replies and errors, and for Design view, which outlines the page. Click the alpha again to close it. Then the back arrow, the section symbol, and the page name. Home, Search, and the other sections stay in the left sidebar. Top, a blue button with an up arrow, sits just left of Post and returns to the top of the page. Post sits at the right edge. The symbol matches that section in the sidebar, such as the house for Home or the person for Profile. Every page except Home has a back arrow before the symbol. Back stays inside LibreSky and returns to the page you came from.</p>
@@ -508,6 +519,8 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
           <span>MIT license. Read the source, report an issue, or fork it.</span>
         </span>
       </a>
+      <h3>Calls</h3>
+      <p>Voice and video start from a chat, a profile, or the Calls page. Both people need LibreSky open. Mute and the camera stay on your side. The time shows once the call connects. Hang up ends it.</p>
       <h3>Follows</h3>
       <p>Open Settings and choose Follows to follow people back and to clean up accounts you followed. Auto follow back can skip accounts that look like spam. Cleanup shows why an account looks off, can unfollow the likely spam, and can follow that batch again.</p>
       <h3>Also here</h3>
@@ -546,7 +559,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
         <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. The session cannot follow you: an app password is shown once and is not a vault, and an OAuth sign-in is tied to this browser. Home feed choices, thread order, and muted words are saved with Bluesky’s private preferences, so the official app can use the feed and thread choices and the muted words. Muted words also have a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
-        <p>An unsent post draft (libresky.draft), words you finish with Tab (libresky.words), and an AI account (libresky.ai) are saved on your account as private preferences, with a copy for the signed-in account in this browser. Private preferences travel with the login. They are not public posts. The AI key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check in Settings, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
+        <p>An unsent post draft (libresky.draft), words you finish with Tab (libresky.words), and an AI account (libresky.ai) are saved on your account as private preferences, with a copy for the signed-in account in this browser. Private preferences travel with the login. They are not public posts. The AI key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check in Settings, Rewrite in the post box, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>
       </article>
       <article id="legal-terms" hidden>
@@ -554,7 +567,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
         <p>LibreSky is an independent client for Bluesky and the AT Protocol. It is not the official Bluesky app. You need a Bluesky account, and Bluesky’s own rules still apply to that account.</p>
         <p>The app is provided as is, under the MIT License. Do not use it to break the law or Bluesky’s rules.</p>
         <p>Voice and video calls connect two LibreSky browsers. Both people need this app open. A strict network can block the call.</p>
-        <p>If you add an AI account, questions you ask with @ai, @si, the AI page, or AI Assist on a profile or post are sent to that provider. LibreSky is not the provider.</p>
+        <p>If you add an AI account, questions you ask with @ai, @si, the AI page, Rewrite in the post box, or AI Assist on a profile or post are sent to that provider. LibreSky is not the provider.</p>
       </article>
     </form>
   </dialog>
@@ -570,8 +583,17 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <video id="call-local" autoplay playsinline muted hidden></video>
       <audio id="call-audio" autoplay></audio>
       <p id="call-status">Calling…</p>
-      <p class="dim">The other person needs LibreSky open. Accept or decline an incoming call from the banner. Hang up ends the call.</p>
-      <button type="button" class="danger" id="call-hangup">Hang up</button>
+      <p id="call-clock" class="call-clock" hidden>0:00</p>
+      <p class="dim">The other person needs LibreSky open. Mute and the camera stay on your side. Hang up ends the call.</p>
+      <div class="call-controls">
+        <button type="button" class="icon-btn call-toggle" id="call-mute" aria-pressed="false" aria-label="Mute microphone" data-tip="Mute">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 3.5a2.8 2.8 0 0 1 2.8 2.8V11a2.8 2.8 0 0 1-5.6 0V6.3A2.8 2.8 0 0 1 12 3.5z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 11a5 5 0 0 0 10 0M12 16v3.2"/><path class="slash" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 5l14 14"/></svg>
+        </button>
+        <button type="button" class="icon-btn call-toggle" id="call-camera" aria-pressed="false" aria-label="Turn camera off" data-tip="Camera" hidden>
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7.2A1.7 1.7 0 0 1 5.7 5.5h8.1A1.7 1.7 0 0 1 15.5 7.2v9.6a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 16.8V7.2zm11.5 2.1 4-2.3v10l-4-2.3v-5.4z"/><path class="slash" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 5l14 14"/></svg>
+        </button>
+        <button type="button" class="danger" id="call-hangup">Hang up</button>
+      </div>
     </div>
   </dialog>
 
