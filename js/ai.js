@@ -42,6 +42,61 @@ export function clearAi() {
   localStorage.removeItem(AI_KEY);
 }
 
+const AI_LOG_KEY = 'libresky.aiLog';
+const aiListeners = new Set();
+
+function readAiLog() {
+  try {
+    const raw = sessionStorage.getItem(AI_LOG_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export function aiLog() {
+  return readAiLog();
+}
+
+export function clearAiLog() {
+  try { sessionStorage.removeItem(AI_LOG_KEY); } catch { /* this tab can still forget the list in memory */ }
+  aiListeners.forEach((fn) => { try { fn([]); } catch { /* a listener can fail on its own */ } });
+}
+
+export function subscribeAiLog(fn) {
+  aiListeners.add(fn);
+  return () => aiListeners.delete(fn);
+}
+
+function scrubLog(value, key) {
+  let text = String(value || '');
+  if (key && text.includes(key)) text = text.split(key).join('[key]');
+  return text.slice(0, 1500);
+}
+
+function pushAiLog(entry) {
+  const next = [entry, ...readAiLog()].slice(0, 80);
+  try { sessionStorage.setItem(AI_LOG_KEY, JSON.stringify(next)); } catch { /* the open panel still receives this call */ }
+  aiListeners.forEach((fn) => { try { fn(next); } catch { /* a listener can fail on its own */ } });
+}
+
+function logAiCall({ account, note, started, ok, asked = '', text = '', error = '', key = '' }) {
+  const secret = key || account?.apiKey || '';
+  pushAiLog({
+    at: new Date().toISOString(),
+    note: String(note || 'call').slice(0, 40),
+    provider: account?.provider || '',
+    model: account?.model || '',
+    kind: account?.kind || '',
+    ok: Boolean(ok),
+    ms: Math.max(0, Date.now() - started),
+    asked: scrubLog(asked, secret).slice(0, 400),
+    text: ok ? scrubLog(text, secret) : '',
+    error: ok ? '' : scrubLog(error, secret),
+  });
+}
+
 export function aiReady(config) {
   return Boolean(config?.apiKey && config?.model && config?.kind);
 }
@@ -150,56 +205,74 @@ async function readBody(res, key) {
   return replyText(data);
 }
 
-export async function askAi(config, messages, signal) {
-  const account = prepareAi(config);
+export async function askAi(config, messages, signal, note = '') {
+  const started = Date.now();
+  let account = null;
   const history = (messages || []).filter((item) => item && item.content).slice(-12);
-  if (!history.length) throw new Error('Write a question first.');
-  const key = account.apiKey;
-  let url = '';
-  let headers = { 'Content-Type': 'application/json' };
-  let body = null;
-  if (account.kind === 'gemini') {
-    url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(account.model)}:generateContent`;
-    headers['x-goog-api-key'] = key;
-    const system = history.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
-    const contents = history.filter((item) => item.role !== 'system').map((item) => ({
-      role: item.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: String(item.content || '') }],
-    }));
-    body = {
-      contents,
-      generationConfig: { maxOutputTokens: 800 },
-    };
-    if (system) body.systemInstruction = { parts: [{ text: system }] };
-  } else if (account.kind === 'responses') {
-    url = `${account.base}/responses`;
-    headers.Authorization = `Bearer ${key}`;
-    body = { model: account.model, input: responsesInput(history), max_output_tokens: 800 };
-  } else {
-    url = `${account.base}/chat/completions`;
-    headers.Authorization = `Bearer ${key}`;
-    body = {
-      model: account.model,
-      messages: history.map((item) => ({
-        role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
-        content: String(item.content || ''),
-      })),
-    };
-    if (account.provider === 'openai') body.max_completion_tokens = 2000;
-    else body.max_tokens = 800;
-  }
-  let res;
+  const asked = [...history].reverse().find((item) => item.role === 'user')?.content || '';
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      redirect: 'error',
-      signal,
-    });
+    account = prepareAi(config);
+    if (!history.length) throw new Error('Write a question first.');
+    const key = account.apiKey;
+    let url = '';
+    let headers = { 'Content-Type': 'application/json' };
+    let body = null;
+    if (account.kind === 'gemini') {
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(account.model)}:generateContent`;
+      headers['x-goog-api-key'] = key;
+      const system = history.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
+      const contents = history.filter((item) => item.role !== 'system').map((item) => ({
+        role: item.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: String(item.content || '') }],
+      }));
+      body = {
+        contents,
+        generationConfig: { maxOutputTokens: 800 },
+      };
+      if (system) body.systemInstruction = { parts: [{ text: system }] };
+    } else if (account.kind === 'responses') {
+      url = `${account.base}/responses`;
+      headers.Authorization = `Bearer ${key}`;
+      body = { model: account.model, input: responsesInput(history), max_output_tokens: 800 };
+    } else {
+      url = `${account.base}/chat/completions`;
+      headers.Authorization = `Bearer ${key}`;
+      body = {
+        model: account.model,
+        messages: history.map((item) => ({
+          role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
+          content: String(item.content || ''),
+        })),
+      };
+      if (account.provider === 'openai') body.max_completion_tokens = 2000;
+      else body.max_tokens = 800;
+    }
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        redirect: 'error',
+        signal,
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      throw new Error('This browser could not reach that account. Check the address and the key.');
+    }
+    const text = await readBody(res, key);
+    logAiCall({ account, note, started, ok: true, asked, text });
+    return text;
   } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    throw new Error('This browser could not reach that account. Check the address and the key.');
+    logAiCall({
+      account,
+      note,
+      started,
+      ok: false,
+      asked,
+      error: error?.name === 'AbortError' ? 'Timed out or cancelled.' : (error?.message || 'The account did not answer.'),
+      key: account?.apiKey || config?.apiKey || '',
+    });
+    throw error;
   }
-  return readBody(res, key);
 }

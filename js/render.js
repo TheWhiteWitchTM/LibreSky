@@ -1,3 +1,4 @@
+import { aiReady, loadAi } from './ai.js';
 import { icon } from './icons.js';
 import {
   accountGone,
@@ -69,6 +70,11 @@ function verifiedMark(actor) {
   }
   if (domain) parts.push(checkMark('Verified domain', 'domain'));
   return parts.join('');
+}
+
+function aiPostAction() {
+  if (!aiReady(loadAi())) return '';
+  return `<button type="button" class="action ai" data-act="ai-post" aria-label="AI Assist">${icon('spark')}<span class="sr-name" aria-hidden="true">AI Assist</span></button>`;
 }
 
 function action(name, label, on, count, listAct) {
@@ -293,6 +299,7 @@ export function postHtml(item, options = {}) {
           ${action('like', 'Like', liked, number.like, 'likes')}
           ${action('bookmark', 'Bookmark', saved, 0)}
           ${action('share', 'Share', false, 0)}
+          ${aiPostAction()}
         </div>
       </div>
     </div>

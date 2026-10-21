@@ -104,7 +104,7 @@
 <body>
   <a class="skip" href="#view">Skip to posts</a>
   <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A free Bluesky client. Edit, AI, voice, video, and chat.</p></div></div>
-  <header class="app-top">
+  <header class="app-top" data-design-label="header">
     <a class="top-mark" href="#/" aria-label="LibreSky home">
       <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0085ff"/><circle cx="22" cy="11" r="3.2" fill="#fff"/><path d="M6 21c4-4 7-4 11 0s7 4 11 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
     </a>
@@ -132,19 +132,23 @@
         </a>
       </div>
     </div>
-    <button type="button" class="alpha" id="alpha-mark" aria-expanded="false">
-      <span class="alpha-door" aria-hidden="true">
-        <span class="alpha-door-string"></span>
-        <span class="alpha-door-card">
+    <div class="alpha-wrap">
+      <button type="button" class="alpha" id="alpha-mark" aria-expanded="false" aria-haspopup="menu" aria-controls="alpha-menu">
+        <span class="alpha-glyph" aria-hidden="true">α</span>
+        <span class="sr-name">Alpha</span>
+      </button>
+      <div class="alpha-door" id="alpha-menu" role="menu" aria-label="Alpha" aria-hidden="true">
+        <span class="alpha-door-string" aria-hidden="true"></span>
+        <div class="alpha-door-card">
           <span class="alpha-door-kicker">Door</span>
           <strong>ALPHA</strong>
           <span class="alpha-door-line">Come on in</span>
           <span class="alpha-door-note">The paint is still wet</span>
-        </span>
-      </span>
-      <span class="alpha-glyph" aria-hidden="true">α</span>
-      <span class="sr-name">Alpha</span>
-    </button>
+          <button type="button" class="alpha-item" role="menuitem" data-act="alpha-debug">Debug</button>
+          <button type="button" class="alpha-item" role="menuitem" id="alpha-design" data-act="alpha-design" aria-pressed="false">Design view</button>
+        </div>
+      </div>
+    </div>
     <div class="headline">
       <button type="button" class="icon-btn" id="back" hidden aria-label="Back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/></svg></button>
       <span class="page-icon" id="page-icon" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg></span>
@@ -155,7 +159,7 @@
     </div>
   </header>
   <div class="shell">
-    <nav class="left" aria-label="Primary">
+    <nav class="left" aria-label="Primary" data-design-label="nav">
       <a class="brand" href="#/" aria-label="LibreSky home">
         <span class="brand-name">Libre<span>Sky</span></span>
       </a>
@@ -166,9 +170,9 @@
       <a class="nav-link" data-nav="bookmarks" href="#/bookmarks" aria-label="Bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
       <a class="nav-link" data-nav="profile" data-no-hover href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
       <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
-      <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI">
+      <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI Assist">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8 13.6 8 19 9.2 13.6 10.8 12 16.2 10.4 10.8 5 9.2 10.4 8 12 2.8zm6.2 9.2.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></svg>
-        <span class="label">AI</span>
+        <span class="label">AI Assist</span>
       </a>
       <button type="button" class="nav-link" id="more-btn" data-nav="more" data-act="nav-more" aria-label="More">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.75a9.25 9.25 0 1 0 0 18.5 9.25 9.25 0 0 0 0-18.5zm0 2.15a7.1 7.1 0 1 1 0 14.2 7.1 7.1 0 0 1 0-14.2z"/><circle cx="8.15" cy="12" r="1.35" fill="currentColor"/><circle cx="12" cy="12" r="1.35" fill="currentColor"/><circle cx="15.85" cy="12" r="1.35" fill="currentColor"/></svg>
@@ -181,7 +185,7 @@
       </button>
     </nav>
 
-    <main class="center">
+    <main class="center" data-design-label="feed">
       <header class="sticky-head">
         <div class="tabs" id="tabs" hidden></div>
       </header>
@@ -204,7 +208,7 @@
       </div>
     </main>
 
-    <aside class="right">
+    <aside class="right" data-design-label="rail">
       <form id="rail-search" class="search-form" role="search">
         <label class="search">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg>
@@ -215,7 +219,7 @@
     </aside>
   </div>
 
-  <nav class="tabbar" aria-label="Mobile">
+  <nav class="tabbar" aria-label="Mobile" data-design-label="tabs">
     <a href="#/" data-nav="home" aria-label="Home"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg></a>
     <a href="#/search" data-nav="search" aria-label="Search"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg></a>
     <a href="#/notifications" data-nav="notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg></a>
@@ -489,7 +493,7 @@ An AI account you save is asked from this browser.</p>
       <p>The mic beside Post types what you say into the box. Tap it again to stop. Chrome and Edge can dictate.</p>
       <p>A link on its own as the last line becomes the preview and does not count toward the 300 characters. Delete that line and the preview goes with it. Other links stay in the post and count as a short form.</p>
       <h3>Top of the page</h3>
-      <p>The LibreSky mark sits at the very left. The menu beside it holds Help, Config, and Downloads, and Support development sits under a line of its own. Help and Config are page scoped. A red alpha sits next to that menu, then the back arrow, the section symbol, and the page name. Home, Search, and the other sections stay in the left sidebar. Post sits at the right edge. The symbol matches that section in the sidebar, such as the house for Home or the person for Profile. Every page except Home has a back arrow before the symbol. Back stays inside LibreSky and returns to the page you came from.</p>
+      <p>The LibreSky mark sits at the very left. The menu beside it holds Help, Config, and Downloads, and Support development sits under a line of its own. Help and Config are page scoped. A red alpha sits next to that menu. Open it for Debug, which keeps AI Assist replies and errors, and for Design view, which outlines the page. Then the back arrow, the section symbol, and the page name. Home, Search, and the other sections stay in the left sidebar. Post sits at the right edge. The symbol matches that section in the sidebar, such as the house for Home or the person for Profile. Every page except Home has a back arrow before the symbol. Back stays inside LibreSky and returns to the page you came from.</p>
       <a class="oss" href="https://github.com/TheWhiteWitchTM/LibreSky" target="_blank" rel="noopener noreferrer">
         <svg class="oss-mark" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
         <span class="oss-copy">
@@ -534,7 +538,7 @@ An AI account you save is asked from this browser.</p>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
         <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. An unsent post draft (libresky.draft) and words you finish with Tab (libresky.words) stay in this browser. Home feed choices and thread order are saved with Bluesky’s preferences, so the official app can use them. Muted words are saved as Bluesky muted words, with a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
-        <p>An AI account (libresky.ai) stays in this browser. The key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, or Check.</p>
+        <p>An AI account (libresky.ai) stays in this browser. The key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check in Settings, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>
       </article>
       <article id="legal-terms" hidden>
@@ -542,7 +546,7 @@ An AI account you save is asked from this browser.</p>
         <p>LibreSky is an independent client for Bluesky and the AT Protocol. It is not the official Bluesky app. You need a Bluesky account, and Bluesky’s own rules still apply to that account.</p>
         <p>The app is provided as is, under the MIT License. Do not use it to break the law or Bluesky’s rules.</p>
         <p>Voice and video calls connect two LibreSky browsers. Both people need this app open. A strict network can block the call.</p>
-        <p>If you add an AI account, questions you ask with @ai, @si, or the AI page are sent to that provider. LibreSky is not the provider.</p>
+        <p>If you add an AI account, questions you ask with @ai, @si, the AI page, or AI Assist on a profile or post are sent to that provider. LibreSky is not the provider.</p>
       </article>
     </form>
   </dialog>
@@ -570,7 +574,23 @@ An AI account you save is asked from this browser.</p>
   <div id="hovercard" class="hovercard" popover="manual" hidden></div>
   <div id="float-tip" class="float-tip" popover="manual" role="tooltip"></div>
   <div id="menu" class="menu" hidden></div>
+  <p id="design-readout" class="design-readout" hidden></p>
+  <div id="posted-bar" class="posted-bar" hidden role="status"></div>
   <div id="toasts" role="status" aria-live="polite"></div>
+  <dialog id="debug-log">
+    <form method="dialog">
+      <div class="compose-bar">
+        <h2>Debug</h2>
+        <div class="compose-bar-end">
+          <button type="button" class="text-btn" id="debug-copy">Copy</button>
+          <button type="button" class="text-btn" id="debug-clear">Clear</button>
+          <button type="submit" class="text-btn" id="debug-close">Close</button>
+        </div>
+      </div>
+      <p class="dim debug-lead">AI Assist calls from this tab. Each row is where you asked, which account answered, how long it took, the question, and the reply or the error. The key is not stored.</p>
+      <div id="debug-body" class="debug-body"></div>
+    </form>
+  </dialog>
   <noscript><p class="empty">LibreSky needs JavaScript to reach Bluesky.</p></noscript>
   <script>
     if ('serviceWorker' in navigator) {

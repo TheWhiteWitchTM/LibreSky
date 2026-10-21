@@ -50,7 +50,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, aiReady, askAi, clearAi, loadAi, prepareAi, providerById, saveAi } from './ai.js';
+import { AI_PROVIDERS, AI_SYSTEM, aiLog, aiReady, askAi, clearAi, clearAiLog, loadAi, prepareAi, providerById, saveAi, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, toShortUrl, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -140,6 +140,23 @@ function toast(message) {
   node.textContent = message;
   $('toasts').append(node);
   setTimeout(() => node.remove(), 3400);
+}
+
+let postedTimer = 0;
+
+function showPosted(message) {
+  const bar = $('posted-bar');
+  if (!bar) return;
+  bar.textContent = message;
+  bar.hidden = false;
+  bar.classList.remove('is-on');
+  void bar.offsetWidth;
+  bar.classList.add('is-on');
+  clearTimeout(postedTimer);
+  postedTimer = setTimeout(() => {
+    bar.hidden = true;
+    bar.classList.remove('is-on');
+  }, 6000);
 }
 
 function remember() {
@@ -772,7 +789,7 @@ async function loadRail() {
 }
 
 const FRESH_POLL_MS = 90000;
-const FRESH_PILL_MS = 60000;
+const FRESH_PILL_MS = 12000;
 const homeWatch = { timer: 0, token: 0, uris: new Set(), pending: [], collapsed: false, collapseTimer: 0, checked: 0 };
 
 function stopHomeWatch() {
@@ -819,10 +836,6 @@ function hideFresh() {
   pill.innerHTML = '';
 }
 
-function freshUpdateLabel(count) {
-  return count === 1 ? 'Update · 1 new post' : `Update · ${count} new posts`;
-}
-
 function paintFreshLink() {
   const view = $('view');
   if (!view) return;
@@ -832,19 +845,19 @@ function paintFreshLink() {
     link?.remove();
     return;
   }
-  const label = freshUpdateLabel(count);
   if (!link) {
     link = document.createElement('button');
     link.type = 'button';
     link.className = 'fresh-update';
     link.dataset.act = 'fresh-update';
-    const lead = view.querySelector('.home-lead');
-    const prompt = view.querySelector('.prompt');
-    if (lead) lead.insertAdjacentElement('afterend', link);
-    else if (prompt) prompt.insertAdjacentElement('afterend', link);
-    else view.prepend(link);
   }
-  if (link.textContent !== label) link.textContent = label;
+  const field = view.querySelector('.ai-inline');
+  const lead = view.querySelector('.home-lead');
+  if (field) field.insertAdjacentElement('afterend', link);
+  else if (lead) lead.append(link);
+  else view.prepend(link);
+  if (link.textContent !== 'Updated') link.textContent = 'Updated';
+  link.setAttribute('aria-label', count === 1 ? 'Updated, 1 new post' : `Updated, ${count} new posts`);
 }
 
 function revealFresh() {
@@ -1161,17 +1174,17 @@ async function showBrowse() {
   }
 }
 
+const AI_NAME = 'AI Assist';
+
 function aiStripHtml() {
-  const saved = loadAi();
-  if (aiReady(saved)) {
-    const label = providerById(saved.provider).label;
-    return `<form class="ai-inline" id="ai-inline"><span class="ai-inline-label">${escapeHtml(label)}</span><input name="ask" maxlength="2000" placeholder="Ask ${escapeHtml(label)}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${escapeHtml(label)}"><button class="primary small" type="submit">Ask</button></form>`;
-  }
-  return `<a class="ai-inline offer" href="#/ai"><strong>Gemini</strong><span>Free with an API key. This is the default assistant on Home and your profile.</span></a>`;
+  if (!aiReady(loadAi())) return '';
+  return `<form class="ai-inline" id="ai-inline"><span class="ai-inline-label">${AI_NAME}</span><input name="ask" maxlength="2000" placeholder="Ask ${AI_NAME}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${AI_NAME}"><button class="primary small" type="submit">Ask</button></form>`;
 }
 
 function homeLead(banner) {
-  return `<div class="home-lead">${banner || ''}${aiStripHtml()}</div>`;
+  const ask = aiStripHtml();
+  if (!banner && !ask) return '';
+  return `<div class="home-lead">${banner || ''}${ask}</div>`;
 }
 
 function homePrompt() {
@@ -1912,10 +1925,9 @@ async function showProfile(actor, tab) {
     const blank = pinHtml || postsHtml
       ? postsHtml
       : (feed.cursor ? '<p class="dim lang-wait">Loading posts…</p>' : emptyHtml('No posts', 'Nothing in this tab yet.'));
-    const mine = signedIn() && profile.did === myDid();
     shownProfile = profile;
     forgetStrips($('view'));
-    $('view').innerHTML = `${profileHtml(profile)}${mine ? aiStripHtml() : ''}<div id="profile-tabs"></div>${pinHtml}${blank}`;
+    $('view').innerHTML = `${profileHtml(profile)}<div id="profile-tabs"></div>${pinHtml}${blank}`;
     paintProfileTabs();
     $('profile-action').innerHTML = action;
     remember();
@@ -2042,16 +2054,22 @@ async function loadProfileShelf(profile, token) {
   }
 }
 
+function profileAiButton() {
+  if (!aiReady(loadAi())) return '';
+  return `<button type="button" class="outline ai-check" data-act="ai-profile">${icon('spark')}<span>AI Assist</span></button>`;
+}
+
 function profileAction(profile) {
   const more = `<button type="button" class="profile-more" data-act="profile-menu" aria-label="Profile menu">${icon('more')}</button>`;
-  if (!signedIn()) return `<span class="profile-actions"><button type="button" class="primary small" data-act="signin">Sign in</button>${more}</span>`;
-  if (profile.did === myDid()) return `<span class="profile-actions"><button type="button" class="outline" data-act="edit-profile">Edit profile</button>${more}</span>`;
+  const ai = profileAiButton();
+  if (!signedIn()) return `<span class="profile-actions"><button type="button" class="primary small" data-act="signin">Sign in</button>${ai}${more}</span>`;
+  if (profile.did === myDid()) return `<span class="profile-actions"><button type="button" class="outline" data-act="edit-profile">Edit profile</button>${ai}${more}</span>`;
   const following = profile.viewer?.following || '';
   const blocking = profile.viewer?.blocking || '';
   const follow = blocking
     ? `<button type="button" class="danger" data-act="block-profile" data-did="${escapeHtml(profile.did)}" data-blocking="${escapeHtml(blocking)}">Blocked</button>`
     : `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${escapeHtml(profile.did)}" data-following="${escapeHtml(following)}">${following ? 'Following' : 'Follow'}</button>`;
-  return `<span class="profile-actions">${follow}${more}</span>`;
+  return `<span class="profile-actions">${ai}${follow}${more}</span>`;
 }
 
 function homeListOk(list) {
@@ -2326,6 +2344,7 @@ const aiDrafts = new Map();
 let aiThread = [];
 let aiSeq = 0;
 let aiPending = '';
+let aiPendingNote = 'Page';
 
 function aiSettingsHtml() {
   const saved = loadAi();
@@ -2335,10 +2354,10 @@ function aiSettingsHtml() {
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
   const keyHint = saved ? 'Saved on this browser. Type a new key to replace it.' : 'Paste the key from that account';
   const status = saved
-    ? `${known.label} is saved on this browser${saved.model ? ` · ${saved.model}` : ''}.`
-    : 'Gemini is the default. A free key from Google AI Studio turns on the AI page, Home, and your profile.';
+    ? `${AI_NAME} is on for this browser.`
+    : `${AI_NAME} is off until a key is saved.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  return `<p class="dim">Gemini is free with a key and is selected first. Any saved account, including Grok, replaces it on the AI page, Home, and your profile. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
+  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
     <form id="ai-form" class="ai-form">
       <label>Provider
         <select id="ai-provider">${options}</select>
@@ -2392,7 +2411,7 @@ function saveAiForm(event) {
   event.preventDefault();
   try {
     const next = saveAi(readAiForm());
-    toast(`${providerById(next.provider).label} saved on this browser`);
+    toast(`${AI_NAME} saved on this browser`);
     if (parseHash()[0] === 'settings') showSettings();
   } catch (error) {
     toast(error.message);
@@ -2408,8 +2427,8 @@ async function checkAiForm() {
     await askAi(account, [
       { role: 'system', content: AI_SYSTEM },
       { role: 'user', content: 'Reply with ok.' },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
-    toast(`${providerById(account.provider).label} replied.`);
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Settings');
+    toast(`${AI_NAME} replied.`);
   } catch (error) {
     if (error?.name === 'AbortError') toast('The account took too long.');
     else toast(error.message || 'The account did not answer.');
@@ -2878,31 +2897,29 @@ async function loadBlockedAccounts(token = generation) {
 
 function showAi() {
   generation += 1;
-  setChrome({ title: 'AI', nav: 'ai', back: true });
+  setChrome({ title: AI_NAME, nav: 'ai', back: true });
   const saved = loadAi();
   const ready = aiReady(saved);
-  const known = providerById(saved?.provider || 'gemini');
   const turns = aiThread.map((turn) => (turn.role === 'assistant'
-    ? assistantHtml(turn.content, { kicker: known.label })
+    ? assistantHtml(turn.content, { kicker: AI_NAME })
     : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
   const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
-      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${escapeHtml(known.label)}"></textarea></div>
+      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"></textarea></div>
       <button class="primary small" type="submit">Ask</button>
       <p class="chat-hint"><span class="chat-hint-keys">Enter asks. Shift+Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line.</span></p>
     </form>`;
   if (ready) {
-    const empty = turns ? '' : `<p class="dim ai-empty">Ask ${escapeHtml(known.label)} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
+    const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
     $('view').innerHTML = `<section class="settings ai-doc ai-live">
-      <p class="ai-ready-line"><strong>${escapeHtml(known.label)}</strong> is on${saved.model ? ` · ${escapeHtml(saved.model)}` : ''}. <a class="text-link" href="#/settings">Settings</a></p>
+      <p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. <a class="text-link" href="#/settings">Settings</a></p>
       <div class="messages ai-thread">${empty}${turns}</div>
       ${askForm}
     </section>`;
   } else {
     $('view').innerHTML = `<section class="settings ai-doc">
-      <h2>Gemini</h2>
-      <p>Gemini is the default assistant. A key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> is free. After you save it, this page becomes a chat, and Home and your profile ask it too.</p>
-      <p>A Grok key, an OpenAI key, or any other account you save is used instead. Nothing is sent until a key is saved.</p>
-      <p><a class="text-link" href="#/settings">Add the key in Settings</a></p>
+      <h2>${AI_NAME}</h2>
+      <p>${AI_NAME} stays off until you save a key in Settings. After that, this page is a chat, Home has an ask field, and profiles and posts get a check. Nothing is sent until a key is saved.</p>
+      <p><a class="text-link" href="#/settings">Add a key in Settings</a></p>
       <h2>@ai and @si</h2>
       <p>@ai and @si are the same tag. They are not Bluesky accounts. In a chat, a message that contains the tag asks the account you saved. That message is not sent to the other person. The answer stays on the chat screen until you press Send.</p>
       <p>A tag in a post is only a highlight. Posting does not call the model.</p>
@@ -2920,6 +2937,8 @@ function showAi() {
 }
 
 async function askOnPage(text) {
+  const note = aiPendingNote;
+  aiPendingNote = 'Page';
   const saved = loadAi();
   if (!aiReady(saved)) {
     toast('Add an AI account in Settings to use @ai and @si.');
@@ -2940,7 +2959,7 @@ async function askOnPage(text) {
       { role: 'system', content: AI_SYSTEM },
       ...prior,
       { role: 'user', content: text },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, note);
     if (seq !== aiSeq) return;
     aiThread = [...aiThread, { role: 'user', content: text }, { role: 'assistant', content: answer }].slice(-40);
     if (parseHash()[0] === 'ai') showAi();
@@ -3273,6 +3292,8 @@ function route() {
   noteNav();
   closeMenu();
   closeAppMenu();
+  closeAlphaMenu();
+  if (designOn()) paintDesignReadout();
   hideSuggest();
   closeHover();
   stopSpeech();
@@ -3885,8 +3906,8 @@ function scheduleSuggest(area) {
 function aiSuggestRows(query) {
   const q = String(query || '').toLowerCase();
   const rows = [];
-  if ('ai'.startsWith(q)) rows.push(suggestRow(rows.length, '@ai', `AI<span class="handle">@ai · your account</span>`));
-  if ('si'.startsWith(q)) rows.push(suggestRow(rows.length, '@si', `AI<span class="handle">@si · your account</span>`));
+  if ('ai'.startsWith(q)) rows.push(suggestRow(rows.length, '@ai', `${AI_NAME}<span class="handle">@ai</span>`));
+  if ('si'.startsWith(q)) rows.push(suggestRow(rows.length, '@si', `${AI_NAME}<span class="handle">@si</span>`));
   return rows;
 }
 
@@ -4280,7 +4301,8 @@ async function publish(event) {
     }
     if (!reply && !quote && !editing) saveDraft('');
     dialog.close();
-    toast(`${editing ? 'Updated' : 'Posted'}.${gateWarning}`);
+    showPosted(editing ? 'Updated' : 'Posted');
+    if (gateWarning.trim()) toast(gateWarning.trim());
     route();
   } catch (error) {
     toast(error.message);
@@ -4309,11 +4331,7 @@ function toggleAppMenu() {
     return;
   }
   closeMenu();
-  const mark = document.getElementById('alpha-mark');
-  if (mark?.classList.contains('is-open')) {
-    mark.classList.remove('is-open');
-    mark.setAttribute('aria-expanded', 'false');
-  }
+  closeAlphaMenu();
   hideTip();
   menu.hidden = false;
   button.setAttribute('aria-expanded', 'true');
@@ -4383,7 +4401,7 @@ function openMoreMenu(anchor) {
   const overflow = sidebarOpen ? [] : [
     { id: 'go-bookmarks', label: 'Bookmarks' },
     { id: 'go-calls', label: 'Calls' },
-    { id: 'go-ai', label: 'AI' },
+    { id: 'go-ai', label: 'AI Assist' },
   ];
   toggleMenu(anchor, [...overflow, ...MORE_LINKS]);
 }
@@ -5118,7 +5136,7 @@ function appendAssistant(text) {
   const id = `ai-${Date.now()}`;
   aiDrafts.set(id, text);
   const list = $('view').querySelector('.messages');
-  list?.insertAdjacentHTML('beforeend', assistantHtml(text, { id, kicker: 'Not sent · your account', actions: true }));
+  list?.insertAdjacentHTML('beforeend', assistantHtml(text, { id, kicker: `Not sent · ${AI_NAME}`, actions: true }));
   if (list) list.scrollTop = list.scrollHeight;
 }
 
@@ -5136,7 +5154,7 @@ async function askInChat(input, text) {
     const answer = await askAi(saved, [
       { role: 'system', content: AI_SYSTEM },
       { role: 'user', content: recent ? `Recent chat:\n${recent}\n\nQuestion:\n${text}` : text },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined);
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Chat');
     if (parseHash()[0] !== 'messages') return;
     appendAssistant(answer);
   } catch (error) {
@@ -6032,6 +6050,28 @@ async function onClick(event) {
     applyFresh();
     return;
   }
+  if (act === 'ai-post') {
+    event.preventDefault();
+    checkPostAi(event.target);
+    return;
+  }
+  if (act === 'ai-profile') {
+    event.preventDefault();
+    checkProfileAi();
+    return;
+  }
+  if (act === 'alpha-debug') {
+    event.preventDefault();
+    closeAlphaMenu();
+    openDebug();
+    return;
+  }
+  if (act === 'alpha-design') {
+    event.preventDefault();
+    applyDesign(!designOn());
+    closeAlphaMenu();
+    return;
+  }
   if (act === 'attach') {
     event.preventDefault();
     openAttachPicker('post');
@@ -6146,8 +6186,8 @@ async function onClick(event) {
     location.hash = quote.getAttribute('data-href');
     return;
   }
-  if (selectedText().trim() && event.target.closest('.text, .bio, .quote-text, .bubble, .snip, .said')) return;
-  if (event.target.closest('.post') && !event.target.closest('a, button')) {
+  if (selectedText().trim() && event.target.closest('.text, .bio, .quote-text, .bubble, .snip, .said, .ai-note')) return;
+  if (event.target.closest('.post') && !event.target.closest('a, button, .ai-note')) {
     const link = found.article.querySelector('.time');
     const href = link?.getAttribute('href');
     if (!href || !found.article.classList.contains('feed-post')) return;
@@ -6942,6 +6982,11 @@ function onKey(event) {
       closeAppMenu(true);
       return;
     }
+    if (document.querySelector('.alpha-wrap.is-open')) {
+      event.preventDefault();
+      closeAlphaMenu(true);
+      return;
+    }
     const menu = $('menu');
     if (menu && !menu.hidden) {
       event.preventDefault();
@@ -7038,6 +7083,7 @@ function bind() {
     closeHover();
     if (event.target?.id !== 'menu') closeMenu();
     closeAppMenu();
+    closeAlphaMenu();
     placeFresh();
   }, true);
   document.addEventListener('visibilitychange', () => {
@@ -7047,6 +7093,7 @@ function bind() {
     closeMenu();
     closeAppMenu();
     placeFresh();
+    if (designOn()) paintDesignReadout();
     measureHead();
     document.querySelectorAll('.tab-scroller').forEach((scroller) => syncStrip(scroller));
   });
@@ -7056,6 +7103,7 @@ function bind() {
     if (event.target.closest('a, button')) closeAppMenu();
   });
   document.addEventListener('click', (event) => {
+    if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
@@ -7080,6 +7128,15 @@ function bind() {
   $('lanes')?.querySelector('form')?.addEventListener('submit', (event) => event.preventDefault());
   $('legal-close')?.addEventListener('click', () => $('legal')?.close());
   $('call-hangup')?.addEventListener('click', () => hangUp(true));
+  $('debug-close')?.addEventListener('click', () => $('debug-log')?.close());
+  $('debug-clear')?.addEventListener('click', () => {
+    clearAiLog();
+    paintDebugLog();
+  });
+  $('debug-copy')?.addEventListener('click', () => copyDebugLog());
+  subscribeAiLog(() => {
+    if ($('debug-log')?.open) paintDebugLog();
+  });
   $('login-form').addEventListener('submit', (event) => {
     const box = $('app-password-box');
     if (!box.hidden && $('login-password').value) {
@@ -7273,6 +7330,7 @@ function bind() {
         return;
       }
       aiPending = text;
+      aiPendingNote = 'Home';
       if (parseHash()[0] === 'ai') showAi();
       else location.hash = '#/ai';
     }
@@ -7752,9 +7810,177 @@ function playAlphaDoor() {
   });
 }
 
+const DESIGN_KEY = 'libresky.design';
+const AI_CHECK_POST = 'You are AI Assist in LibreSky. Check the post you are given. Say what it is about, note claims you cannot verify from the text alone, and keep it to one short paragraph. Do not invent sources, names, or events. Plain text.';
+const AI_CHECK_PROFILE = 'You are AI Assist in LibreSky. Check the profile you are given. Describe how the account presents itself from the name, handle, and bio only. Do not invent a biography, job, or location. One short paragraph. Plain text.';
+
+function designOn() {
+  try { return sessionStorage.getItem(DESIGN_KEY) === '1'; } catch { return false; }
+}
+
+function paintDesignReadout() {
+  const box = $('design-readout');
+  if (!box || box.hidden) return;
+  const theme = document.documentElement.dataset.theme || 'system';
+  const route = location.hash || '#/';
+  const ai = aiReady(loadAi()) ? `${AI_NAME} on` : `${AI_NAME} off`;
+  const last = aiLog()[0];
+  const lastLine = last
+    ? `${last.ok ? 'Last reply' : 'Last error'} · ${last.note || 'call'} · ${last.ms} ms`
+    : 'No AI calls yet';
+  box.textContent = `Design · ${route} · ${window.innerWidth}×${window.innerHeight} · ${theme} · ${ai} · ${lastLine}`;
+}
+
+function applyDesign(on) {
+  if (on) document.documentElement.dataset.design = 'on';
+  else delete document.documentElement.dataset.design;
+  const button = $('alpha-design');
+  if (button) button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const box = $('design-readout');
+  if (box) {
+    box.hidden = !on;
+    if (on) paintDesignReadout();
+  }
+  try { sessionStorage.setItem(DESIGN_KEY, on ? '1' : '0'); } catch { /* the outline still follows this click */ }
+}
+
+function debugWhen(iso) {
+  const date = new Date(iso || '');
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function paintDebugLog() {
+  const body = $('debug-body');
+  if (!body) return;
+  const rows = aiLog();
+  if (!rows.length) {
+    body.innerHTML = `<p class="dim">No ${AI_NAME} calls in this tab yet. Ask on Home, check a post or a profile, or use Check in Settings. The key is not written here.</p>`;
+    return;
+  }
+  body.innerHTML = rows.map((row) => {
+    const meta = [row.provider, row.model, row.kind, row.ms != null ? `${row.ms} ms` : ''].filter(Boolean).join(' · ');
+    const asked = row.asked ? `<p class="debug-asked"><span>Asked</span> ${escapeHtml(row.asked)}</p>` : '';
+    const bodyText = row.ok ? (row.text || '(empty reply)') : (row.error || 'The call failed.');
+    return `<article class="debug-row${row.ok ? '' : ' is-error'}">
+      <header><strong>${row.ok ? 'Reply' : 'Error'}</strong><span>${escapeHtml(row.note || 'call')}</span><time>${escapeHtml(debugWhen(row.at))}</time></header>
+      <p class="debug-meta">${escapeHtml(meta)}</p>
+      ${asked}
+      <pre>${escapeHtml(bodyText)}</pre>
+    </article>`;
+  }).join('');
+}
+
+function aiLogText() {
+  const rows = aiLog();
+  if (!rows.length) return `No ${AI_NAME} calls yet.`;
+  return rows.map((row) => {
+    const head = [row.ok ? 'OK' : 'ERROR', row.note, row.provider, row.model, row.kind, row.ms != null ? `${row.ms}ms` : '', row.at].filter(Boolean).join(' · ');
+    const asked = row.asked ? `Asked: ${row.asked}\n` : '';
+    return `${head}\n${asked}${row.ok ? row.text : row.error}`;
+  }).join('\n\n');
+}
+
+function openDebug() {
+  paintDebugLog();
+  const dialog = $('debug-log');
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+async function copyDebugLog() {
+  const text = aiLogText();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Debug log copied');
+  } catch {
+    toast('Could not copy the debug log.');
+  }
+}
+
+let aiCheckSeq = 0;
+
+function aiNote(after) {
+  let panel = after?.nextElementSibling;
+  if (!panel?.classList.contains('ai-note')) {
+    panel = document.createElement('div');
+    panel.className = 'ai-note';
+    after.insertAdjacentElement('afterend', panel);
+  }
+  const token = String(++aiCheckSeq);
+  panel.dataset.check = token;
+  panel.innerHTML = `<p class="ai-note-kicker">${AI_NAME}</p><p>Reading…</p>`;
+  return { panel, token };
+}
+
+function paintAiNote(panel, token, text, failed) {
+  if (!panel?.isConnected || panel.dataset.check !== token) return;
+  const body = failed ? escapeHtml(text) : richText(text);
+  panel.innerHTML = `<p class="ai-note-kicker">${AI_NAME}</p><p>${body}</p>`;
+}
+
+async function checkPostAi(node) {
+  const found = postFrom(node);
+  const post = found?.post;
+  const article = found?.article;
+  const saved = loadAi();
+  if (!post || !article || !aiReady(saved)) return;
+  const main = article.querySelector('.post-main');
+  if (!main) return;
+  const anchor = main.querySelector('.actions');
+  if (!anchor) return;
+  const { panel, token } = aiNote(anchor);
+  const body = speechText(post).trim();
+  try {
+    const answer = await askAi(saved, [
+      { role: 'system', content: AI_CHECK_POST },
+      { role: 'user', content: body || 'This post has no text.' },
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Post');
+    paintAiNote(panel, token, answer, false);
+  } catch (error) {
+    const message = error?.name === 'AbortError' ? 'The check took too long.' : (error.message || 'The check did not finish.');
+    paintAiNote(panel, token, message, true);
+  }
+}
+
+async function checkProfileAi() {
+  const profile = shownProfile;
+  const saved = loadAi();
+  const header = document.querySelector('#view .profile');
+  if (!profile || !header || !aiReady(saved)) return;
+  const { panel, token } = aiNote(header);
+  const lines = [
+    profile.displayName || '',
+    profile.handle ? `@${profile.handle}` : '',
+    profile.description || '',
+  ].filter(Boolean).join('\n');
+  try {
+    const answer = await askAi(saved, [
+      { role: 'system', content: AI_CHECK_PROFILE },
+      { role: 'user', content: lines || 'This profile has no name or bio.' },
+    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Profile');
+    paintAiNote(panel, token, answer, false);
+  } catch (error) {
+    const message = error?.name === 'AbortError' ? 'The check took too long.' : (error.message || 'The check did not finish.');
+    paintAiNote(panel, token, message, true);
+  }
+}
+
+function closeAlphaMenu(focus) {
+  const wrap = document.querySelector('.alpha-wrap');
+  const mark = document.getElementById('alpha-mark');
+  const menu = document.getElementById('alpha-menu');
+  if (!wrap?.classList.contains('is-open')) return;
+  wrap.classList.remove('is-open');
+  mark?.setAttribute('aria-expanded', 'false');
+  menu?.setAttribute('aria-hidden', 'true');
+  if (focus) mark?.focus();
+}
+
 function bindAlphaDoor() {
   const mark = document.getElementById('alpha-mark');
-  if (!mark) return;
+  const wrap = mark?.closest('.alpha-wrap');
+  const menu = document.getElementById('alpha-menu');
+  if (!mark || !wrap) return;
   const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let last = 0;
   const play = () => {
@@ -7767,9 +7993,13 @@ function bindAlphaDoor() {
   mark.addEventListener('pointerenter', play);
   mark.addEventListener('focus', play);
   mark.addEventListener('click', () => {
-    const open = mark.classList.toggle('is-open');
+    const open = wrap.classList.toggle('is-open');
     mark.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) closeAppMenu();
+    menu?.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) {
+      closeAppMenu();
+      closeMenu();
+    }
     play();
   });
   document.addEventListener('pointerdown', () => {
@@ -7782,6 +8012,7 @@ function bindAlphaDoor() {
 
 async function boot() {
   bindAlphaDoor();
+  applyDesign(designOn());
   applyA11y(a11yPrefs());
   setupCall({ toast });
   bind();
