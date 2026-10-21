@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { prepareAi, replyText } from '../js/ai.js';
+import { aiFromPreference, aiPreference, claimLegacyAi, clearAi, loadAi, prepareAi, replyText, responsesBody, saveAi } from '../js/ai.js';
 import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
-import { setSoundPrefs, soundPrefs } from '../js/session.js';
-import { completeWord, typoWords } from '../js/words.js';
+import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
+import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -68,6 +68,17 @@ const grokAccount = prepareAi({ provider: 'grok', base: 'https://evil.example/v1
 assert.equal(grokAccount.model, 'grok-4.7');
 assert.equal(grokAccount.base, 'https://api.x.ai/v1');
 assert.equal(grokAccount.kind, 'responses');
+assert.equal(prepareAi({ provider: 'grok', apiKey: 'Bearer "xai-test-key-123"' }).apiKey, 'xai-test-key-123');
+const grokBody = responsesBody(grokAccount, [
+  { role: 'system', content: 'Be brief.' },
+  { role: 'user', content: 'hello' },
+]);
+assert.equal(grokBody.model, 'grok-4.7');
+assert.equal(grokBody.store, false);
+assert.equal(grokBody.reasoning.effort, 'low');
+assert.equal(grokBody.max_output_tokens > 800, true);
+assert.equal(grokBody.input[0].role, 'system');
+assert.equal(grokBody.input[1].content, 'hello');
 const localAccount = prepareAi({ provider: 'custom', model: 'llama', base: 'http://127.0.0.1:11434/v1/chat/completions', apiKey: 'local-key-1234' });
 assert.equal(localAccount.base, 'http://127.0.0.1:11434/v1');
 try {
@@ -87,6 +98,7 @@ assert.equal(replyText({
 assert.equal(replyText({ choices: [{ message: { content: 'ok' } }] }), 'ok');
 assert.equal(replyText({ candidates: [{ content: { parts: [{ thought: true, text: 'hmm' }, { text: 'yes' }] } }] }), 'yes');
 assert.throws(() => replyText({ error: { message: 'bad key' } }), /bad key/);
+assert.throws(() => replyText({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] }), /reply limit/);
 const assist = assistantHtml('Hello @ai', { id: '1', actions: true, kicker: 'Not sent · your account' });
 assert.match(assist, /Not sent/);
 assert.match(assist, /data-act="send-ai"/);
@@ -310,6 +322,37 @@ assert.equal(soundPrefs().posts, true);
 assert.equal(soundPrefs().notifications, true);
 assert.equal(soundPrefs().volume.notifications, 25);
 assert.equal(soundPrefs().volume.chat, 70);
+const aiKey = 'test-key-12345678';
+localStorage.setItem('libresky.ai', JSON.stringify({
+  provider: 'gemini',
+  model: 'gemini-3.8-flash',
+  apiKey: aiKey,
+}));
+setPassword({ accessJwt: 'jwt', refreshJwt: 'refresh', did: 'did:plc:one', handle: 'one.bsky.social', pds: 'https://bsky.social' });
+assert.equal(claimLegacyAi('did:plc:one').apiKey, aiKey);
+assert.equal(localStorage.getItem('libresky.ai'), null);
+assert.equal(loadAi().provider, 'gemini');
+const storedAi = aiPreference(loadAi());
+assert.equal(storedAi.$type, 'app.bsky.actor.defs#libreskyAi');
+assert.equal(storedAi.apiKey, aiKey);
+assert.equal(aiFromPreference(storedAi).model, 'gemini-3.8-flash');
+saveDraft('draft for one');
+rememberWords('LibreSky');
+assert.equal(loadDraft(), 'draft for one');
+assert.ok(learnedWordList().some((word) => word.toLowerCase() === 'libresky'));
+setPassword({ accessJwt: 'jwt', refreshJwt: 'refresh', did: 'did:plc:two', handle: 'two.bsky.social', pds: 'https://bsky.social' });
+assert.equal(loadAi(), null);
+assert.equal(loadDraft(), '');
+assert.deepEqual(learnedWordList(), []);
+saveAi({ provider: 'gemini', apiKey: 'other-key-12345678' });
+assert.equal(loadAi().apiKey, 'other-key-12345678');
+clearAi();
+assert.equal(loadAi(), null);
+setPassword({ accessJwt: 'jwt', refreshJwt: 'refresh', did: 'did:plc:one', handle: 'one.bsky.social', pds: 'https://bsky.social' });
+assert.equal(loadAi().apiKey, aiKey);
+assert.equal(loadDraft(), 'draft for one');
+assert.ok(learnedWordList().some((word) => word.toLowerCase() === 'libresky'));
+setPassword(null);
 const aloud = speechText({
   author: { displayName: 'Ada' },
   record: { text: 'Look' },

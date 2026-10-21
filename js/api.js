@@ -405,6 +405,10 @@ export async function writeClientSettings(record) {
     if (!missingRecord(error)) throw error;
   }
   const next = { ...current, ...record, $type: CLIENT_SETTINGS };
+  delete next.ai;
+  delete next.apiKey;
+  delete next.draft;
+  delete next.words;
   return xrpc('com.atproto.repo.putRecord', {
     body: {
       repo: currentDid(),

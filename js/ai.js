@@ -1,6 +1,15 @@
+import { currentDid } from './session.js';
+
 const AI_KEY = 'libresky.ai';
+const AI_MAP = 'libresky.aiAccounts';
+
+// The PDS only stores private preferences whose type is under app.bsky.
+// A repo record is public, so the key must not go in app.libresky.settings.
+export const AI_PREF_TYPE = 'app.bsky.actor.defs#libreskyAi';
 
 export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by tagging @ai or @si. Those tags are not Bluesky accounts. Reply in plain text, usually one short paragraph, and stay under 700 characters unless the question needs more.';
+
+export const AI_TIMEOUT_MS = 90000;
 
 export const AI_PROVIDERS = [
   { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', kind: 'gemini' },
@@ -13,17 +22,59 @@ export function providerById(id) {
   return AI_PROVIDERS.find((item) => item.id === id) || AI_PROVIDERS[0];
 }
 
-function readStore() {
+let aiWatch = () => {};
+
+export function watchAiAccount(fn) {
+  aiWatch = typeof fn === 'function' ? fn : () => {};
+}
+
+function readMap() {
+  try {
+    const raw = localStorage.getItem(AI_MAP);
+    const data = raw ? JSON.parse(raw) : null;
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeMap(map) {
+  try {
+    if (!Object.keys(map).length) localStorage.removeItem(AI_MAP);
+    else localStorage.setItem(AI_MAP, JSON.stringify(map));
+  } catch {
+    /* private mode keeps the in-memory account */
+  }
+}
+
+function dropLegacy() {
+  try { localStorage.removeItem(AI_KEY); } catch { /* already gone */ }
+}
+
+function readLegacy() {
   try {
     const raw = localStorage.getItem(AI_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const saved = raw ? JSON.parse(raw) : null;
+    if (!saved || typeof saved !== 'object' || !saved.apiKey) return null;
+    return prepareAi(saved);
   } catch {
     return null;
   }
 }
 
+function putAccount(did, config, synced) {
+  const map = readMap();
+  if (!did) return;
+  if (!config) delete map[did];
+  else map[did] = { ...config, synced: Boolean(synced) };
+  writeMap(map);
+  dropLegacy();
+}
+
 export function loadAi() {
-  const saved = readStore();
+  const did = currentDid();
+  if (!did) return null;
+  const saved = readMap()[did];
   if (!saved || typeof saved !== 'object' || !saved.apiKey) return null;
   try {
     return prepareAi(saved);
@@ -32,14 +83,69 @@ export function loadAi() {
   }
 }
 
+export function aiAccountSynced(did = currentDid()) {
+  const saved = did ? readMap()[did] : null;
+  return Boolean(saved?.synced);
+}
+
+export function setAiAccountSynced(did, synced) {
+  if (!did || !readMap()[did]) return;
+  const map = readMap();
+  map[did] = { ...map[did], synced: Boolean(synced) };
+  writeMap(map);
+}
+
+export function claimLegacyAi(did) {
+  if (!did || readMap()[did]?.apiKey) return null;
+  const legacy = readLegacy();
+  if (!legacy) return null;
+  putAccount(did, legacy, false);
+  return legacy;
+}
+
+export function storeAiAccount(did, input, synced) {
+  if (!did) return;
+  if (!input) {
+    putAccount(did, null, false);
+    return;
+  }
+  putAccount(did, prepareAi(input), synced);
+}
+
+export function aiPreference(config) {
+  if (!config?.apiKey) return null;
+  return {
+    $type: AI_PREF_TYPE,
+    provider: config.provider,
+    model: config.model,
+    base: config.base || '',
+    apiKey: config.apiKey,
+  };
+}
+
+export function aiFromPreference(pref) {
+  if (!pref || pref.$type !== AI_PREF_TYPE || !pref.apiKey) return null;
+  try {
+    return prepareAi(pref);
+  } catch {
+    return null;
+  }
+}
+
 export function saveAi(input) {
+  const did = currentDid();
+  if (!did) throw new Error('Sign in to save the key on your account.');
   const next = prepareAi(input);
-  localStorage.setItem(AI_KEY, JSON.stringify(next));
+  putAccount(did, next, false);
+  aiWatch();
   return next;
 }
 
 export function clearAi() {
-  localStorage.removeItem(AI_KEY);
+  const did = currentDid();
+  if (did) putAccount(did, null, false);
+  else dropLegacy();
+  aiWatch();
 }
 
 const AI_LOG_KEY = 'libresky.aiLog';
@@ -125,8 +231,12 @@ function cleanBase(value) {
 }
 
 function cleanKey(value) {
-  const key = String(value || '').trim();
-  if (key.length < 8 || key.length > 2000 || /[\s]/.test(key)) {
+  let key = String(value || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  key = key.replace(/^bearer\s+/i, '').trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  if (key.length < 8 || key.length > 2000 || /\s/.test(key)) {
     throw new Error('Paste the API key from that account.');
   }
   return key;
@@ -179,18 +289,32 @@ export function replyText(data) {
   }
   const err = data.error?.message || (typeof data.error === 'string' ? data.error : '');
   if (err) throw new Error(scrub(err));
+  const reason = data.incomplete_details?.reason || data.incomplete_details;
+  if (data.status === 'incomplete' && reason === 'max_output_tokens') {
+    throw new Error('The account used its reply limit before it wrote an answer.');
+  }
   throw new Error('The account sent an empty reply.');
 }
 
-function responsesInput(messages) {
-  const system = messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
-  const rest = messages.filter((item) => item.role !== 'system').map((item) => ({
-    role: item.role === 'assistant' ? 'assistant' : 'user',
-    content: String(item.content || ''),
-  }));
-  if (system && rest[0]?.role === 'user') rest[0] = { role: 'user', content: `${system}\n\n${rest[0].content}` };
-  else if (system) rest.unshift({ role: 'user', content: system });
-  return rest;
+export function responsesBody(account, history) {
+  const body = {
+    model: account.model,
+    input: (history || []).map((item) => ({
+      role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
+      content: String(item.content || ''),
+    })),
+    max_output_tokens: 4000,
+    store: false,
+  };
+  if (/^grok-4\.(?:5|6|7)(?:-|$)/.test(account?.model || '')) body.reasoning = { effort: 'low' };
+  return body;
+}
+
+function explainAiError(provider, message) {
+  if (provider === 'grok' && /incorrect api key|invalid api key/i.test(message || '')) {
+    return 'xAI refused this key. Create one at console.x.ai. It starts with xai-. SuperGrok and an X login are not API keys.';
+  }
+  return message;
 }
 
 async function readBody(res, key) {
@@ -233,7 +357,7 @@ export async function askAi(config, messages, signal, note = '') {
     } else if (account.kind === 'responses') {
       url = `${account.base}/responses`;
       headers.Authorization = `Bearer ${key}`;
-      body = { model: account.model, input: responsesInput(history), max_output_tokens: 800 };
+      body = responsesBody(account, history);
     } else {
       url = `${account.base}/chat/completions`;
       headers.Authorization = `Bearer ${key}`;
@@ -264,15 +388,20 @@ export async function askAi(config, messages, signal, note = '') {
     logAiCall({ account, note, started, ok: true, asked, text });
     return text;
   } catch (error) {
+    const aborted = error?.name === 'AbortError';
+    let message = aborted ? 'The account took too long.' : (error?.message || 'The account did not answer.');
+    if (!aborted) message = explainAiError(account?.provider || config?.provider, message);
     logAiCall({
       account,
       note,
       started,
       ok: false,
       asked,
-      error: error?.name === 'AbortError' ? 'Timed out or cancelled.' : (error?.message || 'The account did not answer.'),
+      error: aborted ? 'Timed out or cancelled.' : message,
       key: account?.apiKey || config?.apiKey || '',
     });
-    throw error;
+    const wrapped = new Error(message);
+    if (aborted) wrapped.name = 'AbortError';
+    throw wrapped;
   }
 }

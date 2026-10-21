@@ -51,7 +51,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, aiLog, aiReady, askAi, clearAi, clearAiLog, loadAi, prepareAi, providerById, saveAi, subscribeAiLog } from './ai.js';
+import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAi, clearAiLog, loadAi, prepareAi, providerById, saveAi, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, forceStyles, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -2348,12 +2348,12 @@ function aiSettingsHtml() {
   const known = providerById(provider);
   const model = saved?.model || known.model || '';
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
-  const keyHint = saved ? 'Saved on this browser. Type a new key to replace it.' : 'Paste the key from that account';
+  const keyHint = saved ? 'Saved on your account. Type a new key to replace it.' : 'Paste the key from that account';
   const status = saved
-    ? `${AI_NAME} is on for this browser.`
+    ? `${AI_NAME} is on for this account.`
     : `${AI_NAME} is off until a key is saved.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this browser. The key stays here and is sent only to the provider you pick.</p>
+  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. The key is saved as a private preference, so it follows this login to another computer. It is not a public post. It is sent only to the provider you pick.</p>
     <form id="ai-form" class="ai-form">
       <label>Provider
         <select id="ai-provider">${options}</select>
@@ -2374,7 +2374,7 @@ function aiSettingsHtml() {
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. That key starts with xai-. SuperGrok and an X login are not an API key. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
 }
 
 function readAiForm() {
@@ -2407,7 +2407,7 @@ function saveAiForm(event) {
   event.preventDefault();
   try {
     const next = saveAi(readAiForm());
-    toast(`${AI_NAME} saved on this browser`);
+    toast(`${AI_NAME} saved on your account`);
     if (parseHash()[0] === 'settings') showSettings();
   } catch (error) {
     toast(error.message);
@@ -2423,11 +2423,16 @@ async function checkAiForm() {
     await askAi(account, [
       { role: 'system', content: AI_SYSTEM },
       { role: 'user', content: 'Reply with ok.' },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Settings');
-    toast(`${AI_NAME} replied.`);
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, 'Settings');
+    const line = `${AI_NAME} replied.`;
+    const status = $('ai-status');
+    if (status?.isConnected) status.textContent = line;
+    toast(line);
   } catch (error) {
-    if (error?.name === 'AbortError') toast('The account took too long.');
-    else toast(error.message || 'The account did not answer.');
+    const message = error?.message || 'The account did not answer.';
+    const status = $('ai-status');
+    if (status?.isConnected) status.textContent = message;
+    toast(message);
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -2897,12 +2902,15 @@ function showAi() {
   setChrome({ title: AI_NAME, nav: 'ai', back: true });
   const saved = loadAi();
   const ready = aiReady(saved);
-  const turns = aiThread.map((turn) => (turn.role === 'assistant'
-    ? assistantHtml(turn.content, { kicker: AI_NAME })
-    : `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`)).join('');
+  const waiting = aiThread.some((turn) => turn.role === 'pending');
+  const turns = aiThread.map((turn) => {
+    if (turn.role === 'assistant' || turn.role === 'pending') return assistantHtml(turn.content, { kicker: AI_NAME });
+    if (turn.role === 'error') return assistantHtml(turn.content, { kicker: 'Could not answer' });
+    return `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`;
+  }).join('');
   const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
-      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"></textarea></div>
-      <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks">Ask</button></span>
+      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"${waiting ? ' disabled' : ''}></textarea></div>
+      <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks"${waiting ? ' disabled' : ''}>Ask</button></span>
       <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
     </form>`;
   if (ready) {
@@ -2915,7 +2923,7 @@ function showAi() {
   } else {
     $('view').innerHTML = `<section class="settings ai-doc">
       <h2>${AI_NAME}</h2>
-      <p>${AI_NAME} stays off until you save a key in Settings. After that, this page is a chat, Home has an ask field, and profiles and posts get a check. Nothing is sent until a key is saved.</p>
+      <p>${AI_NAME} stays off until you save a key in Settings. The key is saved on your account and follows that login. After that, this page is a chat, Home has an ask field, and profiles and posts get a check. Nothing is sent until a key is saved.</p>
       <p><a class="text-link" href="#/settings">Add a key in Settings</a></p>
       <h2>@ai and @si</h2>
       <p>@ai and @si are the same tag. They are not Bluesky accounts. In a chat, a message that contains the tag asks the account you saved. That message is not sent to the other person. The answer stays on the chat screen until you press Send.</p>
@@ -2933,6 +2941,13 @@ function showAi() {
   if (pending && ready) askOnPage(pending);
 }
 
+function aiHistory() {
+  return aiThread
+    .filter((turn) => turn.role === 'user' || turn.role === 'assistant')
+    .slice(-8)
+    .map((turn) => ({ role: turn.role, content: turn.content }));
+}
+
 async function askOnPage(text) {
   const note = aiPendingNote;
   aiPendingNote = 'Page';
@@ -2941,34 +2956,26 @@ async function askOnPage(text) {
     toast('Add an AI account in Settings to use @ai and @si.');
     return;
   }
-  const area = $('ai-text');
-  const button = area?.form?.querySelector('button[type="submit"]');
-  if (area && !area.value.trim()) {
-    area.value = text;
-    paintFieldHighlight(area, $('ai-highlight'));
-  }
-  if (area) area.disabled = true;
-  if (button) button.disabled = true;
   const seq = ++aiSeq;
+  aiThread = aiThread.filter((turn) => turn.role !== 'pending');
+  aiThread = [...aiThread, { role: 'user', content: text }, { role: 'pending', content: 'Reading…' }].slice(-40);
+  if (parseHash()[0] === 'ai') showAi();
   try {
-    const prior = aiThread.slice(-8).map((turn) => ({ role: turn.role, content: turn.content }));
     const answer = await askAi(saved, [
       { role: 'system', content: AI_SYSTEM },
-      ...prior,
-      { role: 'user', content: text },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, note);
+      ...aiHistory(),
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, note);
     if (seq !== aiSeq) return;
-    aiThread = [...aiThread, { role: 'user', content: text }, { role: 'assistant', content: answer }].slice(-40);
+    aiThread = aiThread.filter((turn) => turn.role !== 'pending');
+    aiThread = [...aiThread, { role: 'assistant', content: answer }].slice(-40);
     if (parseHash()[0] === 'ai') showAi();
   } catch (error) {
     if (seq !== aiSeq) return;
-    if (error?.name === 'AbortError') toast('The account took too long.');
-    else toast(error.message || 'The account did not answer.');
-    if (area?.isConnected) {
-      area.disabled = false;
-      area.focus();
-    }
-    if (button?.isConnected) button.disabled = false;
+    const message = error?.message || 'The account did not answer.';
+    aiThread = aiThread.filter((turn) => turn.role !== 'pending');
+    aiThread = [...aiThread, { role: 'error', content: message }].slice(-40);
+    if (parseHash()[0] === 'ai') showAi();
+    toast(message);
   }
 }
 
@@ -4885,7 +4892,7 @@ function openEmojiPicker(button, query = '') {
     body: '<div id="emoji-groups"></div>',
   });
   paintEmojiList(query);
-  pickerArea()?.focus();
+  pickerArea()?.focus({ preventScroll: true });
 }
 
 function insertEmoji(char) {
@@ -4899,9 +4906,8 @@ function insertEmoji(char) {
   area.setSelectionRange(caret, caret);
   rememberEmoji(char);
   area.dispatchEvent(new Event('input', { bubbles: true }));
-  const query = $('emoji-find')?.value || '';
-  if ($('emoji-groups')) paintEmojiList(query);
-  area.focus();
+  area.focus({ preventScroll: true });
+  area.setSelectionRange(caret, caret);
 }
 
 function gifMedia(item, names) {
@@ -4951,7 +4957,8 @@ async function refreshGifs(query) {
       const thumb = gifMedia(item, ['tinygif', 'gif', 'mediumgif']);
       const full = gifMedia(item, ['gif', 'mediumgif', 'tinygif']);
       if (!thumb || !full) return '';
-      return `<button type="button" data-gif="${escapeHtml(full)}" data-gif-title="${escapeHtml(item.title || 'GIF')}" data-gif-thumb="${escapeHtml(thumb)}"><img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.title || 'GIF')}"></button>`;
+      const chosen = $('compose')?._gif?.url === full;
+      return `<button type="button" class="${chosen ? 'on' : ''}" aria-pressed="${chosen ? 'true' : 'false'}" data-gif="${escapeHtml(full)}" data-gif-title="${escapeHtml(item.title || 'GIF')}" data-gif-thumb="${escapeHtml(thumb)}"><img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.title || 'GIF')}"></button>`;
     }).join('');
     $('gif-grid').innerHTML = cards || '<p class="picker-note">No GIFs found.</p>';
   } catch (error) {
@@ -5210,12 +5217,16 @@ function chooseGif(gif) {
   }
   dialog._gif = gif;
   dialog._card = null;
-  closePicker();
   const box = $('compose-link');
   if (box) {
     box.hidden = false;
     box.innerHTML = `<div class="link-preview"><a class="card gif-card" href="${escapeHtml(gif.url)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(gif.thumb || gif.url)}" alt="${escapeHtml(gif.title || 'GIF')}"></a><button type="button" class="card-dismiss" data-act="dismiss-gif" aria-label="Remove GIF">×</button></div>`;
   }
+  document.querySelectorAll('#gif-grid [data-gif]').forEach((button) => {
+    const on = button.dataset.gif === gif.url;
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
   updateCount();
 }
 
@@ -5329,12 +5340,17 @@ async function askInChat(input, text) {
     const answer = await askAi(saved, [
       { role: 'system', content: AI_SYSTEM },
       { role: 'user', content: recent ? `Recent chat:\n${recent}\n\nQuestion:\n${text}` : text },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Chat');
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, 'Chat');
     if (parseHash()[0] !== 'messages') return;
     appendAssistant(answer);
   } catch (error) {
-    if (error?.name === 'AbortError') toast('The account took too long.');
-    else toast(error.message || 'The account did not answer.');
+    const message = error?.message || 'The account did not answer.';
+    if (parseHash()[0] === 'messages') {
+      const list = $('view').querySelector('.messages');
+      list?.insertAdjacentHTML('beforeend', assistantHtml(message, { kicker: 'Could not answer' }));
+      if (list) list.scrollTop = list.scrollHeight;
+    }
+    toast(message);
   } finally {
     if (input.isConnected) {
       input.disabled = false;
@@ -6350,7 +6366,7 @@ async function onClick(event) {
   if (act === 'ai-clear') {
     event.preventDefault();
     clearAi();
-    toast('AI account removed from this browser');
+    toast('AI account removed from your account');
     if (parseHash()[0] === 'settings') showSettings();
     return;
   }
@@ -7521,8 +7537,6 @@ function bind() {
     event.preventDefault();
     chooseGif({ url: gif.dataset.gif || '', title: gif.dataset.gifTitle || 'GIF', thumb: gif.dataset.gifThumb || '' });
   });
-  $('compose-files')?.closest('label')?.addEventListener('click', () => closePicker());
-  $('compose-video-file')?.closest('label')?.addEventListener('click', () => closePicker());
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
     $('compose-files').value = '';
@@ -7844,14 +7858,6 @@ function bind() {
     if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text' || target?.id === 'ai-text') return;
     hideSuggest();
   }, true);
-  document.addEventListener('pointerdown', (event) => {
-    if (!pickerMode) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    if (target.closest('#compose-picker, #chat-picker, #compose-text, #chat-text')) return;
-    if (target.closest('[data-act="emoji"], [data-act="gif"], [data-act="link"], [data-act="post-lang"]')) return;
-    closePicker();
-  });
   bindTips();
   window.addEventListener('hashchange', route);
   document.querySelectorAll('[data-nav]').forEach((link) => {
@@ -7869,6 +7875,7 @@ const TIP_SELECTOR = '[data-tip], button, a.nav-link, a.tip, a.time, .tabbar a, 
 
 function tipLabel(node) {
   if (!node || node.getAttribute('aria-disabled') === 'true') return '';
+  if (node.closest('.emoji-grid, .gif-grid')) return '';
   const explicit = node.dataset.tip || '';
   if (explicit) return explicit;
   if (node.disabled) return '';
@@ -8234,7 +8241,7 @@ async function checkPostAi(node) {
     const answer = await askAi(saved, [
       { role: 'system', content: AI_CHECK_POST },
       { role: 'user', content: body || 'This post has no text.' },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Post');
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, 'Post');
     paintAiNote(panel, token, answer, false);
   } catch (error) {
     const message = error?.name === 'AbortError' ? 'The check took too long.' : (error.message || 'The check did not finish.');
@@ -8257,7 +8264,7 @@ async function checkProfileAi() {
     const answer = await askAi(saved, [
       { role: 'system', content: AI_CHECK_PROFILE },
       { role: 'user', content: lines || 'This profile has no name or bio.' },
-    ], AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined, 'Profile');
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, 'Profile');
     paintAiNote(panel, token, answer, false);
   } catch (error) {
     const message = error?.name === 'AbortError' ? 'The check took too long.' : (error.message || 'The check did not finish.');

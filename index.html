@@ -479,7 +479,7 @@
       </ul>
       <p class="about-facts">Talks to the Bluesky API.
 Sign in with Bluesky happens on Bluesky’s page.
-An AI account you save is asked from this browser.</p>
+An AI account you save follows the Bluesky account you are signed in to.</p>
     </form>
   </dialog>
 
@@ -542,9 +542,9 @@ An AI account you save is asked from this browser.</p>
       <article id="legal-privacy">
         <h3>Privacy</h3>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
-        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. An unsent post draft (libresky.draft) and words you finish with Tab (libresky.words) stay in this browser. Home feed choices and thread order are saved with Bluesky’s preferences, so the official app can use them. Muted words are saved as Bluesky muted words, with a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
+        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. The session cannot follow you: an app password is shown once and is not a vault, and an OAuth sign-in is tied to this browser. Home feed choices, thread order, and muted words are saved with Bluesky’s private preferences, so the official app can use the feed and thread choices and the muted words. Muted words also have a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
-        <p>An AI account (libresky.ai) stays in this browser. The key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check in Settings, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
+        <p>An unsent post draft (libresky.draft), words you finish with Tab (libresky.words), and an AI account (libresky.ai) are saved on your account as private preferences, with a copy for the signed-in account in this browser. Private preferences travel with the login. They are not public posts. The AI key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check in Settings, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>
       </article>
       <article id="legal-terms" hidden>

@@ -83,13 +83,66 @@ export function setMutedWords(list) {
   localStorage.setItem(MUTED_KEY, JSON.stringify(list));
 }
 
-export function loadDraft() {
-  return localStorage.getItem(DRAFT_KEY) || '';
+let draftWatch = () => {};
+
+export function watchDraft(fn) {
+  draftWatch = typeof fn === 'function' ? fn : () => {};
 }
 
-export function saveDraft(text) {
-  if (text) localStorage.setItem(DRAFT_KEY, text);
-  else localStorage.removeItem(DRAFT_KEY);
+function draftKeyFor(did) {
+  return did ? `${DRAFT_KEY}:${did}` : DRAFT_KEY;
+}
+
+function draftSyncedKey(did) {
+  return did ? `${DRAFT_KEY}:synced:${did}` : '';
+}
+
+export function loadDraft() {
+  const did = currentDid();
+  const key = draftKeyFor(did);
+  try {
+    const own = localStorage.getItem(key);
+    if (own != null) return own;
+    if (!did) return '';
+    const legacy = localStorage.getItem(DRAFT_KEY);
+    if (!legacy) return '';
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem(DRAFT_KEY);
+    return legacy;
+  } catch {
+    return '';
+  }
+}
+
+export function saveDraft(text, options = {}) {
+  const did = currentDid();
+  const key = draftKeyFor(did);
+  const value = String(text || '').slice(0, 2000);
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+    if (did) localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* private mode keeps the draft for this view */
+  }
+  if (!options.quiet) draftWatch();
+}
+
+export function draftSynced(did = currentDid()) {
+  const key = draftSyncedKey(did);
+  if (!key) return false;
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+
+export function setDraftSynced(did, synced) {
+  const key = draftSyncedKey(did);
+  if (!key) return;
+  try {
+    if (synced) localStorage.setItem(key, '1');
+    else localStorage.removeItem(key);
+  } catch {
+    /* the next pull can still compare the text */
+  }
 }
 
 const ROSTER_KEY = 'libresky.accounts';

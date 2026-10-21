@@ -1,6 +1,30 @@
 import { getPreferences, patchPreferences, readClientSettings, writeClientSettings } from './api.js';
+import {
+  AI_PREF_TYPE,
+  aiAccountSynced,
+  aiFromPreference,
+  aiPreference,
+  claimLegacyAi,
+  loadAi,
+  setAiAccountSynced,
+  storeAiAccount,
+  watchAiAccount,
+} from './ai.js';
 import { languagePrefs, saveLanguagePrefs } from './lang.js';
-import { currentDid, mutedWords, setMutedWords, setSoundPrefs, signedIn, soundPrefs } from './session.js';
+import {
+  currentDid,
+  draftSynced,
+  loadDraft,
+  mutedWords,
+  saveDraft,
+  setDraftSynced,
+  setMutedWords,
+  setSoundPrefs,
+  signedIn,
+  soundPrefs,
+  watchDraft,
+} from './session.js';
+import { learnedWordList, replaceLearnedWords, watchWords } from './words.js';
 
 const FEEDS_KEY = 'libresky.feedViews';
 const THREAD_KEY = 'libresky.thread';
@@ -15,6 +39,8 @@ const CALL_ALLOWS = new Set(['all', 'following', 'none']);
 const FEED_TYPE = 'app.bsky.actor.defs#feedViewPref';
 const THREAD_TYPE = 'app.bsky.actor.defs#threadViewPref';
 const MUTED_TYPE = 'app.bsky.actor.defs#mutedWordsPref';
+const DRAFT_TYPE = 'app.bsky.actor.defs#libreskyDraft';
+const WORDS_TYPE = 'app.bsky.actor.defs#libreskyWords';
 const SORTS = new Set(['oldest', 'newest', 'most-likes', 'random', 'hotness']);
 const SENSITIVE = new Set(['porn', 'sexual', 'nudity', 'graphic-media', 'gore']);
 
@@ -22,6 +48,12 @@ let mutedItems = [];
 const dirtyFeeds = new Set();
 let dirtyThread = false;
 let dirtyMuted = false;
+let dirtyAi = false;
+let dirtyDraft = false;
+let dirtyWords = false;
+let aiEpoch = 0;
+let draftEpoch = 0;
+let wordsEpoch = 0;
 let dirtyClient = false;
 let clientMissing = false;
 let pulledDid = '';
@@ -446,14 +478,101 @@ function writeFeed(list, feedId) {
   pref.hideQuotePosts = next.hideQuotePosts;
 }
 
+function replacePref(list, type, payload) {
+  const index = list.findIndex((item) => item?.$type === type);
+  if (!payload) {
+    if (index >= 0) list.splice(index, 1);
+    return;
+  }
+  if (index >= 0) list[index] = payload;
+  else list.push(payload);
+}
+
+function sameWords(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((word, index) => word.toLowerCase() === String(right[index] || '').toLowerCase());
+}
+
+function mergeWords(local, remote) {
+  const next = [];
+  [...local, ...remote].forEach((word) => {
+    const clean = String(word || '').trim();
+    if (!clean || next.some((item) => item.toLowerCase() === clean.toLowerCase())) return;
+    next.push(clean);
+  });
+  return next.slice(0, 400);
+}
+
+function applyPulledAi(list, did) {
+  if (dirtyAi) return false;
+  claimLegacyAi(did);
+  const remote = aiFromPreference(list.find((item) => item?.$type === AI_PREF_TYPE));
+  if (remote) {
+    const current = loadAi();
+    storeAiAccount(did, remote, true);
+    return !current || current.apiKey !== remote.apiKey || current.provider !== remote.provider || current.model !== remote.model || current.base !== remote.base;
+  }
+  if (loadAi() && !aiAccountSynced(did)) {
+    dirtyAi = true;
+    return false;
+  }
+  if (loadAi() && aiAccountSynced(did)) {
+    storeAiAccount(did, null, false);
+    return true;
+  }
+  return false;
+}
+
+function applyPulledDraft(list, did) {
+  if (dirtyDraft) return false;
+  const pref = list.find((item) => item?.$type === DRAFT_TYPE);
+  const remote = typeof pref?.text === 'string' ? pref.text.slice(0, 2000) : '';
+  const local = loadDraft();
+  if (remote) {
+    if (local !== remote) saveDraft(remote, { quiet: true });
+    setDraftSynced(did, true);
+    return local !== remote;
+  }
+  if (local && !draftSynced(did)) {
+    dirtyDraft = true;
+    return false;
+  }
+  if (local && draftSynced(did)) {
+    saveDraft('', { quiet: true });
+    setDraftSynced(did, true);
+    return true;
+  }
+  return false;
+}
+
+function applyPulledWords(list) {
+  if (dirtyWords) return false;
+  const pref = list.find((item) => item?.$type === WORDS_TYPE);
+  const remote = Array.isArray(pref?.items) ? pref.items.filter((word) => typeof word === 'string') : [];
+  const local = learnedWordList();
+  if (!remote.length && !local.length) return false;
+  const merged = mergeWords(local, remote);
+  const changed = !sameWords(local, merged);
+  if (changed) replaceLearnedWords(merged, { quiet: true });
+  if (!sameWords(merged, remote)) dirtyWords = true;
+  return changed;
+}
+
 async function pushBluesky() {
   const feeds = [...dirtyFeeds];
   const thread = dirtyThread;
   const muted = dirtyMuted;
-  if (!feeds.length && !thread && !muted) return;
+  const ai = dirtyAi;
+  const draft = dirtyDraft;
+  const words = dirtyWords;
+  if (!feeds.length && !thread && !muted && !ai && !draft && !words) return;
   dirtyFeeds.clear();
   dirtyThread = false;
   dirtyMuted = false;
+  dirtyAi = false;
+  dirtyDraft = false;
+  dirtyWords = false;
+  const did = currentDid();
   try {
     await patchPreferences((list) => {
       feeds.forEach((feedId) => writeFeed(list, feedId));
@@ -473,12 +592,29 @@ async function pushBluesky() {
         if (!pref) list.push(payload);
         else pref.items = payload.items;
       }
+      if (currentDid() !== did) return list;
+      if (ai) replacePref(list, AI_PREF_TYPE, aiPreference(loadAi()));
+      if (draft) {
+        const text = loadDraft();
+        replacePref(list, DRAFT_TYPE, text ? { $type: DRAFT_TYPE, text } : null);
+      }
+      if (words) {
+        const items = learnedWordList();
+        replacePref(list, WORDS_TYPE, items.length ? { $type: WORDS_TYPE, items } : null);
+      }
       return list;
     });
+    if (currentDid() === did) {
+      if (ai) setAiAccountSynced(did, Boolean(loadAi()));
+      if (draft) setDraftSynced(did, true);
+    }
   } catch (error) {
     feeds.forEach((feedId) => dirtyFeeds.add(feedId));
     if (thread) dirtyThread = true;
     if (muted) dirtyMuted = true;
+    if (ai) dirtyAi = true;
+    if (draft) dirtyDraft = true;
+    if (words) dirtyWords = true;
     throw error;
   }
 }
@@ -509,7 +645,7 @@ async function flush() {
   } catch (error) {
     onError(error);
   }
-  if ((dirtyClient || clientMissing || dirtyThread || dirtyMuted || dirtyFeeds.size) && signedIn()) schedule();
+  if ((dirtyClient || clientMissing || dirtyThread || dirtyMuted || dirtyFeeds.size || dirtyAi || dirtyDraft || dirtyWords) && signedIn()) schedule();
 }
 
 export async function pullAccountPrefs() {
@@ -519,12 +655,19 @@ export async function pullAccountPrefs() {
     return null;
   }
   const run = (async () => {
+    const seenAi = aiEpoch;
+    const seenDraft = draftEpoch;
+    const seenWords = wordsEpoch;
     let theme = '';
     let hadMuted = true;
+    let preferences = [];
+    let sawPreferences = false;
     try {
       const data = await getPreferences();
       if (currentDid() !== did) return null;
-      hadMuted = applyBluesky(data?.preferences);
+      preferences = Array.isArray(data?.preferences) ? data.preferences : [];
+      hadMuted = applyBluesky(preferences);
+      sawPreferences = true;
     } catch {
       hadMuted = true;
     }
@@ -544,14 +687,49 @@ export async function pullAccountPrefs() {
       dirtyClient = false;
     } else clientMissing = true;
     pulledDid = did;
+    let aiChanged = false;
+    let draftChanged = false;
+    if (sawPreferences && currentDid() === did) {
+      if (aiEpoch === seenAi) aiChanged = applyPulledAi(preferences, did);
+      if (draftEpoch === seenDraft) draftChanged = applyPulledDraft(preferences, did);
+      if (wordsEpoch === seenWords) applyPulledWords(preferences);
+    }
     if (hadMuted) dirtyMuted = false;
     else if (!dirtyMuted && !mutedItems.length && mutedWords().length) syncMutedWords(mutedWords());
     else if (!dirtyMuted) mutedItems = [];
-    if (clientMissing || dirtyMuted) schedule();
-    return { theme };
+    if (clientMissing || dirtyMuted || dirtyAi || dirtyDraft || dirtyWords) schedule();
+    return { theme, aiChanged, draftChanged };
   })();
   pullPromise = run.finally(() => {
     if (pullPromise === run) pullPromise = null;
   });
   return pullPromise;
 }
+
+function queueAccountChange(mark) {
+  if (!signedIn() || !currentDid()) return;
+  mark();
+  schedule();
+}
+
+watchAiAccount(() => {
+  queueAccountChange(() => {
+    aiEpoch += 1;
+    dirtyAi = true;
+  });
+});
+
+watchDraft(() => {
+  queueAccountChange(() => {
+    draftEpoch += 1;
+    dirtyDraft = true;
+    setDraftSynced(currentDid(), false);
+  });
+});
+
+watchWords(() => {
+  queueAccountChange(() => {
+    wordsEpoch += 1;
+    dirtyWords = true;
+  });
+});

@@ -1,4 +1,5 @@
 import { englishExtends, englishWord } from './dict-en.js';
+import { currentDid } from './session.js';
 
 const LEARNED_KEY = 'libresky.words';
 const LATIN = /^[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){1,40}$/;
@@ -26,24 +27,75 @@ function splitWords(source) {
 const LISTS = Object.fromEntries(Object.entries(WORDS).map(([code, source]) => [code, splitWords(source)]));
 const EXTRA = new Set(splitWords(`${EXTRA_SOURCE} ${Object.values(WORDS).join(' ')}`).map((word) => word.toLowerCase().replace(/’/g, "'")));
 
-function learnedWords() {
+let wordsWatch = () => {};
+
+export function watchWords(fn) {
+  wordsWatch = typeof fn === 'function' ? fn : () => {};
+}
+
+function wordsKey() {
+  const did = currentDid();
+  return did ? `${LEARNED_KEY}:${did}` : LEARNED_KEY;
+}
+
+function readWordList(key) {
   try {
-    const list = JSON.parse(localStorage.getItem(LEARNED_KEY) || '[]');
+    const list = JSON.parse(localStorage.getItem(key) || 'null');
     return Array.isArray(list) ? list.filter((word) => typeof word === 'string' && LATIN.test(word)) : [];
   } catch {
     return [];
   }
 }
 
-export function rememberWords(text) {
-  const found = String(text || '').match(/[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){3,40}/g) || [];
-  if (!found.length) return;
+function learnedWords() {
+  const did = currentDid();
+  const key = wordsKey();
   try {
-    const next = [...found, ...learnedWords()].filter((word, index, all) => all.findIndex((item) => item.toLowerCase() === word.toLowerCase()) === index).slice(0, 400);
-    localStorage.setItem(LEARNED_KEY, JSON.stringify(next));
+    if (localStorage.getItem(key) != null) return readWordList(key);
+  } catch {
+    return [];
+  }
+  if (!did) return [];
+  const legacy = readWordList(LEARNED_KEY);
+  if (!legacy.length) return [];
+  try {
+    localStorage.setItem(key, JSON.stringify(legacy));
+    localStorage.removeItem(LEARNED_KEY);
+  } catch {
+    /* the list is still returned for this view */
+  }
+  return legacy;
+}
+
+export function learnedWordList() {
+  return learnedWords();
+}
+
+export function replaceLearnedWords(list, options = {}) {
+  const next = [];
+  (Array.isArray(list) ? list : []).forEach((word) => {
+    const clean = String(word || '').trim();
+    if (!LATIN.test(clean) || next.some((item) => item.toLowerCase() === clean.toLowerCase())) return;
+    next.push(clean);
+  });
+  const saved = next.slice(0, 400);
+  try {
+    const key = wordsKey();
+    if (saved.length) localStorage.setItem(key, JSON.stringify(saved));
+    else localStorage.removeItem(key);
+    if (currentDid()) localStorage.removeItem(LEARNED_KEY);
   } catch {
     /* this browser is not storing words */
   }
+  if (!options.quiet) wordsWatch();
+  return saved;
+}
+
+export function rememberWords(text) {
+  const found = String(text || '').match(/[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){3,40}/g) || [];
+  if (!found.length) return;
+  const next = [...found, ...learnedWords()].filter((word, index, all) => all.findIndex((item) => item.toLowerCase() === word.toLowerCase()) === index).slice(0, 400);
+  replaceLearnedWords(next);
 }
 
 function applyCase(prefix, word) {
