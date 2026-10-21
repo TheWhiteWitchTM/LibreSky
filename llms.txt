@@ -13,6 +13,9 @@ LibreSky is open source under the MIT license. Sign in with a Bluesky account. T
 - Chat
 - Home, Discover, and search
 - Notifications, bookmarks, and profiles
+- Feeds, lists, and starter packs
+- Follow back and follow cleanup
+- Desktop apps for Linux, Windows, and Mac
 
 ## Links
 

@@ -1,0 +1,79 @@
+# Changes
+
+The paint is still wet. This is the record of the alpha you can [open today](https://thewhitewitchtm.github.io/LibreSky/).
+
+Dates follow the days the work landed in the repository. The app is the source of truth. A longer tour lives in the [README](README.md).
+
+## 21 October 2026
+
+### The room
+
+- Home keeps Following and Discover on the row. Lists and saved feeds you add sit on that same row, and the … menu edits it.
+- Search opens on what people are talking about, then finds people, posts, and feeds.
+- Notifications, chat, bookmarks, your profile, Calls, and AI Assist live in the sidebar. Feeds, lists, starter packs, settings, About, Privacy, and Terms live under More.
+- The menu at the top holds Help, Config, and Downloads. Support development sits on a line of its own.
+- Help and Config follow the page you are on. Home tunes the feed. A thread sets reply order. Search sets Latest or Top, people you follow, replies, languages, and sensitive posts.
+- A red alpha opens Debug, which keeps AI Assist replies and errors from this tab, and Design view, which outlines the page.
+- Back stays inside LibreSky. Top returns to the top of the page.
+- You can browse before you sign in. The site remembers the sign-in on this browser until you sign out.
+
+### Writing
+
+- Edit posts the new version and removes the old one. Likes and replies stay on the original. Images, video, the link card, and a GIF come back into the editor.
+- The composer carries images, a video, a link, a GIF, emoji, a quote, and a feed, list, or starter pack.
+- Bold, italic, strikethrough, and monospace sit on the writing bar.
+- The mic dictates in Chrome and Edge. Tab finishes a word, an `@` name, or a `#` tag.
+- A link that stands alone on the last line becomes the card.
+- Who can reply can be everyone, people you follow, people you mention, or no one.
+- An unsent draft follows the Bluesky account, in private preferences.
+- Post languages ride on the post, up to three. Discover can stay inside the content languages you turn on. Settings lists thirty languages.
+
+### People
+
+- A profile has Posts, Replies, Media, and Likes, and can pin feeds, lists, and starter packs on that row.
+- Name, bio, avatar, banner, and a pinned post are the Bluesky profile record, so other apps read the same one.
+- Chat requests wait until you accept them. Who can message you is your Bluesky chat setting.
+- Bookmarks, lists, custom feeds, and starter packs each have a page.
+- Muted words are saved as Bluesky muted words, so the official app hides them too. Muted accounts and blocks are listed under Safety.
+- This browser keeps up to eight accounts and can switch without dropping the others.
+- Settings can create an app password. The password is shown once.
+- Follow back runs while this tab is open. It can skip accounts that look like spam, and it paces itself at 20, 40, or 100 a day.
+- Cleanup filters the people you follow, says why an account looks off, and can unfollow a batch or follow that batch again. An unfollow there is held, so follow back leaves it alone until you release it.
+
+### Calls
+
+- Voice and video start from a chat, from someone else’s profile, or from the Calls page. Enter a handle to call someone new.
+- The other person needs LibreSky open. An incoming call can be accepted or declined from the banner. Hang up ends it.
+- The sound and the picture travel between the two browsers.
+- Who can call you is saved with LibreSky: everyone, people you follow, or no one.
+
+### AI Assist
+
+- `@ai` and `@si` are the same tag. In a chat, that message asks the account you saved and stays on your screen until you press Send. In a post, the tag is only a highlight.
+- With a key saved, the AI page is a chat, Home has an ask field, and profiles and posts offer a check.
+- The key lives in the private preferences that follow the login. It stays off the public profile.
+- The provider can be Gemini, xAI, OpenAI, DeepSeek, or another address that accepts chat completions. Check in Settings asks once before you rely on it.
+- Debug keeps the question, the reply, and the error from this tab. It leaves the key out.
+
+### Look, sound, and the keyboard
+
+- Light, dark, high-contrast light, and high-contrast dark.
+- Post text scales from 100% to 200%.
+- Screen reader layout adds strong focus rings, underlines links, and shows the names of the post buttons.
+- Chat, notifications, and new posts on Home each have a volume. New posts start quiet. Incoming calls use the chat sound.
+- Read aloud speaks a post and its image description. Voice, speed, and volume are saved on the account.
+- The keyboard map is under Settings, on Display: `n` for a new post, `j` and `k` to move, `l` `r` `t` `b` `s` for like, reply, repost, bookmark, and share, `/` for search, `a` to read aloud.
+
+### On the desk and on the web
+
+- Linux, Windows, and Mac each download as one zip. The page joins the stored pieces, then saves the file.
+- The Mac app is unsigned. Right-click `LibreSky.app` and choose Open the first time.
+- A web app manifest and a service worker store the pages and scripts for the next open.
+- The banner, the short summary in `llms.txt`, and the sitemap make the client easier to find.
+- [LibreSky Corporate](CORPORATE.md) is the custom edition. You would host the services. It is marked coming soon.
+
+## 20 October 2026
+
+- The browser client is published on GitHub Pages: <https://thewhitewitchtm.github.io/LibreSky/>
+- Desktop builds are stored in pieces small enough for GitHub. The download page assembles each zip in the browser.
+- Sign-in uses Bluesky. The password is entered on Bluesky’s page. An app-password session, when you choose that path, stays in this browser until you sign out.
