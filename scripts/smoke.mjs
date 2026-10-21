@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareAi, replyText } from '../js/ai.js';
-import { assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
+import { assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, richText, toShortUrl, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
@@ -125,6 +125,86 @@ assert.match(spoken, /class="facet tag"/);
 assert.match(spoken, /note-kicker">Related post/);
 assert.match(spoken, /data-href="#\/profile\/d\.bsky\.social\/post\/reply"/);
 assert.match(notesHtml, /data-href=/);
+const mediaNotes = [
+  {
+    reason: 'like',
+    author: { did: 'did:c', handle: 'c.bsky.social', displayName: 'Cara' },
+    reasonSubject: 'at://did:x/app.bsky.feed.post/pic',
+    indexedAt: '2026-10-20T00:02:00.000Z',
+    isRead: true,
+  },
+  {
+    reason: 'reply',
+    uri: 'at://did:d/app.bsky.feed.post/reply2',
+    author: { did: 'did:d', handle: 'd.bsky.social', displayName: 'Dee' },
+    reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+    record: { text: 'see this', embed: { $type: 'app.bsky.embed.external' } },
+    indexedAt: '2026-10-20T00:03:00.000Z',
+    isRead: true,
+  },
+  {
+    reason: 'repost',
+    author: { did: 'did:e', handle: 'e.bsky.social', displayName: 'Eve' },
+    reasonSubject: 'at://did:x/app.bsky.feed.post/clip',
+    indexedAt: '2026-10-20T00:04:00.000Z',
+    isRead: true,
+  },
+];
+const mediaHtml = notificationsHtml(mediaNotes, new Map([
+  ['at://did:x/app.bsky.feed.post/pic', {
+    uri: 'at://did:x/app.bsky.feed.post/pic',
+    author: { handle: 'me.bsky.social' },
+    record: { text: 'photo' },
+    embed: {
+      $type: 'app.bsky.embed.images#view',
+      images: [
+        { thumb: 'https://cdn.example/a.jpg', fullsize: 'https://cdn.example/a-full.jpg', alt: 'A cat' },
+        { thumb: 'https://cdn.example/b.jpg', fullsize: 'https://cdn.example/b-full.jpg', alt: 'A dog' },
+      ],
+    },
+  }],
+  ['at://did:d/app.bsky.feed.post/reply2', {
+    uri: 'at://did:d/app.bsky.feed.post/reply2',
+    author: { handle: 'd.bsky.social' },
+    record: { text: 'see this' },
+    embed: {
+      $type: 'app.bsky.embed.external#view',
+      external: { uri: 'https://example.com/story', title: 'A story', description: 'Words', thumb: 'https://cdn.example/card.jpg' },
+    },
+  }],
+  ['at://did:x/app.bsky.feed.post/clip', {
+    uri: 'at://did:x/app.bsky.feed.post/clip',
+    author: { handle: 'me.bsky.social' },
+    record: { text: 'clip' },
+    embed: { $type: 'app.bsky.embed.video#view', thumbnail: 'https://cdn.example/clip.jpg', alt: 'A clip' },
+  }],
+]));
+assert.match(mediaHtml, /class="note-shot"/);
+assert.match(mediaHtml, /A cat/);
+assert.match(mediaHtml, /A dog/);
+assert.match(mediaHtml, /class="note-link"/);
+assert.match(mediaHtml, /example\.com/);
+assert.match(mediaHtml, /A story/);
+assert.match(mediaHtml, /note-shot is-play/);
+assert.match(mediaHtml, /cdn\.example\/clip\.jpg/);
+assert.doesNotMatch(notificationsHtml([{
+  reason: 'like',
+  author: { handle: 'c.bsky.social', displayName: 'Cara' },
+  reasonSubject: 'at://did:x/app.bsky.feed.post/bad',
+  indexedAt: '2026-10-20T00:00:00.000Z',
+}], new Map([['at://did:x/app.bsky.feed.post/bad', {
+  embed: { $type: 'app.bsky.embed.external#view', external: { uri: 'javascript:alert(1)', title: 'Bad' } },
+  record: { text: 'x' },
+}]])), /javascript:/);
+const wanted = notificationSubjects(mediaNotes);
+assert.ok(wanted.includes('at://did:d/app.bsky.feed.post/reply2'));
+assert.ok(wanted.includes('at://did:x/app.bsky.feed.post/pic'));
+assert.equal(notificationSubjects([{
+  reason: 'reply',
+  uri: 'at://did:d/app.bsky.feed.post/plain',
+  reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+  record: { text: 'just words' },
+}]).includes('at://did:d/app.bsky.feed.post/plain'), false);
 
 const mine = messageHtml({ text: 'hello @jay.bsky.social', sender: { did: 'did:me' } }, 'did:me');
 assert.match(mine, /class="bubble mine"/);

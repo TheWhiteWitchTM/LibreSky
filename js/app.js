@@ -19,6 +19,7 @@ import {
   assistantHtml,
   messageHtml,
   notificationsHtml,
+  notificationSubjects,
   packHtml,
   postHtml,
   profileHtml,
@@ -1313,22 +1314,14 @@ async function showNotifications(filter) {
     if (token !== generation) return;
     const subjects = new Map();
     const learn = async (notes) => {
-      const want = [];
-      const push = (uri) => {
-        if (uri && !subjects.has(uri) && !want.includes(uri)) want.push(uri);
-      };
-      (notes || []).forEach((note) => {
-        const reason = note?.reason;
-        const said = typeof note?.record?.text === 'string' && note.record.text.trim();
-        if ((reason === 'reply' || reason === 'mention' || reason === 'quote') && !said) push(note.uri);
-      });
-      (notes || []).forEach((note) => push(note.reasonSubject));
-      const uris = want.slice(0, 25);
-      if (!uris.length) return;
-      try {
-        const fetched = await api.getPosts(uris);
-        (fetched.posts || []).forEach((post) => subjects.set(post.uri, post));
-      } catch { /* snippets are optional */ }
+      const want = notificationSubjects(notes).filter((uri) => !subjects.has(uri));
+      for (let index = 0; index < want.length; index += 25) {
+        const uris = want.slice(index, index + 25);
+        try {
+          const fetched = await api.getPosts(uris);
+          (fetched.posts || []).forEach((post) => subjects.set(post.uri, post));
+        } catch { /* snippets and media previews are optional */ }
+      }
     };
     let all = data.notifications || [];
     await learn(all);
@@ -3706,7 +3699,9 @@ function updateCount() {
     const figure = count.querySelector('b');
     if (figure) figure.textContent = String(left);
     else count.textContent = String(left);
+    count.title = left < 0 ? 'Over the 300 character limit' : `${left} characters left`;
   }
+  count?.classList.toggle('near', left >= 0 && left <= 50);
   count?.classList.toggle('over', left < 0);
   $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !holdingLink && !gif && !video && !attached && !quoted);
   paintFieldHighlight(area, $('compose-highlight'));

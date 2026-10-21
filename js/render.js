@@ -473,6 +473,100 @@ function spokenRecord(note, subjects) {
   return null;
 }
 
+function pushShot(found, shot) {
+  found.total += 1;
+  if (found.shots.length < 4) found.shots.push(shot);
+}
+
+function collectMedia(embed, found, depth) {
+  if (!embed || depth > 3 || found.shots.length || found.link) return;
+  const type = String(embed.$type || '');
+  if (type.endsWith('images#view')) {
+    (embed.images || []).forEach((image) => {
+      const thumb = safeUrl(image?.thumb || image?.fullsize || '');
+      if (thumb) pushShot(found, { thumb, alt: image.alt || '', kind: 'image' });
+    });
+    return;
+  }
+  if (type.endsWith('gallery#view')) {
+    (embed.items || []).forEach((item) => {
+      const thumb = safeUrl(item?.thumbnail || item?.thumb || item?.fullsize || '');
+      if (thumb) pushShot(found, { thumb, alt: item?.alt || '', kind: 'image' });
+    });
+    return;
+  }
+  if (type.endsWith('video#view')) {
+    pushShot(found, { thumb: safeUrl(embed.thumbnail || ''), alt: embed.alt || 'Video', kind: 'video' });
+    return;
+  }
+  if (type.endsWith('external#view')) {
+    const external = embed.external || {};
+    const href = safeUrl(external.uri || '');
+    if (!href) return;
+    if (gifHost(href)) {
+      const thumb = safeUrl(external.thumb || '') || (/\.gif$/i.test(href) ? href : '');
+      pushShot(found, { thumb, alt: external.title || 'GIF', kind: 'gif' });
+      return;
+    }
+    found.link = {
+      href,
+      thumb: safeUrl(external.thumb || ''),
+      title: String(external.title || href),
+      host: hostOf(href),
+    };
+    return;
+  }
+  if (type.endsWith('recordWithMedia#view')) {
+    collectMedia(embed.media, found, depth + 1);
+    if (!found.shots.length && !found.link) collectMedia(embed.record, found, depth + 1);
+    return;
+  }
+  if (type.endsWith('record#view') || type.endsWith('viewRecord')) {
+    const record = embed.record || embed;
+    (record.embeds || []).forEach((child) => collectMedia(child, found, depth + 1));
+  }
+}
+
+function noteMediaHtml(post) {
+  const found = { shots: [], link: null, total: 0 };
+  collectMedia(post?.embed, found, 0);
+  if (!found.shots.length && !found.link) return '';
+  const shown = found.shots;
+  const extra = found.total - shown.length;
+  const shots = shown.map((shot, index) => {
+    const play = shot.kind === 'video' || shot.kind === 'gif';
+    const more = extra && index === shown.length - 1 ? `<span class="note-more">+${extra}</span>` : '';
+    const badge = shot.kind === 'gif' && !more ? '<span class="note-badge">GIF</span>' : '';
+    const img = shot.thumb ? `<img src="${attr(shot.thumb)}" alt="${attr(shot.alt || '')}">` : '';
+    return `<span class="note-shot${play ? ' is-play' : ''}">${img}${badge}${more}</span>`;
+  }).join('');
+  const strip = shots ? `<span class="note-shots">${shots}</span>` : '';
+  let link = '';
+  if (found.link && !found.shots.length) {
+    const item = found.link;
+    const thumb = item.thumb
+      ? `<img src="${attr(item.thumb)}" alt="">`
+      : `<span class="note-link-mark">${icon('link')}</span>`;
+    link = `<a class="note-link" href="${attr(item.href)}" target="_blank" rel="noopener noreferrer">${thumb}<span class="note-link-copy"><span class="domain">${escapeHtml(item.host)}</span><strong>${escapeHtml(item.title)}</strong></span></a>`;
+  }
+  return `<span class="note-media">${strip}${link}</span>`;
+}
+
+export function notificationSubjects(notes) {
+  const uris = [];
+  const push = (uri) => {
+    if (uri && !uris.includes(uri)) uris.push(uri);
+  };
+  (notes || []).forEach((note) => {
+    const reason = note?.reason;
+    const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
+    const text = typeof note?.record?.text === 'string' && note.record.text.trim();
+    if (spoken && (!text || note?.record?.embed)) push(note.uri);
+    push(note.reasonSubject);
+  });
+  return uris;
+}
+
 function notificationGroupHtml(group, subjects) {
   const first = group[0] || {};
   const reason = first.reason || '';
@@ -495,9 +589,11 @@ function notificationGroupHtml(group, subjects) {
     ? `${kicker ? `<span class="note-kicker">${kicker}</span>` : ''}<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
     : '';
   const snippet = context ? `<span class="note-context">${context}</span>` : '';
+  const mediaPost = spoken ? subjects?.get?.(first.uri) : subject;
+  const media = noteMediaHtml(mediaPost);
   const unread = group.some((note) => !note.isRead);
   const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';
-  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${snippet}</span></article>`;
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${spoken ? media : ''}${snippet}${spoken ? '' : media}</span></article>`;
 }
 
 export function speechText(post) {
