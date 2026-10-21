@@ -124,8 +124,12 @@ const collapsedEmoji = new Set();
 const styleHold = new Map();
 let gifSeq = 0;
 let gifTimer = 0;
+let hoverTimer = 0;
+let hoverHideTimer = 0;
 let hoverSeq = 0;
 let hoverActor = '';
+let hoverWait = '';
+let hoverWaitLink = null;
 const hoverProfiles = new Map();
 let homeLanes = [];
 let homeLanesDid = '';
@@ -5897,12 +5901,17 @@ function filterLanguageButtons(input) {
   });
 }
 
+function avatarHoverTarget(node) {
+  const button = node?.closest?.('[data-act="account-card"]');
+  if (!button || button.disabled) return null;
+  if (button.closest('#hovercard, #menu, #suggest, #app-menu, dialog')) return null;
+  const id = button.dataset.actor || '';
+  if (!id) return null;
+  return { id, link: button };
+}
+
 function placeHover(card, anchor) {
   const rect = anchor.getBoundingClientRect();
-  const row = anchor.closest?.('.person, .chat-head');
-  const rowRect = row?.getBoundingClientRect();
-  const avoidTop = rowRect ? rowRect.top : rect.top;
-  const avoidBottom = rowRect ? rowRect.bottom : rect.bottom;
   const frame = viewportFrame();
   const width = Math.min(320, frame.width - 16);
   card.style.width = `${Math.round(width)}px`;
@@ -5910,8 +5919,8 @@ function placeHover(card, anchor) {
   showFloat(card);
   const height = card.offsetHeight || 220;
   const left = Math.max(8, Math.min(rect.left, frame.width - width - 8));
-  const below = avoidBottom + 4;
-  const above = avoidTop - height - 4;
+  const below = rect.bottom + 6;
+  const above = rect.top - height - 6;
   let top = below;
   if (below + height > frame.height - 8 && above >= 8) top = above;
   else if (below + height > frame.height - 8) top = Math.max(8, frame.height - height - 8);
@@ -5920,7 +5929,11 @@ function placeHover(card, anchor) {
 }
 
 function closeHover() {
+  clearTimeout(hoverTimer);
+  clearTimeout(hoverHideTimer);
   hoverActor = '';
+  hoverWait = '';
+  hoverWaitLink = null;
   document.querySelectorAll('[data-act="account-card"][aria-expanded="true"]').forEach((node) => {
     node.setAttribute('aria-expanded', 'false');
   });
@@ -5943,11 +5956,60 @@ function toggleAccountCard(button) {
   openHover({ id, link: button });
 }
 
+function scheduleHover(event) {
+  if (event.pointerType && event.pointerType !== 'mouse') return;
+  if (window.matchMedia('(hover: none)').matches) return;
+  const found = avatarHoverTarget(event.target);
+  if (!found) return;
+  clearTimeout(hoverHideTimer);
+  const card = $('hovercard');
+  const open = Boolean(card && !card.hidden);
+  if (open && card._anchor === found.link) return;
+  if (!open && hoverWaitLink === found.link) return;
+  clearTimeout(hoverTimer);
+  hoverWait = found.id;
+  hoverWaitLink = found.link;
+  if (open) {
+    hoverWait = '';
+    hoverWaitLink = null;
+    openHover(found);
+    return;
+  }
+  hoverTimer = setTimeout(() => {
+    if (hoverWaitLink !== found.link) return;
+    hoverWait = '';
+    hoverWaitLink = null;
+    if (!found.link.isConnected) return;
+    openHover(found);
+  }, 380);
+}
+
+function scheduleHoverHide(event) {
+  const next = event.relatedTarget;
+  const card = $('hovercard');
+  if (next instanceof Element) {
+    if (card?.contains(next)) return;
+    const nextTarget = avatarHoverTarget(next);
+    if (nextTarget && (nextTarget.link === card?._anchor || nextTarget.link === hoverWaitLink)) return;
+  }
+  hoverWait = '';
+  hoverWaitLink = null;
+  clearTimeout(hoverTimer);
+  clearTimeout(hoverHideTimer);
+  if (!hoverActor && !(card && !card.hidden)) return;
+  hoverHideTimer = setTimeout(closeHover, 240);
+}
+
 async function openHover(found) {
   const card = $('hovercard');
   if (!card || !found?.link || found.link.closest('#hovercard, #menu, #suggest')) return closeHover();
+  clearTimeout(hoverTimer);
+  clearTimeout(hoverHideTimer);
+  hoverWait = '';
+  hoverWaitLink = null;
   hoverActor = found.id;
   card._anchor = found.link;
+  hideTip();
   document.querySelectorAll('[data-act="account-card"][aria-expanded="true"]').forEach((node) => {
     if (node !== found.link) node.setAttribute('aria-expanded', 'false');
   });
@@ -8222,6 +8284,13 @@ function bind() {
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
     if (!event.target.closest('#hovercard, [data-act="account-card"]')) closeHover();
   });
+  document.addEventListener('pointerover', scheduleHover);
+  document.addEventListener('pointerout', scheduleHoverHide);
+  $('hovercard')?.addEventListener('pointerover', (event) => {
+    if (event.pointerType && event.pointerType !== 'mouse') return;
+    clearTimeout(hoverHideTimer);
+  });
+  $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
   document.addEventListener('keydown', onKey);
   $('back').addEventListener('click', () => goBack());
   $('compose-mic')?.addEventListener('pointerdown', (event) => {
@@ -8761,7 +8830,7 @@ const TIP_SELECTOR = '[data-tip], button, a.nav-link, a.tip, a.time, .tabbar a, 
 
 function tipLabel(node) {
   if (!node || node.getAttribute('aria-disabled') === 'true') return '';
-  if (node.closest('.emoji-grid, .gif-grid')) return '';
+  if (node.closest('.emoji-grid, .gif-grid, [data-act="account-card"]')) return '';
   const explicit = node.dataset.tip || '';
   if (explicit) return explicit;
   if (node.disabled) return '';

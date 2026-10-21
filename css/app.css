@@ -811,8 +811,10 @@ img { max-width: 100%; }
   width: 2px;
   height: calc(100% + 20px);
   background: var(--border);
+  pointer-events: none;
 }
 .post-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; }
+.post-row > .avatar-btn { align-self: start; }
 .post-top { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
 .name { font-weight: 700; }
 .name, .handle, .time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
