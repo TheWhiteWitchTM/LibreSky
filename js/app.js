@@ -7990,6 +7990,16 @@ async function checkProfileAi() {
   }
 }
 
+function releaseAlphaShut() {
+  const wrap = document.querySelector('.alpha-wrap');
+  const menu = document.getElementById('alpha-menu');
+  if (!wrap?.classList.contains('is-shut')) return;
+  if (wrap.matches(':hover')) return;
+  if (wrap.contains(document.activeElement)) return;
+  wrap.classList.remove('is-shut');
+  menu?.removeAttribute('inert');
+}
+
 function closeAlphaMenu(focus) {
   const wrap = document.querySelector('.alpha-wrap');
   const mark = document.getElementById('alpha-mark');
@@ -7998,6 +8008,14 @@ function closeAlphaMenu(focus) {
   wrap.classList.remove('is-open');
   mark?.setAttribute('aria-expanded', 'false');
   menu?.setAttribute('aria-hidden', 'true');
+  const hold = Boolean(focus) || wrap.matches(':hover') || wrap.contains(document.activeElement);
+  if (hold) {
+    wrap.classList.add('is-shut');
+    menu?.setAttribute('inert', '');
+  } else {
+    wrap.classList.remove('is-shut');
+    menu?.removeAttribute('inert');
+  }
   if (focus) mark?.focus();
 }
 
@@ -8017,14 +8035,21 @@ function bindAlphaDoor() {
   };
   mark.addEventListener('pointerenter', play);
   mark.addEventListener('focus', play);
+  wrap.addEventListener('pointerleave', releaseAlphaShut);
+  wrap.addEventListener('focusout', () => setTimeout(releaseAlphaShut, 0));
   mark.addEventListener('click', () => {
-    const open = wrap.classList.toggle('is-open');
-    mark.setAttribute('aria-expanded', open ? 'true' : 'false');
-    menu?.setAttribute('aria-hidden', open ? 'false' : 'true');
-    if (open) {
-      closeAppMenu();
-      closeMenu();
+    if (wrap.classList.contains('is-open')) {
+      closeAlphaMenu();
+      play();
+      return;
     }
+    wrap.classList.remove('is-shut');
+    menu?.removeAttribute('inert');
+    wrap.classList.add('is-open');
+    mark.setAttribute('aria-expanded', 'true');
+    menu?.setAttribute('aria-hidden', 'false');
+    closeAppMenu();
+    closeMenu();
     play();
   });
   document.addEventListener('pointerdown', () => {

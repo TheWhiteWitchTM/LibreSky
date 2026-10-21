@@ -349,6 +349,14 @@ img { max-width: 100%; }
   68% { transform: rotate(-5deg); }
   100% { opacity: 1; transform: rotate(-1deg); }
 }
+.alpha-wrap.is-shut .alpha-door,
+.alpha-wrap.is-shut:hover .alpha-door,
+.alpha-wrap.is-shut:focus-within .alpha-door {
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+  transform: rotate(-16deg);
+}
 .noscript-pitch {
   margin: 28px auto;
   max-width: 34rem;
@@ -508,15 +516,7 @@ img { max-width: 100%; }
 }
 .sticky-head:has(#tabs[hidden]) { display: none; }
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-.to-top {
-  width: 32px;
-  height: 32px;
-  justify-content: center;
-  padding: 0;
-  flex: none;
-}
-.to-top .ico { width: 18px; height: 18px; }
-.to-top:hover { background: var(--hover); }
+.to-top,
 .head-post {
   display: inline-flex;
   align-items: center;
@@ -533,7 +533,9 @@ img { max-width: 100%; }
   font-weight: 800;
   white-space: nowrap;
 }
+.to-top:hover,
 .head-post:hover { background: var(--blue-press); }
+.to-top .ico { width: 18px; height: 18px; }
 .head-post .ico { width: 16px; height: 16px; }
 .tab-strip {
   display: flex;
@@ -2434,6 +2436,8 @@ kbd { font-family: ui-monospace, monospace; border: 1px solid var(--border); bor
 :root[data-theme="contrast-dark"] .primary,
 :root[data-theme="contrast-light"] .post-btn,
 :root[data-theme="contrast-dark"] .post-btn,
+:root[data-theme="contrast-light"] .to-top,
+:root[data-theme="contrast-dark"] .to-top,
 :root[data-theme="contrast-light"] .head-post,
 :root[data-theme="contrast-dark"] .head-post,
 :root[data-theme="contrast-light"] .settings-tabs button,
@@ -2493,8 +2497,10 @@ html[data-reader="on"] .post .sr-name {
 }
 
 @media (max-width: 640px) {
-  .head-post span { display: none; }
-  .head-post { width: 32px; padding: 0; }
+  .head-post span,
+  .to-top span { display: none; }
+  .head-post,
+  .to-top { width: 32px; padding: 0; }
 }
 @media (max-width: 720px) {
   .shell { display: block; }
