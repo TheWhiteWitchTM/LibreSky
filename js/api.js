@@ -1184,6 +1184,18 @@ export function listConvos(cursor, signal, status) {
   return chat('chat.bsky.convo.listConvos', { params, signal });
 }
 
+export function listConvoRequests(cursor, signal) {
+  return chat('chat.bsky.convo.listConvoRequests', { params: { limit: 100, cursor }, signal });
+}
+
+export function getChatUnreadCounts(signal) {
+  return chat('chat.bsky.convo.getUnreadCounts', { signal });
+}
+
+export function withdrawJoinRequest(convoId) {
+  return chat('chat.bsky.group.withdrawJoinRequest', { body: { convoId } });
+}
+
 export function acceptConvo(convoId) {
   return chat('chat.bsky.convo.acceptConvo', { body: { convoId } });
 }

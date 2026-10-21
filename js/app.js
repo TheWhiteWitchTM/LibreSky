@@ -12,7 +12,9 @@ import {
   chatHeaderHtml,
   hoverCardHtml,
   convoHtml,
+  joinRequestHtml,
   requestEntryHtml,
+  requestPeople,
   drainPosts,
   emptyHtml,
   feedHtml,
@@ -53,7 +55,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -642,23 +644,58 @@ async function classifyCalls(convos) {
   return { ring, requests };
 }
 
+async function listRequestItems() {
+  const items = [];
+  let cursor;
+  for (let page = 0; page < 5; page += 1) {
+    const data = await api.listConvoRequests(cursor);
+    (data?.requests || data?.convos || []).forEach((item) => items.push(item));
+    if (!data?.cursor || data.cursor === cursor) break;
+    cursor = data.cursor;
+  }
+  return items;
+}
+
+async function laterAcceptedRequests(first) {
+  const found = [];
+  let cursor = first?.cursor || '';
+  for (let page = 0; page < 3 && cursor; page += 1) {
+    const data = await api.listConvos(cursor, undefined, 'accepted').catch(() => null);
+    if (!data) break;
+    (data.convos || []).forEach((row) => {
+      if (String(row?.status || '').toLowerCase() === 'request') found.push(row);
+    });
+    if (!data.cursor || data.cursor === cursor) break;
+    cursor = data.cursor;
+  }
+  return found;
+}
+
 async function loadConvoPages() {
-  const [accepted, requests] = await Promise.all([
+  const [accepted, legacy, fresh, unread] = await Promise.all([
     api.listConvos(undefined, undefined, 'accepted').catch(() => null),
     api.listConvos(undefined, undefined, 'request').catch(() => null),
+    listRequestItems().catch(() => null),
+    api.getChatUnreadCounts().catch(() => null),
   ]);
-  if (accepted && requests) {
-    const requestRows = requests.convos || [];
-    const requestIds = new Set(requestRows.map((convo) => convo.id));
-    const main = (accepted.convos || []).filter((convo) => convo.status !== 'request' && !requestIds.has(convo.id));
-    return { main, requests: requestRows };
+  const reported = Number(unread?.unreadRequestConvos) || 0;
+  if (!accepted && !legacy && !fresh) {
+    const all = await api.listConvos().catch(() => ({ convos: [] }));
+    return { ...partitionConvos({ accepted: all, legacyRequests: null, requestItems: null }), reported };
   }
-  const all = await api.listConvos().catch(() => ({ convos: [] }));
-  const rows = all.convos || [];
-  const requestRows = requests?.convos || rows.filter((convo) => convo.status === 'request');
-  const requestIds = new Set(requestRows.map((convo) => convo.id));
-  const main = (accepted?.convos || rows).filter((convo) => convo.status !== 'request' && !requestIds.has(convo.id));
-  return { main, requests: requestRows };
+  const parts = partitionConvos({ accepted, legacyRequests: legacy, requestItems: fresh });
+  const listed = parts.requests.length + parts.joins.length;
+  if (reported > listed && accepted?.cursor) {
+    const extra = await laterAcceptedRequests(accepted);
+    const seen = new Set(parts.requests.map((row) => row.id));
+    extra.forEach((row) => {
+      if (!row?.id || seen.has(row.id)) return;
+      seen.add(row.id);
+      parts.requests.push({ ...row, status: 'request' });
+      parts.main = parts.main.filter((item) => item.id !== row.id);
+    });
+  }
+  return { ...parts, reported };
 }
 
 function paintIncomingBar(offer) {
@@ -707,10 +744,11 @@ async function refreshBadge() {
     /* the badge is optional */
   }
   try {
-    const { main, requests } = await loadConvoPages();
+    const { main, requests, reported } = await loadConvoPages();
     const convos = [...main, ...requests];
     const mine = myDid();
-    const count = convos.reduce((sum, convo) => sum + convoUnread(convo, mine), 0);
+    const requestUnread = requests.reduce((sum, convo) => sum + convoUnread(convo, mine), 0);
+    const count = main.reduce((sum, convo) => sum + convoUnread(convo, mine), 0) + Math.max(requestUnread, Number(reported) || 0);
     paintBadge('chat-badge', count);
     const { ring: offer } = await classifyCalls(convos);
     paintIncomingBar(offer);
@@ -1481,20 +1519,30 @@ async function showMessages(convoId) {
   showSkeletons();
   try {
     if (!convoId || convoId === 'requests') {
-      const { main, requests } = await loadConvoPages();
+      const { main, requests, joins, reported } = await loadConvoPages();
       if (token !== generation) return;
       const mine = myDid();
+      const people = requestPeople(requests, joins, mine);
+      const waiting = requests.length + (joins || []).length;
       if (convoId === 'requests') {
         setChrome({ title: 'Message requests', nav: 'messages', back: true });
-        const rows = requests.map((convo) => convoHtml(convo, mine, { request: true })).join('');
-        $('view').innerHTML = rows || emptyHtml('No message requests', 'When someone you have not accepted messages you, it shows up here.');
+        const rows = [
+          ...requests.map((convo) => convoHtml(convo, mine, { request: true })),
+          ...(joins || []).map((item) => joinRequestHtml(item)),
+        ].join('');
+        const missed = !rows && reported > 0;
+        $('view').innerHTML = rows || emptyHtml(
+          missed ? 'Message requests did not load' : 'No message requests',
+          missed ? 'Bluesky still counts a request. Open this page again in a moment.' : 'When someone you have not accepted messages you, it shows up here.',
+          missed ? '<button type="button" class="primary" data-act="retry">Try again</button>' : '',
+        );
         return;
       }
       main.forEach((convo) => {
         if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
       });
       const rows = main.map((convo) => convoHtml(convo, mine)).join('');
-      const entry = requestEntryHtml(requests.length);
+      const entry = requestEntryHtml(waiting || reported, people);
       $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
       refreshBadge();
       return;
@@ -5122,11 +5170,49 @@ async function publish(event) {
   }
 }
 
+let layerOpenedAt = 0;
+
+function noteLayerOpen() {
+  layerOpenedAt = performance.now();
+}
+
+function showLayer(node) {
+  if (!node) return;
+  // Opening a popover can scroll the page. Mark the time first so that
+  // scroll does not close the menu that is just opening.
+  noteLayerOpen();
+  node.hidden = false;
+  node.style.position = 'fixed';
+  if (!node.style.left) node.style.left = '8px';
+  if (!node.style.top) node.style.top = '8px';
+  if (typeof node.showPopover === 'function') {
+    try {
+      if (!node.matches(':popover-open')) node.showPopover();
+    } catch {
+      node.removeAttribute('popover');
+    }
+  }
+}
+
+function hideLayer(node) {
+  if (!node) return;
+  if (typeof node.hidePopover === 'function' && node.matches(':popover-open')) {
+    try { node.hidePopover(); } catch { /* already closed */ }
+  }
+  node.hidden = true;
+}
+
+function layerOpen(node) {
+  if (!node) return false;
+  if (node.hidden && !(typeof node.matches === 'function' && node.matches(':popover-open'))) return false;
+  return true;
+}
+
 function closeAppMenu(focus) {
   const menu = $('app-menu');
   const button = $('app-menu-btn');
-  if (!menu || menu.hidden) return;
-  menu.hidden = true;
+  if (!layerOpen(menu)) return;
+  hideLayer(menu);
   button?.setAttribute('aria-expanded', 'false');
   if (focus) button?.focus();
 }
@@ -5135,17 +5221,17 @@ function toggleAppMenu() {
   const menu = $('app-menu');
   const button = $('app-menu-btn');
   if (!menu || !button) return;
-  if (!menu.hidden) {
+  if (layerOpen(menu)) {
     closeAppMenu();
     return;
   }
   closeMenu();
   closeAlphaMenu();
   hideTip();
-  menu.hidden = false;
+  showLayer(menu);
   button.setAttribute('aria-expanded', 'true');
   placeAppMenu();
-  requestAnimationFrame(() => { if (!menu.hidden) placeAppMenu(); });
+  requestAnimationFrame(() => { if (layerOpen(menu)) placeAppMenu(); });
 }
 
 function viewportFrame() {
@@ -5166,7 +5252,7 @@ function pinBox(box, left, top) {
 function placeAppMenu() {
   const menu = $('app-menu');
   const button = $('app-menu-btn');
-  if (!menu || !button || menu.hidden) return;
+  if (!menu || !button || !layerOpen(menu)) return;
   const rect = button.getBoundingClientRect();
   const frame = viewportFrame();
   const width = menu.offsetWidth || 248;
@@ -5182,9 +5268,9 @@ function placeAppMenu() {
 
 function closeMenu() {
   const menu = $('menu');
-  if (!menu) return;
+  if (!menu || !layerOpen(menu)) return;
   const anchor = menu._anchor;
-  menu.hidden = true;
+  hideLayer(menu);
   menu._anchor = null;
   menu._post = null;
   if (anchor?.isConnected) anchor.setAttribute('aria-expanded', 'false');
@@ -5215,17 +5301,17 @@ function openMenu(anchor, items) {
   menu._post = null;
   menu._anchor = anchor || null;
   menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
-  menu.hidden = false;
+  showLayer(menu);
   if (anchor?.getBoundingClientRect) {
     placeMenu(menu, anchor);
-    requestAnimationFrame(() => { if (!menu.hidden && menu._anchor === anchor) placeMenu(menu, anchor); });
+    requestAnimationFrame(() => { if (layerOpen(menu) && menu._anchor === anchor) placeMenu(menu, anchor); });
   }
   if (anchor) anchor.setAttribute('aria-expanded', 'true');
 }
 
 function toggleMenu(anchor, items) {
   const menu = $('menu');
-  if (menu && !menu.hidden && anchor && menu._anchor === anchor) {
+  if (menu && layerOpen(menu) && anchor && menu._anchor === anchor) {
     closeMenu();
     return false;
   }
@@ -6803,6 +6889,20 @@ async function handleChromeAct(act, event) {
     } catch (error) { toast(error.message); }
     return true;
   }
+  if (act === 'withdraw-join') {
+    event.preventDefault();
+    const id = button?.dataset.convo;
+    if (!id) return true;
+    if (!window.confirm('Withdraw this request to join?')) return true;
+    try {
+      await api.withdrawJoinRequest(id);
+      button.closest('.person')?.remove();
+      toast('Request withdrawn');
+      refreshBadge();
+      if (!$('view')?.querySelector('.person')) route();
+    } catch (error) { toast(error.message); }
+    return true;
+  }
   if (act === 'leave-convo') {
     event.preventDefault();
     const id = button?.dataset.convo;
@@ -7470,7 +7570,7 @@ async function submitReport(event) {
 }
 
 async function onMenu(event) {
-  const id = event.target.dataset.menu;
+  const id = event.target.closest?.('[data-menu]')?.dataset.menu;
   const found = $('menu')._post;
   closeMenu();
   if (!id) return;
@@ -8179,7 +8279,7 @@ function scrollToTop() {
 function onKey(event) {
   if (event.key === 'Escape') {
     const appMenu = $('app-menu');
-    if (appMenu && !appMenu.hidden) {
+    if (layerOpen(appMenu)) {
       event.preventDefault();
       closeAppMenu(true);
       return;
@@ -8190,7 +8290,7 @@ function onKey(event) {
       return;
     }
     const menu = $('menu');
-    if (menu && !menu.hidden) {
+    if (layerOpen(menu)) {
       event.preventDefault();
       closeMenu();
       return;
@@ -8315,17 +8415,23 @@ function bind() {
   if (loginDownloads) loginDownloads.innerHTML = downloadsHtml(true);
   window.addEventListener('scroll', (event) => {
     closeHover();
-    if (event.target?.id !== 'menu') closeMenu();
-    closeAppMenu();
-    closeAlphaMenu();
+    if (pageScroll(event)) {
+      closeMenu();
+      closeAppMenu();
+      closeAlphaMenu();
+    }
     placeFresh();
   }, true);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && homeWatch.timer) pollHome(homeWatch.token);
   });
   window.addEventListener('resize', () => {
-    closeMenu();
-    closeAppMenu();
+    if (performance.now() - layerOpenedAt >= 450) {
+      closeMenu();
+      closeAppMenu();
+    } else {
+      placeOpenLayers();
+    }
     placeFresh();
     if (designOn()) paintDesignReadout();
     measureHead();
@@ -9421,14 +9527,22 @@ async function boot() {
   armFollowBack();
 }
 
+function pageScroll(event) {
+  if (performance.now() - layerOpenedAt < 450) return false;
+  const target = event.target;
+  if (!target || target === document || target === document.documentElement || target === document.body) return true;
+  if (target.id === 'view' || target.classList?.contains('messages') || target.classList?.contains('center')) return true;
+  return false;
+}
+
 function placeOpenLayers() {
   const menu = $('menu');
-  if (menu && !menu.hidden) {
+  if (layerOpen(menu)) {
     if (menu._anchor?.isConnected) placeMenu(menu, menu._anchor);
     else closeMenu();
   }
   const appMenu = $('app-menu');
-  if (appMenu && !appMenu.hidden) placeAppMenu();
+  if (layerOpen(appMenu)) placeAppMenu();
   const card = $('hovercard');
   if (card && !card.hidden && card._anchor?.isConnected) placeHover(card, card._anchor);
 }

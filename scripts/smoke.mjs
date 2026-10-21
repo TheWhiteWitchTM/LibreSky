@@ -3,9 +3,9 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { aiFromPreference, aiPreference, chatExtras, claimLegacyAi, clearAi, loadAi, prepareAi, replyText, responsesBody, saveAi } from '../js/ai.js';
-import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
+import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
@@ -936,8 +936,49 @@ const requestChat = convoHtml({
 }, 'did:me', { request: true });
 assert.match(requestChat, /data-act="accept-convo"/);
 assert.match(requestChat, /data-act="decline-convo"/);
+assert.equal(requestEntryHtml(0), '');
+assert.equal(requestEntryHtml(0, []), '');
 assert.match(requestEntryHtml(2), /Message requests/);
 assert.match(requestEntryHtml(2), /#\/messages\/requests/);
+assert.match(requestEntryHtml(2), /did not load/);
+assert.doesNotMatch(requestEntryHtml(0), /data-initial="R"/);
+const adaRequest = requestEntryHtml(1, [{ name: 'Ada', avatar: '' }]);
+assert.match(adaRequest, /Ada is waiting/);
+assert.match(adaRequest, /data-initial="A"/);
+assert.match(adaRequest, /#\/messages\/requests/);
+const keptRequest = partitionConvos({
+  accepted: { convos: [{ id: 'a', status: 'accepted' }, { id: 'r', status: 'request', members: [{ did: 'did:them', displayName: 'Ada' }] }] },
+  legacyRequests: { convos: [] },
+  requestItems: [],
+});
+assert.deepEqual(keptRequest.main.map((convo) => convo.id), ['a']);
+assert.equal(keptRequest.requests[0].id, 'r');
+const freshRequest = partitionConvos({
+  accepted: { convos: [{ id: 'a', status: 'accepted' }] },
+  legacyRequests: { convos: [] },
+  requestItems: [{ id: 'req', status: 'request', members: [{ did: 'did:them', displayName: 'Ada' }] }],
+});
+assert.equal(freshRequest.requests[0].id, 'req');
+assert.equal(freshRequest.main.length, 1);
+const echoed = partitionConvos({
+  accepted: { convos: [{ id: 'a', status: 'accepted' }, { id: 'b', status: 'accepted' }] },
+  legacyRequests: { convos: [{ id: 'a', status: 'accepted' }, { id: 'b', status: 'accepted' }] },
+  requestItems: null,
+});
+assert.equal(echoed.requests.length, 0);
+assert.equal(echoed.main.length, 2);
+const joined = partitionConvos({
+  accepted: { convos: [] },
+  legacyRequests: null,
+  requestItems: [{ $type: 'chat.bsky.group.defs#joinRequestConvoView', convoId: 'g1', name: 'Club', owner: { did: 'did:o', displayName: 'Owner' } }],
+});
+assert.equal(joined.requests.length, 0);
+assert.equal(joined.joins[0].convoId, 'g1');
+assert.match(joinRequestHtml(joined.joins[0]), /data-act="withdraw-join"/);
+assert.match(joinRequestHtml(joined.joins[0]), /Club/);
+const faces = requestPeople(freshRequest.requests, joined.joins, 'did:me');
+assert.equal(faces[0].name, 'Ada');
+assert.equal(faces[1].name, 'Club');
 const callRequest = callRequestHtml({ media: 'video', name: 'Ada', rkey: 'abc', convoId: 'c1', peerDid: 'did:ada' });
 assert.match(callRequest, /data-act="call-accept"/);
 assert.match(callRequest, /Video call request/);

@@ -347,6 +347,67 @@ export function ownUnread(convo, me) {
   return Boolean(sender && me && sender === me);
 }
 
+export function convoIsRequest(convo) {
+  return String(convo?.status || '').toLowerCase() === 'request';
+}
+
+export function isJoinRequest(item) {
+  const type = String(item?.$type || '');
+  if (type.includes('joinRequestConvoView')) return true;
+  return Boolean(item && item.convoId && item.owner && !item.id && !item.members);
+}
+
+function sameConvoIds(left, right) {
+  if (!left.length || left.length !== right.length) return false;
+  const ids = new Set(right);
+  return left.every((id) => ids.has(id));
+}
+
+// Accepted chats stay in main. Incoming requests and outgoing group joins
+// stay in the request lists. A request that only appears on the accepted
+// page is still a request, so it is not dropped.
+export function partitionConvos({ accepted, legacyRequests, requestItems } = {}) {
+  const acceptedRows = Array.isArray(accepted?.convos) ? accepted.convos.filter((row) => row?.id) : [];
+  const legacyRows = Array.isArray(legacyRequests?.convos) ? legacyRequests.convos.filter((row) => row?.id) : [];
+  const fresh = Array.isArray(requestItems) ? requestItems : [];
+  const incoming = new Map();
+  const joins = new Map();
+  const keepRequest = (convo) => {
+    if (!convo?.id || incoming.has(convo.id)) return;
+    incoming.set(convo.id, { ...convo, status: 'request' });
+  };
+  fresh.forEach((item) => {
+    if (isJoinRequest(item)) {
+      if (item.convoId && !joins.has(item.convoId)) joins.set(item.convoId, item);
+      return;
+    }
+    if (item?.id) keepRequest(item);
+  });
+  const echoed = sameConvoIds(acceptedRows.map((row) => row.id), legacyRows.map((row) => row.id));
+  legacyRows.forEach((convo) => {
+    if (echoed) {
+      if (convoIsRequest(convo)) keepRequest(convo);
+      return;
+    }
+    if (convo.status && !convoIsRequest(convo)) return;
+    keepRequest(convo);
+  });
+  acceptedRows.forEach((convo) => {
+    if (convoIsRequest(convo)) keepRequest(convo);
+  });
+  const requestIds = new Set(incoming.keys());
+  const seen = new Set();
+  const main = [];
+  const addMain = (convo) => {
+    if (!convo?.id || seen.has(convo.id) || requestIds.has(convo.id)) return;
+    seen.add(convo.id);
+    main.push(convo);
+  };
+  acceptedRows.forEach(addMain);
+  if (!accepted) legacyRows.forEach(addMain);
+  return { main, requests: [...incoming.values()], joins: [...joins.values()] };
+}
+
 const CALL_RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
 
 export function parseCallMessage(text) {

@@ -1085,6 +1085,13 @@ button.avatar-btn:focus-visible {
 }
 .person.unread .handle { color: var(--text); font-weight: 700; }
 .person strong, .person .handle, .person .snip { display: block; }
+a.person.request-entry { width: 100%; }
+.request-faces { display: flex; flex: none; }
+.request-faces .avatar + .avatar { margin-left: -12px; }
+.request-faces .avatar { box-shadow: 0 0 0 2px var(--bg); }
+.avatar.request-mark { display: grid; place-items: center; background: var(--search); color: var(--text); }
+.avatar.request-mark::before { content: none; }
+.avatar.request-mark .ico { width: 22px; height: 22px; }
 .person-link { flex: 1; min-width: 0; }
 .person .follow, .profile-actions { flex: none; }
 .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
@@ -1513,21 +1520,21 @@ button.avatar-btn:focus-visible {
 #chat-form > .chat-field { grid-column: 1; grid-row: 1; }
 #chat-form > button[type="submit"],
 #chat-form > .tip-wrap { grid-column: 2; grid-row: 1; }
-#chat-form > #chat-picker:not([hidden]) { grid-column: 1 / -1; min-height: 0; overflow: hidden; }
 #chat-form > .chat-tools { grid-column: 1 / -1; }
 #chat-form > .chat-hint { grid-column: 1 / -1; }
 #chat-picker:not([hidden]) {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 6;
   display: flex;
   flex-direction: column;
+  height: min(440px, calc(100dvh - 210px));
+  max-height: min(440px, calc(100dvh - 210px));
   min-height: 0;
-  max-height: min(300px, 42dvh);
   overflow: hidden;
   background: transparent;
-}
-#chat-picker:not([hidden]):has(.picker-tall) {
-  height: min(360px, 50dvh);
-  min-height: min(240px, 40dvh);
-  max-height: min(360px, 50dvh);
 }
 #chat-picker:not([hidden]) > .picker,
 #compose.picker-open #compose-picker:not([hidden]) > .picker {
@@ -1536,6 +1543,10 @@ button.avatar-btn:focus-visible {
   max-height: none;
   margin-top: 0;
   overflow: hidden;
+}
+#chat-picker:not([hidden]) > .picker,
+#compose.picker-open #compose-picker:not([hidden]):has(.picker-tall) > .picker {
+  height: 100%;
 }
 .chat-tools { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .chat-tools .icon-btn {
@@ -1894,10 +1905,6 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   align-items: stretch;
 }
 #compose.picker-open .compose-stage { min-height: 120px; }
-#compose.picker-open:has(.picker-tall) .compose-stage {
-  flex: 1 1 180px;
-  min-height: 120px;
-}
 #compose.picker-open #compose-picker:not([hidden]) {
   display: flex;
   flex-direction: column;
@@ -1906,11 +1913,6 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   max-height: min(280px, 40dvh);
   overflow: hidden;
   background: transparent;
-}
-#compose.picker-open #compose-picker:not([hidden]):has(.picker-tall) {
-  flex: 1 1 300px;
-  min-height: min(240px, 36dvh);
-  max-height: none;
 }
 #compose[open] .compose-write { min-height: 0; height: 100%; }
 #compose[open] .composer-field {
@@ -1939,6 +1941,34 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 }
 #compose-save-draft:hover { background: var(--hover); }
 #compose-picker { flex: none; position: relative; z-index: 2; background: transparent; }
+#compose.picker-open:has(.picker-tall) .compose-stage {
+  flex: 0 0 auto;
+  max-height: min(180px, 28dvh);
+  min-height: 0;
+  overflow: hidden;
+}
+#compose.picker-open:has(.picker-tall) .compose-write {
+  height: auto;
+  min-height: 0;
+}
+#compose.picker-open:has(.picker-tall) #compose-context {
+  max-height: 3.2em;
+  overflow: hidden;
+}
+#compose.picker-open:has(.picker-tall) .composer-field {
+  flex: none;
+  height: 52px;
+  min-height: 52px;
+}
+#compose.picker-open:has(.picker-tall) .reply-control { margin-block: 0; }
+#compose.picker-open #compose-picker:not([hidden]):has(.picker-tall) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
 #compose[open] .reply-control,
 #compose[open] .compose-bar,
 #compose[open] .compose-leave { flex: none; }
@@ -2374,6 +2404,32 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
   color: inherit;
   overflow: visible;
 }
+#menu,
+#app-menu {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+#menu {
+  width: 250px;
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+}
+#app-menu {
+  min-width: 248px;
+  overflow: visible;
+}
+#menu:popover-open:not([hidden]),
+#app-menu:popover-open:not([hidden]) { display: block; }
 #suggest:popover-open, .float-tip:popover-open, #hovercard:popover-open, #type-ghost:popover-open { display: block !important; }
 .float-tip {
   position: fixed;
@@ -2989,11 +3045,21 @@ select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
+  color: var(--text);
+  background-color: var(--search);
+  color-scheme: light;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
   background-position: calc(100% - 18px) center, calc(100% - 13px) center;
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 32px;
+  cursor: pointer;
+}
+select option,
+select optgroup {
+  color-scheme: light;
+  color: #14181f;
+  background-color: #fff;
 }
 .reply-control select,
 #report select,

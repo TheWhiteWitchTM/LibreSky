@@ -700,10 +700,42 @@ export function convoHtml(convo, me, options = {}) {
   return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
 }
 
-export function requestEntryHtml(count) {
-  const n = Number(count) || 0;
-  const detail = n === 1 ? '1 person waiting' : (n ? `${n} people waiting` : 'People you have not accepted');
-  return `<a class="person request-entry" href="#/messages/requests"><span class="avatar" data-initial="R"></span><span class="person-link"><strong>Message requests</strong><span class="handle">${escapeHtml(detail)}</span></span></a>`;
+export function requestPeople(requests, joins, me = '') {
+  const people = [];
+  (requests || []).forEach((convo) => {
+    const members = convo.members || [];
+    const other = members.find((member) => member?.did && member.did !== me) || members.find((member) => member?.did) || {};
+    const name = other.displayName || (other.handle ? `@${other.handle}` : '') || convo.name || 'Someone';
+    const mark = other.displayName || other.handle || convo.name || name;
+    people.push({ name, mark, avatar: other.avatar || '' });
+  });
+  (joins || []).forEach((item) => {
+    const owner = item?.owner || {};
+    const name = item?.name || owner.displayName || (owner.handle ? `@${owner.handle}` : '') || 'Group';
+    const mark = item?.name || owner.displayName || owner.handle || name;
+    people.push({ name, mark, avatar: owner.avatar || '' });
+  });
+  return people;
+}
+
+export function requestEntryHtml(count, people = []) {
+  const faces = (Array.isArray(people) ? people : []).filter((person) => person?.name).slice(0, 3);
+  const total = Math.max(Number(count) || 0, faces.length);
+  if (total < 1) return '';
+  const faceHtml = faces.length
+    ? `<span class="request-faces">${faces.map((person) => avatar(person.avatar, person.mark || person.name)).join('')}</span>`
+    : `<span class="avatar request-mark" aria-hidden="true">${icon('chat')}</span>`;
+  const detail = faces.length
+    ? (total === 1 ? `${faces[0].name} is waiting` : `${total} people waiting`)
+    : (total === 1 ? 'A request did not load. Open to try again.' : `${total} requests did not load.`);
+  return `<a class="person request-entry" href="#/messages/requests">${faceHtml}<span class="person-link"><strong>Message requests</strong><span class="handle">${escapeHtml(detail)}</span></span></a>`;
+}
+
+export function joinRequestHtml(item) {
+  const name = item?.name || 'Group';
+  const owner = item?.owner || {};
+  const who = owner.displayName || (owner.handle ? `@${owner.handle}` : '') || 'the owner';
+  return `<div class="person convo">${avatar(owner.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">Waiting to join · ${escapeHtml(who)}</span></span><span class="row-actions"><button type="button" class="danger mini" data-act="withdraw-join" data-convo="${attr(item?.convoId || '')}">Withdraw</button></span></div>`;
 }
 
 function callLine(parsed) {
