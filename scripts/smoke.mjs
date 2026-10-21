@@ -331,6 +331,7 @@ localStorage.setItem('libresky.ai', JSON.stringify({
 setPassword({ accessJwt: 'jwt', refreshJwt: 'refresh', did: 'did:plc:one', handle: 'one.bsky.social', pds: 'https://bsky.social' });
 assert.equal(claimLegacyAi('did:plc:one').apiKey, aiKey);
 assert.equal(localStorage.getItem('libresky.ai'), null);
+assert.equal(localStorage.getItem('libresky.aiAccounts'), null);
 assert.equal(loadAi().provider, 'gemini');
 const storedAi = aiPreference(loadAi());
 assert.equal(storedAi.$type, 'app.bsky.actor.defs#libreskyAi');
@@ -346,6 +347,7 @@ assert.equal(loadDraft(), '');
 assert.deepEqual(learnedWordList(), []);
 saveAi({ provider: 'gemini', apiKey: 'other-key-12345678' });
 assert.equal(loadAi().apiKey, 'other-key-12345678');
+assert.equal(localStorage.getItem('libresky.aiAccounts'), null);
 clearAi();
 assert.equal(loadAi(), null);
 setPassword({ accessJwt: 'jwt', refreshJwt: 'refresh', did: 'did:plc:one', handle: 'one.bsky.social', pds: 'https://bsky.social' });

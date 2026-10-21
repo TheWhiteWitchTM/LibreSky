@@ -51,7 +51,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAi, clearAiLog, loadAi, prepareAi, providerById, saveAi, subscribeAiLog } from './ai.js';
+import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, forceStyles, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -64,6 +64,7 @@ import {
   callMayRing,
   feedView,
   homeAllows,
+  commitAiAccount,
   pullAccountPrefs,
   saveA11yPrefs,
   saveCallAllow,
@@ -2348,13 +2349,13 @@ function aiSettingsHtml() {
   const known = providerById(provider);
   const model = saved?.model || known.model || '';
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
-  const keyHint = saved ? 'Saved on your account. Type a new key to replace it.' : 'Paste the key from that account';
+  const keyHint = saved ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account';
   const status = saved
     ? `${AI_NAME} is on for this account.`
     : `${AI_NAME} is off until a key is saved.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. The key is saved as a private preference, so it follows this login to another computer. It is not a public post. It is sent only to the provider you pick.</p>
-    <form id="ai-form" class="ai-form">
+  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. The key is saved on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
+    <form id="ai-form" class="ai-form" autocomplete="off">
       <label>Provider
         <select id="ai-provider">${options}</select>
       </label>
@@ -2365,7 +2366,7 @@ function aiSettingsHtml() {
         <input id="ai-base" value="${escapeHtml(provider === 'custom' ? (saved?.base || '') : '')}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://example.com/v1">
       </label>
       <label>API key
-        <input id="ai-key" type="password" maxlength="2000" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(keyHint)}">
+        <input id="ai-key" type="text" name="provider-secret" maxlength="2000" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" placeholder="${escapeHtml(keyHint)}">
       </label>
       <div class="toolbar">
         <button class="primary small" type="submit">Save</button>
@@ -2374,7 +2375,7 @@ function aiSettingsHtml() {
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. That key starts with xai-. SuperGrok and an X login are not an API key. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
 }
 
 function readAiForm() {
@@ -2403,14 +2404,18 @@ function syncAiFields() {
   }
 }
 
-function saveAiForm(event) {
+async function saveAiForm(event) {
   event.preventDefault();
+  const button = event.target?.querySelector?.('button[type="submit"]');
+  if (button) button.disabled = true;
   try {
-    const next = saveAi(readAiForm());
-    toast(`${AI_NAME} saved on your account`);
+    await commitAiAccount(readAiForm());
+    toast(`${AI_NAME} saved on your Bluesky account`);
     if (parseHash()[0] === 'settings') showSettings();
   } catch (error) {
-    toast(error.message);
+    toast(error.message || 'Could not save the key on your Bluesky account.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
   }
 }
 
@@ -6365,9 +6370,10 @@ async function onClick(event) {
   }
   if (act === 'ai-clear') {
     event.preventDefault();
-    clearAi();
-    toast('AI account removed from your account');
-    if (parseHash()[0] === 'settings') showSettings();
+    commitAiAccount(null).then(() => {
+      toast('AI account removed from your Bluesky account');
+      if (parseHash()[0] === 'settings') showSettings();
+    }).catch((error) => toast(error.message || 'Could not remove the key from your Bluesky account.'));
     return;
   }
   if (act === 'ai-check') {

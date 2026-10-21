@@ -3,9 +3,11 @@ import { currentDid } from './session.js';
 const AI_KEY = 'libresky.ai';
 const AI_MAP = 'libresky.aiAccounts';
 
-// The PDS only stores private preferences whose type is under app.bsky.
-// A repo record is public, so the key must not go in app.libresky.settings.
+// Private account preferences travel with the login. The profile record is public,
+// so the key must not be written there or in app.libresky.settings.
 export const AI_PREF_TYPE = 'app.bsky.actor.defs#libreskyAi';
+
+const memory = new Map();
 
 export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by tagging @ai or @si. Those tags are not Bluesky accounts. Reply in plain text, usually one short paragraph, and stay under 700 characters unless the question needs more.';
 
@@ -28,7 +30,7 @@ export function watchAiAccount(fn) {
   aiWatch = typeof fn === 'function' ? fn : () => {};
 }
 
-function readMap() {
+function readLegacyMap() {
   try {
     const raw = localStorage.getItem(AI_MAP);
     const data = raw ? JSON.parse(raw) : null;
@@ -38,17 +40,26 @@ function readMap() {
   }
 }
 
-function writeMap(map) {
+function writeLegacyMap(map) {
   try {
     if (!Object.keys(map).length) localStorage.removeItem(AI_MAP);
     else localStorage.setItem(AI_MAP, JSON.stringify(map));
   } catch {
-    /* private mode keeps the in-memory account */
+    /* the account copy is the record that matters */
   }
 }
 
 function dropLegacy() {
   try { localStorage.removeItem(AI_KEY); } catch { /* already gone */ }
+}
+
+function forgetBrowserCopy(did) {
+  const map = readLegacyMap();
+  if (did && map[did]) {
+    delete map[did];
+    writeLegacyMap(map);
+  }
+  dropLegacy();
 }
 
 function readLegacy() {
@@ -63,18 +74,20 @@ function readLegacy() {
 }
 
 function putAccount(did, config, synced) {
-  const map = readMap();
   if (!did) return;
-  if (!config) delete map[did];
-  else map[did] = { ...config, synced: Boolean(synced) };
-  writeMap(map);
-  dropLegacy();
+  if (!config) {
+    memory.delete(did);
+    forgetBrowserCopy(did);
+    return;
+  }
+  memory.set(did, { ...config, synced: Boolean(synced) });
+  if (synced) forgetBrowserCopy(did);
 }
 
 export function loadAi() {
   const did = currentDid();
   if (!did) return null;
-  const saved = readMap()[did];
+  const saved = memory.get(did);
   if (!saved || typeof saved !== 'object' || !saved.apiKey) return null;
   try {
     return prepareAi(saved);
@@ -84,22 +97,27 @@ export function loadAi() {
 }
 
 export function aiAccountSynced(did = currentDid()) {
-  const saved = did ? readMap()[did] : null;
+  const saved = did ? memory.get(did) : null;
   return Boolean(saved?.synced);
 }
 
 export function setAiAccountSynced(did, synced) {
-  if (!did || !readMap()[did]) return;
-  const map = readMap();
-  map[did] = { ...map[did], synced: Boolean(synced) };
-  writeMap(map);
+  if (!did || !memory.get(did)) return;
+  memory.set(did, { ...memory.get(did), synced: Boolean(synced) });
+  if (synced) forgetBrowserCopy(did);
 }
 
 export function claimLegacyAi(did) {
-  if (!did || readMap()[did]?.apiKey) return null;
-  const legacy = readLegacy();
+  if (!did || memory.get(did)?.apiKey) return null;
+  const map = readLegacyMap();
+  let legacy = null;
+  if (map[did]?.apiKey) {
+    try { legacy = prepareAi(map[did]); } catch { legacy = null; }
+  }
+  if (!legacy) legacy = readLegacy();
   if (!legacy) return null;
-  putAccount(did, legacy, false);
+  memory.set(did, { ...legacy, synced: false });
+  dropLegacy();
   return legacy;
 }
 
@@ -312,7 +330,7 @@ export function responsesBody(account, history) {
 
 function explainAiError(provider, message) {
   if (provider === 'grok' && /incorrect api key|invalid api key/i.test(message || '')) {
-    return 'xAI refused this key. Create one at console.x.ai. It starts with xai-. SuperGrok and an X login are not API keys.';
+    return 'xAI refused this key. The key from console.x.ai is the one api.x.ai accepts.';
   }
   return message;
 }

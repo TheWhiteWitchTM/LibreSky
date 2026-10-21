@@ -2731,6 +2731,9 @@ html[data-design="on"] .app-top::after {
   padding: 10px 16px;
   font-weight: 500;
 }
+#ai-key {
+  -webkit-text-security: disc;
+}
 .settings.ai-doc { padding: 12px 16px 24px; }
 .ai-doc .ai-thread { min-height: 0; padding: 4px 0 8px; }
 .ai-ask { position: static; margin-top: 8px; border: 1px solid var(--border); border-radius: 18px; }

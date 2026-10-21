@@ -558,6 +558,33 @@ function applyPulledWords(list) {
   return changed;
 }
 
+export async function commitAiAccount(input) {
+  const did = currentDid();
+  if (!signedIn() || !did) throw new Error('Sign in to save the key on your account.');
+  if (pullPromise) {
+    try { await pullPromise; } catch { /* a failed read can still try to save */ }
+  }
+  if (currentDid() !== did) throw new Error('Sign in to save the key on your account.');
+  if (input) storeAiAccount(did, input, false);
+  else storeAiAccount(did, null, false);
+  let wrote = false;
+  try {
+    await patchPreferences((list) => {
+      if (currentDid() !== did) return list;
+      replacePref(list, AI_PREF_TYPE, aiPreference(loadAi()));
+      wrote = true;
+      return list;
+    });
+    if (!wrote || currentDid() !== did) throw new Error('Sign in to save the key on your account.');
+    setAiAccountSynced(did, Boolean(loadAi()));
+    dirtyAi = false;
+  } catch (error) {
+    dirtyAi = true;
+    schedule();
+    throw error;
+  }
+}
+
 async function pushBluesky() {
   const feeds = [...dirtyFeeds];
   const thread = dirtyThread;
