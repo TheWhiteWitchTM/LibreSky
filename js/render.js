@@ -246,10 +246,21 @@ function quote(view, linked = true) {
   return '';
 }
 
+function videoFrame(embed) {
+  let width = Number(embed?.aspectRatio?.width);
+  let height = Number(embed?.aspectRatio?.height);
+  if (!(width > 0) || !(height > 0)) return '';
+  // A feed frame no taller than 1:2. The picture stays inside that frame.
+  if (width / height < 0.5) width = height / 2;
+  return `--vw:${Math.round(width)};--vh:${Math.round(height)}`;
+}
+
 function video(embed) {
   const thumb = safeUrl(embed.thumbnail || '');
   const playlist = safeUrl(embed.playlist || '');
-  return `<button type="button" class="video" data-act="video" data-playlist="${attr(playlist)}" data-alt="${attr(embed.alt || '')}">${thumb ? `<img src="${attr(thumb)}" alt="${attr(embed.alt || 'Video')}">` : ''}<span class="play">Play</span></button>`;
+  const frame = videoFrame(embed);
+  const style = frame ? ` style="${frame}"` : '';
+  return `<button type="button" class="video"${style} data-act="video" data-playlist="${attr(playlist)}" data-alt="${attr(embed.alt || '')}">${thumb ? `<img src="${attr(thumb)}" alt="${attr(embed.alt || 'Video')}">` : ''}<span class="play">Play</span></button>`;
 }
 
 function embedHtml(embed) {

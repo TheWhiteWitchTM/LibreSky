@@ -570,6 +570,39 @@ assert.match(rendered, /class="action-group like/);
 assert.match(rendered, /class="name"/);
 assert.match(rendered, /data-act="account-card"/);
 assert.doesNotMatch(rendered, /<a class="avatar-link"/);
+const videoPost = postHtml({
+  post: {
+    uri: 'at://did:x/app.bsky.feed.post/v',
+    cid: 'cid',
+    author: { did: 'did:x', handle: 'me.bsky.social' },
+    record: { text: 'clip', createdAt: '2026-10-21T11:31:16.741Z' },
+    embed: {
+      $type: 'app.bsky.embed.video#view',
+      playlist: 'https://video.bsky.app/watch/did%3Aplc%3Aexample/bafkrei/playlist.m3u8',
+      thumbnail: 'https://video.bsky.app/watch/did%3Aplc%3Aexample/bafkrei/thumbnail.jpg',
+      alt: 'A portrait clip',
+      aspectRatio: { width: 720, height: 1280 },
+    },
+  },
+});
+assert.match(videoPost, /class="video"/);
+assert.match(videoPost, /--vw:720;--vh:1280/);
+assert.match(videoPost, /playlist\.m3u8/);
+assert.match(videoPost, /alt="A portrait clip"/);
+const tallVideo = postHtml({
+  post: {
+    uri: 'at://did:x/app.bsky.feed.post/tall',
+    cid: 'cid',
+    author: { did: 'did:x', handle: 'me.bsky.social' },
+    record: { text: 'tall', createdAt: '2026-10-21T11:31:16.741Z' },
+    embed: {
+      $type: 'app.bsky.embed.video#view',
+      playlist: 'https://video.bsky.app/watch/did%3Aplc%3Aexample/bafkrei/playlist.m3u8',
+      aspectRatio: { width: 100, height: 400 },
+    },
+  },
+});
+assert.match(tallVideo, /--vw:200;--vh:400/);
 const savedPost = postHtml({
   post: {
     uri: 'at://did:x/app.bsky.feed.post/1',

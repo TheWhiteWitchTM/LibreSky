@@ -4041,6 +4041,7 @@ function goBack() {
 }
 
 function route() {
+  stopVideo();
   noteNav();
   closeMenu();
   closeAppMenu();
@@ -7261,6 +7262,7 @@ async function onClick(event) {
     return;
   }
   if (act === 'video') {
+    if (event.target.closest('video')) return;
     event.preventDefault();
     playVideo(event.target.closest('.video'));
     return;
@@ -7826,34 +7828,91 @@ function paintLightbox() {
   $('lightbox-alt').textContent = image.alt || '';
 }
 
+// Bluesky video is MPEG-TS HLS (H.264 + AAC). Chrome answers "maybe" for
+// application/vnd.apple.mpegurl and then leaves the controls at 0:00.
+// hls.js plays that playlist. Native HLS is only the fallback.
+function canPlayBskyVideoCodecs() {
+  const mediaSource = globalThis.ManagedMediaSource || globalThis.MediaSource || globalThis.WebKitMediaSource;
+  if (!mediaSource || typeof mediaSource.isTypeSupported !== 'function') return false;
+  return mediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"')
+    && mediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"');
+}
+
+let activeHls = null;
+
+function stopVideo() {
+  activeHls?.destroy();
+  activeHls = null;
+}
+
+function mountVideo(node) {
+  const player = document.createElement('div');
+  player.className = 'video playing';
+  if (node.style.cssText) player.style.cssText = node.style.cssText;
+  const video = document.createElement('video');
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  const poster = node.querySelector('img')?.getAttribute('src') || '';
+  if (poster) video.poster = poster;
+  const alt = node.dataset.alt || '';
+  if (alt) video.setAttribute('aria-label', alt);
+  player.append(video);
+  node.replaceWith(player);
+  return { player, video };
+}
+
+function failVideo(player) {
+  stopVideo();
+  player.replaceChildren();
+  player.textContent = 'This browser could not play the video.';
+}
+
+function playNativeVideo(player, video, playlist) {
+  // Native HLS is for players with no Media Source, such as iOS Safari.
+  // Where Media Source exists, Chrome's native HLS reports 0:00 for these playlists.
+  if (canPlayBskyVideoCodecs() || !video.canPlayType('application/vnd.apple.mpegurl')) {
+    failVideo(player);
+    return;
+  }
+  video.src = playlist;
+  video.play().catch(() => {});
+}
+
 async function playVideo(node) {
-  if (!node || node.dataset.playing) return;
+  if (!node || node.dataset.playing || node.classList.contains('playing')) return;
   const playlist = node.dataset.playlist;
   if (!playlist) return;
   node.dataset.playing = '1';
-  const video = document.createElement('video');
-  video.controls = true;
-  video.autoplay = true;
-  video.playsInline = true;
-  node.replaceChildren(video);
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = playlist;
-    return;
-  }
-  try {
-    const mod = await import('https://cdn.jsdelivr.net/npm/hls.js@1.6.13/+esm');
-    const Hls = mod.default;
-    if (Hls?.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(playlist);
-      hls.attachMedia(video);
-      return;
+  stopVideo();
+  const { player, video } = mountVideo(node);
+  if (canPlayBskyVideoCodecs()) {
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/hls.js@1.6.13/+esm');
+      const Hls = mod.default;
+      if (!player.isConnected) return;
+      if (Hls?.isSupported()) {
+        const hls = new Hls({ maxMaxBufferLength: 30 });
+        activeHls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data?.fatal || activeHls !== hls) return;
+          hls.destroy();
+          if (activeHls === hls) activeHls = null;
+          failVideo(player);
+        });
+        hls.attachMedia(video);
+        hls.loadSource(playlist);
+        return;
+      }
+    } catch {
+      /* fall through */
     }
-  } catch {
-    /* fall through */
   }
-  node.replaceChildren();
-  node.textContent = 'This browser could not play the video.';
+  if (!player.isConnected) return;
+  playNativeVideo(player, video, playlist);
 }
 
 async function startOAuth(event) {
