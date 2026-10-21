@@ -748,9 +748,16 @@ function callLine(parsed) {
 export function messageHtml(message, me, options = {}) {
   const type = message?.$type || '';
   if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
-  const sender = messageSender(message);
+  const nested = message?.message && typeof message.message === 'object' ? message.message : null;
+  if (type.endsWith('systemMessageView')) {
+    const line = nested?.text || message?.text || '';
+    if (!line) return '';
+    const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
+    return `<div class="msg-header"${id}><span>${escapeHtml(line)}</span></div>`;
+  }
+  const sender = messageSender(message) || messageSender(nested);
   const mine = Boolean(sender && sender === me);
-  const text = message?.text || '';
+  const text = message?.text || nested?.text || '';
   const call = parseCallMessage(text);
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
   if (call?.kind === 'data') return `<div class="msg-signal"${id} hidden></div>`;
@@ -763,10 +770,10 @@ export function messageHtml(message, me, options = {}) {
       : '';
     return `<div class="msg-header${tone}"${id}>${icon(video ? 'video' : 'phone')}<span>${escapeHtml(callLine(call))}</span>${actions}</div>`;
   }
-  const embed = message?.embed ? embedHtml(message.embed) : '';
+  const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';
-  return `<div class="bubble${mine ? ' mine' : ''}${fresh}"${id}>${text ? `<p>${richText(text, message?.facets)}</p>` : ''}${embed}</div>`;
+  return `<div class="bubble${mine ? ' mine' : ''}${fresh}"${id}>${text ? `<p>${richText(text, message?.facets || nested?.facets)}</p>` : ''}${embed}</div>`;
 }
 
 export function assistantHtml(text, { id = '', kicker = 'Your account', actions = false } = {}) {

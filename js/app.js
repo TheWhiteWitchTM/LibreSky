@@ -54,8 +54,8 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -116,6 +116,13 @@ let reportTarget = null;
 let chatTimer = 0;
 let badgeMemory = { notifications: null, chat: null, ring: '' };
 const ignoredRings = new Set();
+const convoById = new Map();
+
+function rememberConvos(rows) {
+  (rows || []).forEach((row) => {
+    if (row?.id) convoById.set(row.id, row);
+  });
+}
 let suggestTimer = 0;
 let suggestSeq = 0;
 let suggestArea = null;
@@ -671,6 +678,49 @@ async function laterAcceptedRequests(first) {
   return found;
 }
 
+async function requestIdsFromLog() {
+  const data = await api.getChatLog().catch(() => null);
+  const logs = data?.logs || [];
+  const ids = [];
+  const seen = new Set();
+  logs.forEach((event) => {
+    const id = event?.convoId || event?.convo?.id;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  });
+  return ids;
+}
+
+async function fillMissingRequests(parts, reported, accepted) {
+  let listed = parts.requests.length + parts.joins.length;
+  if (reported <= listed) return parts;
+  if (accepted?.cursor) {
+    const extra = await laterAcceptedRequests(accepted);
+    const seen = new Set(parts.requests.map((row) => row.id));
+    extra.forEach((row) => {
+      if (!row?.id || seen.has(row.id)) return;
+      seen.add(row.id);
+      parts.requests.push({ ...row, status: 'request' });
+      parts.main = parts.main.filter((item) => item.id !== row.id);
+    });
+  }
+  listed = parts.requests.length + parts.joins.length;
+  if (reported <= listed) return parts;
+  const known = new Set([...parts.requests, ...parts.main].map((row) => row.id));
+  const ids = (await requestIdsFromLog()).filter((id) => !known.has(id)).slice(0, 10);
+  const views = await Promise.all(ids.map((id) => api.getConvoView(id).catch(() => null)));
+  views.forEach((wrap) => {
+    const convo = wrap?.convo;
+    if (!convo?.id || known.has(convo.id)) return;
+    if (!convoIsRequest(convo)) return;
+    known.add(convo.id);
+    parts.requests.push({ ...convo, status: 'request' });
+    parts.main = parts.main.filter((item) => item.id !== convo.id);
+  });
+  return parts;
+}
+
 async function loadConvoPages() {
   const [accepted, legacy, fresh, unread] = await Promise.all([
     api.listConvos(undefined, undefined, 'accepted').catch(() => null),
@@ -681,20 +731,16 @@ async function loadConvoPages() {
   const reported = Number(unread?.unreadRequestConvos) || 0;
   if (!accepted && !legacy && !fresh) {
     const all = await api.listConvos().catch(() => ({ convos: [] }));
-    return { ...partitionConvos({ accepted: all, legacyRequests: null, requestItems: null }), reported };
+    const parts = partitionConvos({ accepted: all, legacyRequests: null, requestItems: null });
+    rememberConvos(parts.main);
+    rememberConvos(parts.requests);
+    return { ...parts, reported };
   }
-  const parts = partitionConvos({ accepted, legacyRequests: legacy, requestItems: fresh });
+  let parts = partitionConvos({ accepted, legacyRequests: legacy, requestItems: fresh });
   const listed = parts.requests.length + parts.joins.length;
-  if (reported > listed && accepted?.cursor) {
-    const extra = await laterAcceptedRequests(accepted);
-    const seen = new Set(parts.requests.map((row) => row.id));
-    extra.forEach((row) => {
-      if (!row?.id || seen.has(row.id)) return;
-      seen.add(row.id);
-      parts.requests.push({ ...row, status: 'request' });
-      parts.main = parts.main.filter((item) => item.id !== row.id);
-    });
-  }
+  if (reported > listed) parts = await fillMissingRequests(parts, reported, accepted);
+  rememberConvos(parts.main);
+  rememberConvos(parts.requests);
   return { ...parts, reported };
 }
 
@@ -1547,21 +1593,27 @@ async function showMessages(convoId) {
       refreshBadge();
       return;
     }
+    const cached = convoById.get(convoId) || null;
+    let loadError = null;
     const [data, convoWrap] = await Promise.all([
-      api.getConvo(convoId),
+      api.getConvo(convoId).catch((error) => { loadError = error; return null; }),
       api.getConvoView(convoId).catch(() => null),
     ]);
     if (token !== generation) return;
-    const messages = (data.messages || []).slice().reverse();
-    const other = otherMember(convoWrap?.convo, messages);
+    const convo = convoWrap?.convo || (convoWrap?.id ? convoWrap : null) || cached || null;
+    if (convo?.id) rememberConvos([convo]);
+    if (!data && !convo) throw loadError || new Error('Could not open that chat.');
+    const messages = messagesForConvo(data, convo);
+    const other = otherMember(convo, messages);
     const peerDid = other?.did || '';
-    const requested = convoWrap?.convo?.status === 'request';
+    const requested = convoIsRequest(convo);
     if (other?.did) {
       if (other.viewer && Object.prototype.hasOwnProperty.call(other.viewer, 'following')) followCache.set(other.did, Boolean(other.viewer.following));
       else await rememberFollows([other.did]);
     }
     if (token !== generation) return;
     if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
+    else $('title').textContent = requested ? 'Message request' : 'Chat';
     const options = chatOptions(messages, peerDid, convoId, false);
     const requestBar = requested
       ? `<div class="request-banner"><p>This is a message request. Accept it to keep the chat, or delete it.</p><span class="row-actions"><button type="button" class="primary small" data-act="accept-convo" data-convo="${escapeHtml(convoId)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${escapeHtml(convoId)}">Delete</button></span></div>`
@@ -1570,7 +1622,10 @@ async function showMessages(convoId) {
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button>${styleButtons()}</div>`;
-    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
+    const header = chatHeaderHtml(other) || `<div class="chat-head"><span class="chat-with"><span><strong>${requested ? 'Message request' : 'Chat'}</strong></span></span></div>`;
+    const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
+    const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
+    $('view').innerHTML = `${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -2408,24 +2463,40 @@ let aiSeq = 0;
 let aiPending = '';
 let aiPendingNote = 'Page';
 
+function aiKeyHelp(provider) {
+  const item = providerById(provider);
+  if (item.id === 'custom') {
+    return 'Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.';
+  }
+  if (!item.keyUrl) return '';
+  const link = `<a href="${escapeHtml(item.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.keyLabel || item.keyUrl)}</a>`;
+  if (item.keyOptional) return `${escapeHtml(item.label)} answers without a key. A key from ${link} raises the limit.`;
+  return `Get a ${escapeHtml(item.label)} key from ${link}.`;
+}
+
 function aiSettingsHtml() {
   const saved = loadAi();
-  const provider = saved?.provider || 'gemini';
+  const provider = saved?.provider || 'grok';
   const known = providerById(provider);
   const model = saved?.model || known.model || '';
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
-  const keyHint = saved ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account';
-  const status = saved
+  const keyHint = saved?.apiKey ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account';
+  const usingFallback = !saved?.apiKey;
+  const status = saved?.apiKey
     ? `${AI_NAME} is on for this account.`
-    : `${AI_NAME} is off until a key is saved.`;
+    : `${AI_NAME} is on with a free public model until you save a key.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. It stays off until you save a key. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. The key is saved on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
+  const directory = AI_PROVIDERS.filter((item) => item.keyUrl).map((item) => {
+    const extra = item.keyOptional ? ' · works without a key' : '';
+    return `<li><a href="${escapeHtml(item.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>${extra}</li>`;
+  }).join('');
+  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. Without a key it uses a free public model so you still have something. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
     <form id="ai-form" class="ai-form" autocomplete="off">
       <label>Provider
         <select id="ai-provider">${options}</select>
       </label>
       <label>Model
-        <input id="ai-model" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="80" spellcheck="false" autocapitalize="off" autocomplete="off">
+        <input id="ai-model" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off">
       </label>
       <label id="ai-base-label"${provider === 'custom' ? '' : ' hidden'}>API address
         <input id="ai-base" value="${escapeHtml(provider === 'custom' ? (saved?.base || '') : '')}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://example.com/v1">
@@ -2433,6 +2504,7 @@ function aiSettingsHtml() {
       <label>API key
         <input id="ai-key" type="text" name="provider-secret" maxlength="2000" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" placeholder="${escapeHtml(keyHint)}">
       </label>
+      <p class="dim" id="ai-key-help">${aiKeyHelp(provider)}</p>
       <div class="toolbar">
         <button class="primary small" type="submit">Save</button>
         <button type="button" class="text-btn" id="ai-check" data-act="ai-check">Check</button>
@@ -2440,7 +2512,8 @@ function aiSettingsHtml() {
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. DeepSeek uses a key from <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a> and calls api.deepseek.com. That key is billed by DeepSeek. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+    <p class="dim">${usingFallback ? 'A key is optional. Pick a provider and open its site to create one.' : 'Replace the key by pasting a new one and saving.'}</p>
+    <ul class="ai-key-list dim">${directory}</ul>`;
 }
 
 function readAiForm() {
@@ -2461,6 +2534,8 @@ function syncAiFields() {
   const item = providerById(select.value);
   const baseLabel = $('ai-base-label');
   if (baseLabel) baseLabel.hidden = item.id !== 'custom';
+  const help = $('ai-key-help');
+  if (help) help.innerHTML = aiKeyHelp(select.value);
   const current = model.value.trim();
   const known = AI_PROVIDERS.some((provider) => provider.model && provider.model === current);
   if (model.dataset.auto === '1' || !current || known) {
@@ -2487,7 +2562,7 @@ async function saveAiForm(event) {
 async function checkAiForm() {
   const button = $('ai-check');
   let account;
-  try { account = readAiForm(); } catch (error) { toast(error.message); return; }
+  try { account = readAiForm(); } catch { account = resolveAi(null); }
   if (button) button.disabled = true;
   try {
     await askAi(account, [
@@ -3698,6 +3773,7 @@ function showAi() {
   setChrome({ title: AI_NAME, nav: 'ai', back: true });
   const saved = loadAi();
   const ready = aiReady(saved);
+  const usingFallback = !saved?.apiKey;
   const waiting = aiThread.some((turn) => turn.role === 'pending');
   const turns = aiThread.map((turn) => {
     if (turn.role === 'assistant' || turn.role === 'pending') return assistantHtml(turn.content, { kicker: AI_NAME });
@@ -3711,19 +3787,18 @@ function showAi() {
     </form>`;
   if (ready) {
     const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
+    const line = usingFallback
+      ? `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with a free public model. <a class="text-link" href="#/settings">Add a key</a></p>`
+      : `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. <a class="text-link" href="#/settings">Settings</a></p>`;
     $('view').innerHTML = `<section class="settings ai-doc ai-live">
-      <p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. <a class="text-link" href="#/settings">Settings</a></p>
+      ${line}
       <div class="messages ai-thread">${empty}${turns}</div>
       ${askForm}
     </section>`;
   } else {
     $('view').innerHTML = `<section class="settings ai-doc">
       <h2>${AI_NAME}</h2>
-      <p>${AI_NAME} stays off until you save a key in Settings. The key is saved on your account and follows that login. After that, this page is a chat, Home has an ask field, and profiles and posts get a check. Nothing is sent until a key is saved.</p>
-      <p><a class="text-link" href="#/settings">Add a key in Settings</a></p>
-      <h2>@ai and @si</h2>
-      <p>@ai and @si are the same tag. They are not Bluesky accounts. In a chat, a message that contains the tag asks the account you saved. That message is not sent to the other person. The answer stays on the chat screen until you press Send.</p>
-      <p>A tag in a post is only a highlight. Posting does not call the model.</p>
+      <p>${AI_NAME} could not start. <a class="text-link" href="#/settings">Settings</a> can add a key.</p>
     </section>`;
   }
   const area = $('ai-text');
@@ -3749,7 +3824,7 @@ async function askOnPage(text) {
   aiPendingNote = 'Page';
   const saved = loadAi();
   if (!aiReady(saved)) {
-    toast('Add an AI account in Settings to use @ai and @si.');
+    toast('AI Assist could not start. Add a key in Settings.');
     return;
   }
   const seq = ++aiSeq;
@@ -6260,7 +6335,7 @@ function appendAssistant(text) {
 async function askInChat(input, text) {
   const saved = loadAi();
   if (!aiReady(saved)) {
-    toast('Add an AI account in Settings to use @ai and @si.');
+    toast('AI Assist could not start. Add a key in Settings.');
     return;
   }
   const button = input.form?.querySelector('button[type="submit"]');

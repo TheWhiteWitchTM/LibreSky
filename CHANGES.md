@@ -4,6 +4,11 @@ The paint is still wet. This is the record of the alpha you can [open today](htt
 
 Dates follow the days the work landed in the repository. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 22 October 2026
+
+- Opening a message request shows the preview Bluesky already sent, even when the message list comes back empty. Accept and delete stay on that screen.
+- AI Assist answers with a free public model when no key is saved. Settings lists Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, and Pollinations, each with a link to get a key.
+
 ## 21 October 2026
 
 ### The room
@@ -50,9 +55,9 @@ Dates follow the days the work landed in the repository. The app is the source o
 ### AI Assist
 
 - `@ai` and `@si` are the same tag. In a chat, that message asks the account you saved and stays on your screen until you press Send. In a post, the tag is only a highlight.
-- With a key saved, the AI page is a chat, Home has an ask field, and profiles and posts offer a check.
+- The AI page is a chat, Home has an ask field, and profiles and posts offer a check. A saved key uses that account. Without one, a free public model answers.
 - The key lives in the private preferences that follow the login. It stays off the public profile.
-- The provider can be Gemini, xAI, OpenAI, DeepSeek, or another address that accepts chat completions. Check in Settings asks once before you rely on it.
+- The provider can be Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, Pollinations, or another address that accepts chat completions. Check in Settings asks once before you rely on it. Without a key, a free public model still answers.
 - Debug keeps the question, the reply, and the error from this tab. It leaves the key out.
 
 ### Look, sound, and the keyboard

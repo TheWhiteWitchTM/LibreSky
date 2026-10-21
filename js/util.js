@@ -357,6 +357,28 @@ export function isJoinRequest(item) {
   return Boolean(item && item.convoId && item.owner && !item.id && !item.members);
 }
 
+export function normalizeConvoItem(item) {
+  if (!item || typeof item !== 'object') return item;
+  if (isJoinRequest(item)) return item;
+  const inner = item.convo && typeof item.convo === 'object' && !item.members ? item.convo : item;
+  const id = inner.id || item.id || inner.convoId || item.convoId || '';
+  if (!id) return inner;
+  return {
+    ...inner,
+    id,
+    status: inner.status || item.status || 'request',
+    members: inner.members || item.members || [],
+    lastMessage: inner.lastMessage || item.lastMessage,
+  };
+}
+
+export function messagesForConvo(data, convo) {
+  const raw = Array.isArray(data?.messages) ? data.messages : [];
+  if (raw.length) return raw.slice().reverse();
+  if (convo?.lastMessage) return [convo.lastMessage];
+  return [];
+}
+
 function sameConvoIds(left, right) {
   if (!left.length || left.length !== right.length) return false;
   const ids = new Set(right);
@@ -381,7 +403,8 @@ export function partitionConvos({ accepted, legacyRequests, requestItems } = {})
       if (item.convoId && !joins.has(item.convoId)) joins.set(item.convoId, item);
       return;
     }
-    if (item?.id) keepRequest(item);
+    const convo = normalizeConvoItem(item);
+    if (convo?.id) keepRequest(convo);
   });
   const echoed = sameConvoIds(acceptedRows.map((row) => row.id), legacyRows.map((row) => row.id));
   legacyRows.forEach((convo) => {

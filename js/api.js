@@ -1192,6 +1192,10 @@ export function getChatUnreadCounts(signal) {
   return chat('chat.bsky.convo.getUnreadCounts', { signal });
 }
 
+export function getChatLog(cursor, signal) {
+  return chat('chat.bsky.convo.getLog', { params: { cursor }, signal });
+}
+
 export function withdrawJoinRequest(convoId) {
   return chat('chat.bsky.group.withdrawJoinRequest', { body: { convoId } });
 }

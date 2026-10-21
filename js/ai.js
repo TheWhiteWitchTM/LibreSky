@@ -14,15 +14,45 @@ export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by 
 export const AI_TIMEOUT_MS = 90000;
 
 export const AI_PROVIDERS = [
-  { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', kind: 'gemini' },
-  { id: 'grok', label: 'Grok', model: 'grok-4.7', base: 'https://api.x.ai/v1', kind: 'responses' },
-  { id: 'openai', label: 'OpenAI', model: 'gpt-5-mini', base: 'https://api.openai.com/v1', kind: 'chat' },
-  { id: 'deepseek', label: 'DeepSeek', model: 'deepseek-flash', base: 'https://api.deepseek.com', kind: 'chat' },
+  { id: 'grok', label: 'Grok (xAI)', model: 'grok-4.7', base: 'https://api.x.ai/v1', kind: 'responses', keyUrl: 'https://console.x.ai/team/default/api-keys', keyLabel: 'console.x.ai' },
+  { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', kind: 'gemini', keyUrl: 'https://aistudio.google.com/apikey', keyLabel: 'Google AI Studio' },
+  { id: 'openai', label: 'OpenAI', model: 'gpt-5-mini', base: 'https://api.openai.com/v1', kind: 'chat', keyUrl: 'https://platform.openai.com/api-keys', keyLabel: 'platform.openai.com' },
+  { id: 'anthropic', label: 'Claude', model: 'claude-sonnet-4-5', base: 'https://api.anthropic.com', kind: 'anthropic', keyUrl: 'https://console.anthropic.com/settings/keys', keyLabel: 'console.anthropic.com' },
+  { id: 'deepseek', label: 'DeepSeek', model: 'deepseek-flash', base: 'https://api.deepseek.com', kind: 'chat', keyUrl: 'https://platform.deepseek.com/api_keys', keyLabel: 'platform.deepseek.com' },
+  { id: 'groq', label: 'Groq', model: 'llama-3.3-70b-versatile', base: 'https://api.groq.com/openai/v1', kind: 'chat', keyUrl: 'https://console.groq.com/keys', keyLabel: 'console.groq.com' },
+  { id: 'openrouter', label: 'OpenRouter', model: 'openrouter/auto', base: 'https://openrouter.ai/api/v1', kind: 'chat', keyUrl: 'https://openrouter.ai/keys', keyLabel: 'openrouter.ai' },
+  { id: 'mistral', label: 'Mistral', model: 'mistral-small-latest', base: 'https://api.mistral.ai/v1', kind: 'chat', keyUrl: 'https://console.mistral.ai/api-keys', keyLabel: 'console.mistral.ai' },
+  { id: 'together', label: 'Together', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', base: 'https://api.together.xyz/v1', kind: 'chat', keyUrl: 'https://api.together.ai/settings/api-keys', keyLabel: 'api.together.ai' },
+  { id: 'cerebras', label: 'Cerebras', model: 'llama3.1-8b', base: 'https://api.cerebras.ai/v1', kind: 'chat', keyUrl: 'https://cloud.cerebras.ai', keyLabel: 'cloud.cerebras.ai' },
+  { id: 'pollinations', label: 'Pollinations (free)', model: 'openai', base: 'https://text.pollinations.ai', kind: 'pollinations', keyOptional: true, keyUrl: 'https://enter.pollinations.ai', keyLabel: 'enter.pollinations.ai' },
   { id: 'custom', label: 'Other', model: '', kind: 'chat' },
 ];
 
 export function providerById(id) {
   return AI_PROVIDERS.find((item) => item.id === id) || AI_PROVIDERS[0];
+}
+
+export function fallbackAi() {
+  const item = providerById('pollinations');
+  return {
+    provider: item.id,
+    model: item.model,
+    base: item.base,
+    apiKey: '',
+    kind: item.kind,
+    fallback: true,
+  };
+}
+
+function keyOptional(provider) {
+  return Boolean(providerById(provider)?.keyOptional);
+}
+
+export function resolveAi(config) {
+  if (config && (config.apiKey || keyOptional(config.provider))) {
+    try { return prepareAi(config); } catch { /* a broken saved account still has the free model */ }
+  }
+  return fallbackAi();
 }
 
 let aiWatch = () => {};
@@ -89,7 +119,8 @@ export function loadAi() {
   const did = currentDid();
   if (!did) return null;
   const saved = memory.get(did);
-  if (!saved || typeof saved !== 'object' || !saved.apiKey) return null;
+  if (!saved || typeof saved !== 'object') return null;
+  if (!saved.apiKey && !keyOptional(saved.provider)) return null;
   try {
     return prepareAi(saved);
   } catch {
@@ -132,18 +163,20 @@ export function storeAiAccount(did, input, synced) {
 }
 
 export function aiPreference(config) {
-  if (!config?.apiKey) return null;
+  if (!config) return null;
+  if (!config.apiKey && !keyOptional(config.provider)) return null;
   return {
     $type: AI_PREF_TYPE,
     provider: config.provider,
     model: config.model,
     base: config.base || '',
-    apiKey: config.apiKey,
+    apiKey: config.apiKey || '',
   };
 }
 
 export function aiFromPreference(pref) {
-  if (!pref || pref.$type !== AI_PREF_TYPE || !pref.apiKey) return null;
+  if (!pref || pref.$type !== AI_PREF_TYPE) return null;
+  if (!pref.apiKey && !keyOptional(pref.provider)) return null;
   try {
     return prepareAi(pref);
   } catch {
@@ -223,12 +256,13 @@ function logAiCall({ account, note, started, ok, asked = '', text = '', error = 
 }
 
 export function aiReady(config) {
-  return Boolean(config?.apiKey && config?.model && config?.kind);
+  const account = resolveAi(config);
+  return Boolean(account?.model && account?.kind);
 }
 
 function cleanModel(value, fallback) {
   const model = String(value || fallback || '').trim();
-  if (!model || model.length > 80 || /[\s/\\:]/.test(model)) {
+  if (!model || model.length > 120 || /[\s\\]/.test(model) || !/^[A-Za-z0-9_./:+-]+$/.test(model)) {
     throw new Error('Enter a model name.');
   }
   return model;
@@ -265,8 +299,10 @@ export function prepareAi(input) {
   const provider = providerById(input?.provider);
   const custom = provider.id === 'custom';
   const model = cleanModel(input?.model, custom ? '' : provider.model);
-  const base = provider.kind === 'gemini' ? '' : cleanBase(custom ? input?.base : provider.base);
-  const apiKey = cleanKey(input?.apiKey);
+  const skipBase = provider.kind === 'gemini' || provider.kind === 'pollinations';
+  const base = skipBase ? (provider.base || '') : cleanBase(custom ? input?.base : provider.base);
+  const typed = String(input?.apiKey || '').trim();
+  const apiKey = !typed && provider.keyOptional ? '' : cleanKey(input?.apiKey);
   return { provider: provider.id, model, base, apiKey, kind: provider.kind };
 }
 
@@ -308,6 +344,10 @@ export function replyText(data) {
     const text = parts.filter((part) => !part?.thought).map((part) => part?.text || '').join('').trim();
     if (text) return text;
   }
+  if (Array.isArray(data.content)) {
+    const text = data.content.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('').trim();
+    if (text) return text;
+  }
   const err = data.error?.message || (typeof data.error === 'string' ? data.error : '');
   if (err) throw new Error(scrub(err));
   const reason = data.incomplete_details?.reason || data.incomplete_details;
@@ -345,6 +385,9 @@ function explainAiError(provider, message) {
   if (provider === 'deepseek' && /invalid api key|authentication fails|unauthorized/i.test(message || '')) {
     return 'DeepSeek refused this key. The key from platform.deepseek.com is the one api.deepseek.com accepts.';
   }
+  if (provider === 'pollinations' && /rate|limit|pollen|forbidden/i.test(message || '')) {
+    return 'The free public model is busy. Try again in a moment, or save a key in Settings.';
+  }
   return message;
 }
 
@@ -353,11 +396,13 @@ async function readBody(res, key) {
   let data = null;
   try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
   if (!res.ok) {
-    const message = data?.error?.message || data?.error?.status || (typeof data?.error === 'string' ? data.error : '') || res.statusText || 'The account refused the request.';
+    const message = data?.error?.message || data?.error?.status || (typeof data?.error === 'string' ? data.error : '') || raw.slice(0, 180) || res.statusText || 'The account refused the request.';
     throw new Error(scrub(message, key));
   }
-  if (!data) throw new Error('The account sent an empty reply.');
-  return replyText(data);
+  if (data) return replyText(data);
+  const text = String(raw || '').trim();
+  if (text) return text.slice(0, 4000);
+  throw new Error('The account sent an empty reply.');
 }
 
 export async function askAi(config, messages, signal, note = '') {
@@ -366,12 +411,16 @@ export async function askAi(config, messages, signal, note = '') {
   const history = (messages || []).filter((item) => item && item.content).slice(-12);
   const asked = [...history].reverse().find((item) => item.role === 'user')?.content || '';
   try {
-    account = prepareAi(config);
+    account = resolveAi(config);
     if (!history.length) throw new Error('Write a question first.');
     const key = account.apiKey;
     let url = '';
     let headers = { 'Content-Type': 'application/json' };
     let body = null;
+    const chatMessages = history.map((item) => ({
+      role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
+      content: String(item.content || ''),
+    }));
     if (account.kind === 'gemini') {
       url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(account.model)}:generateContent`;
       headers['x-goog-api-key'] = key;
@@ -385,6 +434,28 @@ export async function askAi(config, messages, signal, note = '') {
         generationConfig: { maxOutputTokens: 800 },
       };
       if (system) body.systemInstruction = { parts: [{ text: system }] };
+    } else if (account.kind === 'anthropic') {
+      url = `${account.base}/v1/messages`;
+      headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+      const system = history.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
+      body = {
+        model: account.model,
+        max_tokens: 800,
+        messages: history.filter((item) => item.role !== 'system').map((item) => ({
+          role: item.role === 'assistant' ? 'assistant' : 'user',
+          content: String(item.content || ''),
+        })),
+      };
+      if (system) body.system = system;
+    } else if (account.kind === 'pollinations') {
+      url = `${account.base}/openai`;
+      if (key) headers.Authorization = `Bearer ${key}`;
+      body = {
+        model: account.model || 'openai',
+        messages: chatMessages,
+        seed: Math.floor(Math.random() * 1e9),
+      };
     } else if (account.kind === 'responses') {
       url = `${account.base}/responses`;
       headers.Authorization = `Bearer ${key}`;
@@ -392,12 +463,13 @@ export async function askAi(config, messages, signal, note = '') {
     } else {
       url = `${account.base}/chat/completions`;
       headers.Authorization = `Bearer ${key}`;
+      if (account.provider === 'openrouter') {
+        headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://thewhitewitchtm.github.io/LibreSky';
+        headers['X-Title'] = 'LibreSky';
+      }
       body = {
         model: account.model,
-        messages: history.map((item) => ({
-          role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
-          content: String(item.content || ''),
-        })),
+        messages: chatMessages,
         ...chatExtras(account),
       };
     }
@@ -412,7 +484,16 @@ export async function askAi(config, messages, signal, note = '') {
       });
     } catch (error) {
       if (error?.name === 'AbortError') throw error;
-      throw new Error('This browser could not reach that account. Check the address and the key.');
+      if (account.kind === 'pollinations' && asked) {
+        const getUrl = `${account.base}/${encodeURIComponent(asked.slice(0, 500))}?model=${encodeURIComponent(account.model || 'openai')}`;
+        try {
+          res = await fetch(getUrl, { signal, redirect: 'error' });
+        } catch {
+          throw new Error('This browser could not reach that account. Check the address and the key.');
+        }
+      } else {
+        throw new Error('This browser could not reach that account. Check the address and the key.');
+      }
     }
     const text = await readBody(res, key);
     logAiCall({ account, note, started, ok: true, asked, text });

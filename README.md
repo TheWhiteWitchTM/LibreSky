@@ -78,9 +78,9 @@ An incoming call shows a banner. Accept or decline it there. Settings choose who
 
 Type `@ai` or `@si`. Both tags ask the account you saved. Bluesky has no account behind either tag. In a chat, a message that contains the tag stays on your screen until you press Send. A tag in a post is only a highlight.
 
-Settings can hold a Grok, Gemini, OpenAI, DeepSeek, or other account. The key is saved on your Bluesky account, in the private preferences that follow this login. Anyone can read the public profile, so the key stays in those private preferences. The key is sent only to the provider you pick, and only when you ask.
+Settings can hold a Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, Pollinations, or other account. Each row links to the site that issues a key. The key is saved on your Bluesky account, in the private preferences that follow this login. Anyone can read the public profile, so the key stays in those private preferences. The key is sent only to the provider you pick, and only when you ask.
 
-AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) explains how. The assistant stays quiet until a key is saved.
+AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) explains how. Without a key it uses a free public model so the page still answers.
 
 ## A desk you can tune
 

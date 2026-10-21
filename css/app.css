@@ -2866,6 +2866,11 @@ html[data-design="on"] .app-top::after {
 }
 
 .ai-form { display: flex; flex-direction: column; gap: 10px; max-width: 440px; }
+.ai-key-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.ai-key-list a { color: var(--blue); }
 .ai-form label { display: flex; flex-direction: column; gap: 6px; font-weight: 700; }
 .ai-form input, .ai-form select {
   border: 1px solid var(--border);
