@@ -1,5 +1,5 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
-import { applyShortLinks, bskyPostParts, httpUrlRe, pageCard, splitAtUri, trimLink, xStatusParts } from './util.js';
+import { applyShortLinks, bskyPostParts, pageCard, plainFacets, splitAtUri, xStatusParts } from './util.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -878,47 +878,7 @@ export async function resolveHandle(handle) {
 }
 
 export async function facetsFor(text) {
-  const source = String(text ?? '');
-  const bytes = new TextEncoder();
-  const facets = [];
-  const patterns = [
-    { re: httpUrlRe(), type: 'link' },
-    { re: /(^|\s)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, type: 'mention' },
-    { re: /(^|\s)#([a-zA-Z0-9_]+)/g, type: 'tag' },
-  ];
-  for (const pattern of patterns) {
-    pattern.re.lastIndex = 0;
-    let match = pattern.re.exec(source);
-    while (match) {
-      if (pattern.type === 'link') {
-        const value = trimLink(match[0]);
-        if (value) {
-          const start = bytes.encode(source.slice(0, match.index)).length;
-          facets.push({
-            index: { byteStart: start, byteEnd: start + bytes.encode(value).length },
-            features: [{ $type: 'app.bsky.richtext.facet#link', uri: value }],
-          });
-        }
-      } else if (pattern.type === 'mention') {
-        const handle = match[2];
-        const offset = match[1].length;
-        const start = bytes.encode(source.slice(0, match.index + offset)).length;
-        facets.push({
-          index: { byteStart: start, byteEnd: start + bytes.encode(`@${handle}`).length },
-          features: [{ $type: 'app.bsky.richtext.facet#mention', did: handle }],
-        });
-      } else {
-        const tag = match[2];
-        const offset = match[1].length;
-        const start = bytes.encode(source.slice(0, match.index + offset)).length;
-        facets.push({
-          index: { byteStart: start, byteEnd: start + bytes.encode(`#${tag}`).length },
-          features: [{ $type: 'app.bsky.richtext.facet#tag', tag }],
-        });
-      }
-      match = pattern.re.exec(source);
-    }
-  }
+  const facets = plainFacets(text);
   for (const facet of facets) {
     for (const feature of facet.features) {
       if (feature.$type === 'app.bsky.richtext.facet#mention' && feature.did && !String(feature.did).startsWith('did:')) {

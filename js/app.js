@@ -52,7 +52,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_PROVIDERS, AI_SYSTEM, aiLog, aiReady, askAi, clearAi, clearAiLog, loadAi, prepareAi, providerById, saveAi, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, toShortUrl, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, forceStyles, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -109,6 +109,9 @@ let suggestSeq = 0;
 let suggestArea = null;
 let tipTimer = 0;
 let pickerMode = '';
+let pickerHost = 'compose';
+const collapsedEmoji = new Set();
+const styleHold = new Map();
 let gifSeq = 0;
 let gifTimer = 0;
 let hoverTimer = 0;
@@ -1501,7 +1504,10 @@ async function showMessages(convoId) {
       ? `<div class="request-banner"><p>This is a message request. Accept it to keep the chat, or delete it.</p><span class="row-actions"><button type="button" class="primary small" data-act="accept-convo" data-convo="${escapeHtml(convoId)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${escapeHtml(convoId)}">Delete</button></span></div>`
       : '';
     $('view').dataset.convoStatus = requested ? 'request' : 'accepted';
-    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter sends">Send</button><p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
+    if (pickerHost === 'chat') closePicker();
+    styleHold.delete('chat-text');
+    const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button>${styleButtons()}</div>`;
+    $('view').innerHTML = `${chatHeaderHtml(other)}${requestBar}<div class="messages">${messages.map((message) => messageHtml(message, myDid(), options)).join('')}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" title="Shift+Enter sends">Send</button>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -3516,7 +3522,10 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   paintComposeAvatar();
   paintLangChip();
   applyFieldLanguage(area);
+  styleHold.delete('compose-text');
+  area._before = area.value;
   updateCount();
+  paintStyleButtons(area);
   scheduleLinkPreview();
   dialog._editBase = source ? editFingerprint(dialog) : '';
   const send = $('compose-send');
@@ -3939,13 +3948,37 @@ async function refreshSuggest(area) {
     if (document.activeElement !== area) return hideSuggest();
     const rows = token.sigil === '@'
       ? items.slice(0, 6).map((actor, index) => suggestRow(index, `@${actor.handle}`, `${escapeHtml(actor.displayName || actor.handle)}<span class="handle">@${escapeHtml(actor.handle || '')}</span>`))
-      : items.slice(0, 6).map((tag, index) => suggestRow(index, `#${tag}`, `#${escapeHtml(tag)}`));
+      : tagSuggestRows(token.query, items);
     paintSuggest(area, [...leads, ...rows].slice(0, 8));
   } catch {
     if (seq !== suggestSeq) return;
-    if (leads.length && document.activeElement === area) paintSuggest(area, leads);
+    if (document.activeElement !== area) return;
+    if (token.sigil === '#') {
+      const rows = tagSuggestRows(token.query, []);
+      if (rows.length) return paintSuggest(area, rows);
+    }
+    if (leads.length) paintSuggest(area, leads);
     else hideSuggest();
   }
+}
+
+function tagSuggestRows(query, tags) {
+  const rows = [];
+  const seen = new Set();
+  const typed = tagFromQuery(query);
+  if (typed) {
+    seen.add(typed.toLowerCase());
+    rows.push(suggestRow(rows.length, `#${typed}`, `#${escapeHtml(typed)}<span class="handle">Hashtag</span>`));
+  }
+  for (const tag of tags || []) {
+    const name = String(tag || '').replace(/^[#＃]/, '');
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    rows.push(suggestRow(rows.length, `#${name}`, `#${escapeHtml(name)}<span class="handle">Hashtag</span>`));
+    if (rows.length >= 8) break;
+  }
+  return rows;
 }
 
 function suggestRow(index, insert, body) {
@@ -4147,6 +4180,9 @@ function renderPreviews() {
 }
 
 async function addFiles(list) {
+  closePicker();
+  const incoming = [...(list || [])];
+  if (!incoming.length) return;
   if ($('compose')._gif) {
     toast('Remove the GIF before adding images.');
     return;
@@ -4156,8 +4192,16 @@ async function addFiles(list) {
     return;
   }
   const bucket = $('compose')._files || [];
-  for (const file of list) {
-    if (bucket.length >= 4) break;
+  if (bucket.length >= 4) {
+    toast('A post can have 4 images.');
+    return;
+  }
+  let skipped = false;
+  for (const file of incoming) {
+    if (bucket.length >= 4) {
+      skipped = true;
+      break;
+    }
     try {
       const image = await compress(file);
       bucket.push({ file: image, alt: '', url: URL.createObjectURL(image) });
@@ -4168,6 +4212,7 @@ async function addFiles(list) {
   $('compose')._files = bucket;
   renderPreviews();
   paintLinkPreview();
+  if (skipped) toast('A post can have 4 images.');
 }
 
 async function publish(event) {
@@ -4442,12 +4487,158 @@ function rememberEmoji(char) {
   syncClientPrefs();
 }
 
+function styleButtons() {
+  return [
+    ['bold', 'B', 'Bold'],
+    ['italic', 'I', 'Italic'],
+    ['strike', 'S', 'Strikethrough'],
+    ['mono', 'M', 'Monospace'],
+  ].map(([style, label, name]) => `<button type="button" class="icon-btn style-btn" data-act="style" data-style="${style}" aria-pressed="false" aria-label="${name}" data-tip="${name}">${label}</button>`).join('');
+}
+
+function buttonHost(button) {
+  return button?.closest?.('#chat-form') ? 'chat' : 'compose';
+}
+
+function pickerArea() {
+  return pickerHost === 'chat' ? $('chat-text') : $('compose-text');
+}
+
+function paintStyleButtons(area) {
+  const host = area?.id === 'chat-text' ? $('chat-form') : $('compose-form');
+  if (!host || !area) return;
+  const start = area.selectionStart ?? 0;
+  const end = area.selectionEnd ?? start;
+  const flags = end > start ? styleFlags(area.value, start, end) : null;
+  const hold = styleHold.get(area.id) || new Set();
+  host.querySelectorAll('[data-act="style"]').forEach((button) => {
+    const on = flags ? Boolean(flags[button.dataset.style]) : hold.has(button.dataset.style);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    button.classList.toggle('on', on);
+  });
+}
+
+function syncToolState() {
+  document.querySelectorAll('[data-act="emoji"], [data-act="gif"], [data-act="link"], [data-act="post-lang"]').forEach((button) => {
+    const open = Boolean(pickerMode) && pickerMode === button.dataset.act && pickerHost === buttonHost(button);
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    button.classList.toggle('on', open);
+  });
+  $('compose')?.classList.toggle('picker-open', pickerHost === 'compose' && Boolean(pickerMode));
+  const active = document.activeElement;
+  const area = active?.id === 'compose-text' || active?.id === 'chat-text' ? active : pickerArea();
+  if (area) paintStyleButtons(area);
+}
+
 function closePicker() {
   pickerMode = '';
-  const box = $('compose-picker');
-  if (!box) return;
-  box.hidden = true;
-  box.innerHTML = '';
+  for (const id of ['compose-picker', 'chat-picker']) {
+    const box = $(id);
+    if (!box) continue;
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+  syncToolState();
+}
+
+function preparePicker(act, button) {
+  const host = buttonHost(button);
+  if (host === 'chat' && act !== 'emoji') return null;
+  const box = host === 'chat' ? $('chat-picker') : $('compose-picker');
+  if (!box) return null;
+  pickerHost = host;
+  pickerMode = act;
+  const other = $(host === 'chat' ? 'compose-picker' : 'chat-picker');
+  if (other) {
+    other.hidden = true;
+    other.innerHTML = '';
+  }
+  box.hidden = false;
+  syncToolState();
+  return box;
+}
+
+function toggleStyleHold(area, style) {
+  const hold = new Set(styleHold.get(area.id) || []);
+  if (hold.has(style)) hold.delete(style);
+  else {
+    hold.add(style);
+    if (style === 'mono') {
+      hold.delete('bold');
+      hold.delete('italic');
+    }
+    if (style === 'bold' || style === 'italic') hold.delete('mono');
+  }
+  if (hold.size) styleHold.set(area.id, hold);
+  else styleHold.delete(area.id);
+}
+
+function applyComposerStyle(area, style, range) {
+  if (!area || !style) return;
+  const start = range?.start ?? area.selectionStart ?? 0;
+  const end = range?.end ?? area.selectionEnd ?? start;
+  if (end > start) {
+    const next = toggleStyle(area.value, start, end, style);
+    area.value = next.text;
+    area._before = next.text;
+    area.setSelectionRange(next.start, next.end);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    area.focus();
+    paintStyleButtons(area);
+    return;
+  }
+  toggleStyleHold(area, style);
+  area.focus();
+  paintStyleButtons(area);
+}
+
+function snapshotField(area) {
+  if (!area) return;
+  area._before = area.value;
+  area._insertAt = area.selectionStart ?? area.value.length;
+  area._insertEnd = area.selectionEnd ?? area._insertAt;
+}
+
+function applyHeldStyles(area) {
+  if (!area) return;
+  const hold = styleHold.get(area.id);
+  const before = area._before;
+  const after = area.value;
+  if (!hold?.size || before == null || before === after) {
+    area._before = after;
+    return;
+  }
+  const at = Math.max(0, Math.min(before.length, area._insertAt ?? 0));
+  const end = Math.max(at, Math.min(before.length, area._insertEnd ?? at));
+  const insertedLength = after.length - (before.length - (end - at));
+  if (insertedLength <= 0) {
+    area._before = after;
+    return;
+  }
+  const next = forceStyles(after, at, at + insertedLength, hold);
+  if (next.text !== after) {
+    area.value = next.text;
+    area.setSelectionRange(next.end, next.end);
+  }
+  area._before = area.value;
+}
+
+function onPickerKey(event) {
+  const box = event.target.closest?.('#compose-picker, #chat-picker');
+  if (!box || box.hidden) return false;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closePicker();
+    pickerArea()?.focus();
+    return true;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    if (event.target.id === 'link-url') addComposerLink();
+    return true;
+  }
+  return false;
 }
 
 const attachBag = new Map();
@@ -4543,6 +4734,7 @@ function paintAttachKinds() {
 }
 
 function openAttachPicker(mode) {
+  closePicker();
   if (mode === 'post') {
     const dialog = $('compose');
     if (!dialog?.open) return openComposer();
@@ -4669,28 +4861,31 @@ function paintEmojiList(query) {
   const needle = String(query || '').trim().toLowerCase();
   if (recent.length && !needle) groups.push(['Recent', recent.map((char) => [char, char])]);
   emojiGroups(query).forEach(([name, list]) => groups.push([name, list]));
+  const searching = Boolean(needle);
   box.innerHTML = groups.length
-    ? groups.map(([name, list]) => `<p class="picker-label">${escapeHtml(name)}</p>${emojiButtons(list)}`).join('')
+    ? groups.map(([name, list]) => {
+      const open = searching || !collapsedEmoji.has(name);
+      return `<details class="emoji-group" data-emoji-group="${escapeHtml(name)}"${open ? ' open' : ''}><summary>${escapeHtml(name)}</summary>${emojiButtons(list)}</details>`;
+    }).join('')
     : '<p class="picker-note">No emoji matched.</p>';
 }
 
-function openEmojiPicker(query = '') {
-  pickerMode = 'emoji';
-  const box = $('compose-picker');
+function openEmojiPicker(button, query = '') {
+  const box = preparePicker('emoji', button);
   if (!box) return;
-  box.hidden = false;
   box.innerHTML = `<div class="picker"><input id="emoji-find" placeholder="Search emoji" autocomplete="off" value="${escapeHtml(query)}"><div id="emoji-groups"></div></div>`;
   paintEmojiList(query);
-  $('emoji-find')?.focus();
+  pickerArea()?.focus();
 }
 
 function insertEmoji(char) {
-  const area = $('compose-text');
+  const area = pickerArea();
   if (!area || !char) return;
   const start = area.selectionStart ?? area.value.length;
   const end = area.selectionEnd ?? start;
   area.value = `${area.value.slice(0, start)}${char}${area.value.slice(end)}`;
   const caret = start + char.length;
+  area._before = area.value;
   area.setSelectionRange(caret, caret);
   rememberEmoji(char);
   area.dispatchEvent(new Event('input', { bubbles: true }));
@@ -4707,11 +4902,9 @@ function gifMedia(item, names) {
   return '';
 }
 
-function openGifPicker() {
-  pickerMode = 'gif';
-  const box = $('compose-picker');
+function openGifPicker(button) {
+  const box = preparePicker('gif', button);
   if (!box) return;
-  box.hidden = false;
   box.innerHTML = `<div class="picker"><input id="gif-q" placeholder="Search KLIPY" autocomplete="off"><p class="picker-note">GIFs by KLIPY</p><div id="gif-grid" class="gif-grid"></div></div>`;
   const input = $('gif-q');
   input?.addEventListener('keydown', (event) => {
@@ -4795,6 +4988,7 @@ function videoMeta(url) {
 async function addVideo(file) {
   const dialog = $('compose');
   if (!file || !dialog) return;
+  closePicker();
   if ((dialog._files || []).length || dialog._gif) {
     toast('Remove the images or GIF before adding a video.');
     return;
@@ -4823,11 +5017,9 @@ async function addVideo(file) {
   paintLinkPreview();
 }
 
-function openLinkPicker() {
-  pickerMode = 'link';
-  const box = $('compose-picker');
+function openLinkPicker(button) {
+  const box = preparePicker('link', button);
   if (!box) return;
-  box.hidden = false;
   box.innerHTML = `<div class="picker"><p class="picker-label">Add a link</p><div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. Delete the line to remove the preview.</p></div>`;
   $('link-url')?.focus();
 }
@@ -4852,12 +5044,10 @@ function addComposerLink() {
   area.focus();
 }
 
-function openPostLangPicker() {
-  pickerMode = 'post-lang';
-  const box = $('compose-picker');
+function openPostLangPicker(button) {
+  const box = preparePicker('post-lang', button);
   if (!box) return;
   const selected = $('compose')._langs || languagePrefs().posts;
-  box.hidden = false;
   box.innerHTML = `<div class="picker"><p class="picker-label">Post languages</p><input id="post-lang-find" class="lang-find" placeholder="Find a language" autocomplete="off"><p class="picker-note">Up to three. Tab completes words in these languages.</p><div class="lang-grid">${languageButtons('posts', selected)}</div></div>`;
   box.querySelector('#post-lang-find')?.focus();
 }
@@ -5107,11 +5297,13 @@ function openLegal(which) {
 
 function fitChatInput(box) {
   if (!box) return;
+  const pre = box.id === 'chat-text' ? $('chat-highlight') : (box.id === 'ai-text' ? $('ai-highlight') : null);
   box.style.height = 'auto';
-  const full = box.scrollHeight;
+  const full = Math.max(box.scrollHeight, pre?.scrollHeight || 0);
   const next = Math.min(Math.max(full, 96), 280);
   box.style.height = `${next}px`;
   box.style.overflowY = full > 280 ? 'auto' : 'hidden';
+  if (pre) pre.scrollTop = box.scrollTop;
 }
 
 function chatLines() {
@@ -5198,8 +5390,10 @@ function onAiDraft(act, id) {
     if (!area) return;
     const sized = chatSized(text);
     area.value = sized.text;
+    area._before = sized.text;
     paintFieldHighlight(area, $('chat-highlight'));
     fitChatInput(area);
+    paintStyleButtons(area);
     area.focus();
     if (sized.trimmed) toast('The reply is longer than a chat message, so the box has the first part.');
     return;
@@ -5556,11 +5750,19 @@ async function handleChromeAct(act, event) {
   }
   if (act === 'emoji' || act === 'gif' || act === 'link' || act === 'post-lang') {
     event.preventDefault();
-    if (pickerMode === act) closePicker();
-    else if (act === 'emoji') openEmojiPicker();
-    else if (act === 'gif') openGifPicker();
-    else if (act === 'link') openLinkPicker();
-    else openPostLangPicker();
+    const host = buttonHost(button);
+    if (host === 'chat' && act !== 'emoji') return true;
+    if (pickerMode === act && pickerHost === host) closePicker();
+    else if (act === 'emoji') openEmojiPicker(button);
+    else if (act === 'gif') openGifPicker(button);
+    else if (act === 'link') openLinkPicker(button);
+    else openPostLangPicker(button);
+    return true;
+  }
+  if (act === 'style') {
+    event.preventDefault();
+    const area = button?.closest('#chat-form') ? $('chat-text') : $('compose-text');
+    applyComposerStyle(area, button?.dataset.style || '', button?._range);
     return true;
   }
   if (act === 'add-link') {
@@ -7094,9 +7296,26 @@ function bind() {
     if (area?.id === 'compose-text') {
       rememberDictateCaret(area);
       paintFieldHighlight(area, $('compose-highlight'));
-    } else if (area?.id === 'chat-text') paintFieldHighlight(area, $('chat-highlight'));
-    else if (area?.id === 'ai-text') paintFieldHighlight(area, $('ai-highlight'));
+      paintStyleButtons(area);
+    } else if (area?.id === 'chat-text') {
+      paintFieldHighlight(area, $('chat-highlight'));
+      paintStyleButtons(area);
+    } else if (area?.id === 'ai-text') paintFieldHighlight(area, $('ai-highlight'));
   });
+  document.addEventListener('mousedown', (event) => {
+    const button = event.target.closest?.('[data-act="style"]');
+    if (!button) return;
+    const area = button.closest('#chat-form') ? $('chat-text') : $('compose-text');
+    if (area) button._range = { start: area.selectionStart, end: area.selectionEnd };
+    event.preventDefault();
+  });
+  document.addEventListener('toggle', (event) => {
+    const group = event.target?.dataset?.emojiGroup ? event.target : null;
+    if (!group || $('emoji-find')?.value.trim()) return;
+    const name = group.dataset.emojiGroup;
+    if (group.open) collapsedEmoji.delete(name);
+    else collapsedEmoji.add(name);
+  }, true);
   document.addEventListener('pointerdown', (event) => {
     const button = event.target.closest?.('#suggest [data-insert]');
     if (!button) return;
@@ -7219,10 +7438,28 @@ function bind() {
     event.preventDefault();
     requestCloseComposer();
   });
-  $('compose-text').addEventListener('input', () => {
+  $('compose-text').addEventListener('beforeinput', (event) => {
+    const area = $('compose-text');
+    if (!area || event.isComposing) return;
+    snapshotField(area);
+  });
+  $('compose-text').addEventListener('compositionstart', () => snapshotField($('compose-text')));
+  $('compose-text').addEventListener('compositionend', () => {
+    const area = $('compose-text');
+    applyHeldStyles(area);
     updateCount();
+    paintStyleButtons(area);
+  });
+  $('compose-text').addEventListener('input', (event) => {
+    const area = $('compose-text');
+    if (!event.isComposing) {
+      if (event.isTrusted) applyHeldStyles(area);
+      else area._before = area.value;
+    }
+    updateCount();
+    paintStyleButtons(area);
     const dialog = $('compose');
-    if (!dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit) saveDraft($('compose-text').value);
+    if (!dialog.dataset.reply && !dialog.dataset.quote && !dialog.dataset.edit) saveDraft(area.value);
     scheduleLinkPreview();
   });
   $('compose-text').addEventListener('keydown', (event) => {
@@ -7245,6 +7482,7 @@ function bind() {
     stopDictate();
     clearComposeTypos();
     hideSuggest();
+    styleHold.delete('compose-text');
     closePicker();
     const leave = $('compose-leave');
     if (leave) leave.hidden = true;
@@ -7280,12 +7518,7 @@ function bind() {
     if (event.target.id === 'post-lang-find') filterLanguageButtons(event.target);
     if (event.target.id === 'emoji-find') paintEmojiList(event.target.value);
   });
-  $('compose-picker')?.addEventListener('keydown', (event) => {
-    if (event.target.id === 'link-url' && event.key === 'Enter') {
-      event.preventDefault();
-      addComposerLink();
-    }
-  });
+  $('compose-picker')?.addEventListener('keydown', onPickerKey);
   $('compose-picker')?.addEventListener('click', (event) => {
     const emoji = event.target.closest('[data-emoji]');
     if (emoji) {
@@ -7298,6 +7531,8 @@ function bind() {
     event.preventDefault();
     chooseGif({ url: gif.dataset.gif || '', title: gif.dataset.gifTitle || 'GIF', thumb: gif.dataset.gifThumb || '' });
   });
+  $('compose-files')?.closest('label')?.addEventListener('click', () => closePicker());
+  $('compose-video-file')?.closest('label')?.addEventListener('click', () => closePicker());
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
     $('compose-files').value = '';
@@ -7339,8 +7574,11 @@ function bind() {
       input.disabled = true;
       deliverChat(id, text).then(() => {
         input.value = '';
+        input._before = '';
+        styleHold.delete('chat-text');
         paintFieldHighlight(input, $('chat-highlight'));
         fitChatInput(input);
+        paintStyleButtons(input);
       }).catch((error) => toast(error.message)).finally(() => {
         if (input.isConnected) {
           input.disabled = false;
@@ -7441,6 +7679,13 @@ function bind() {
   });
   $('tune-close')?.addEventListener('click', () => $('tune')?.close());
   $('view').addEventListener('keydown', (event) => {
+    if (onPickerKey(event)) return;
+    if (event.target.id === 'chat-text' && event.key === 'Escape' && $('chat-picker') && !$('chat-picker').hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      closePicker();
+      return;
+    }
     const tab = event.target.closest?.('[data-settings-tab]');
     if (tab && (event.key === 'ArrowRight' || event.key === 'ArrowLeft' || event.key === 'Home' || event.key === 'End')) {
       const buttons = [...document.querySelectorAll('[data-settings-tab]')];
@@ -7494,9 +7739,28 @@ function bind() {
       if (label) label.textContent = `${saved.scale}%`;
     }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
-    fitChatInput(event.target);
+    if (event.target.id === 'chat-text' && !event.isComposing) {
+      if (event.isTrusted) applyHeldStyles(event.target);
+      else event.target._before = event.target.value;
+    }
     paintFieldHighlight(event.target, event.target.id === 'chat-text' ? $('chat-highlight') : $('ai-highlight'));
+    fitChatInput(event.target);
+    if (event.target.id === 'chat-text') paintStyleButtons(event.target);
     scheduleSuggest(event.target);
+  });
+  $('view').addEventListener('beforeinput', (event) => {
+    if (event.target.id !== 'chat-text' || event.isComposing) return;
+    snapshotField(event.target);
+  });
+  $('view').addEventListener('compositionstart', (event) => {
+    if (event.target.id === 'chat-text') snapshotField(event.target);
+  });
+  $('view').addEventListener('compositionend', (event) => {
+    if (event.target.id !== 'chat-text') return;
+    applyHeldStyles(event.target);
+    paintFieldHighlight(event.target, $('chat-highlight'));
+    fitChatInput(event.target);
+    paintStyleButtons(event.target);
   });
   $('view').addEventListener('scroll', (event) => {
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
@@ -7510,6 +7774,12 @@ function bind() {
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());
   $('view').addEventListener('click', (event) => {
+    const emoji = event.target.closest?.('[data-emoji]');
+    if (emoji && event.target.closest('#chat-picker')) {
+      event.preventDefault();
+      insertEmoji(emoji.dataset.emoji || '');
+      return;
+    }
     const chatChoice = event.target.closest('[data-chat-allow]')?.dataset.chatAllow;
     if (chatChoice) {
       chooseChatAllow(chatChoice);

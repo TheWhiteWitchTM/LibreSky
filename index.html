@@ -272,7 +272,7 @@
       <div class="compose-bar">
         <button type="button" class="text-btn" id="compose-cancel">Cancel</button>
         <div class="compose-bar-end">
-          <button type="button" class="lang-chip" id="compose-lang" data-act="post-lang" aria-label="Post languages">EN</button>
+          <button type="button" class="lang-chip" id="compose-lang" data-act="post-lang" aria-expanded="false" aria-label="Post languages">EN</button>
           <button type="button" class="icon-btn" id="compose-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 11.5a5 5 0 0 0 10 0M12 16.5V20M9 20h6"/></svg>
           </button>
@@ -322,18 +322,22 @@
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7.2A1.7 1.7 0 0 1 5.7 5.5h8.1A1.7 1.7 0 0 1 15.5 7.2v9.6a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 16.8V7.2zm11.5 2.1 4-2.3v10l-4-2.3v-5.4z"/></svg>
             <input id="compose-video-file" type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" hidden>
           </label>
-          <button type="button" class="icon-btn" data-act="link" aria-label="Add a link" data-tip="Link">
+          <button type="button" class="icon-btn" data-act="link" aria-expanded="false" aria-label="Add a link" data-tip="Link">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M10.2 13.4a3.6 3.6 0 0 0 5.1.2l1.8-1.8a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M13.8 10.6a3.6 3.6 0 0 0-5.1-.2l-1.8 1.8a3.6 3.6 0 0 0 5.1 5.1l1-1"/></svg>
           </button>
-          <button type="button" class="icon-btn" data-act="emoji" aria-label="Emoji" data-tip="Emoji">
+          <button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="1.15" fill="currentColor"/><circle cx="15" cy="10" r="1.15" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8.4 13.6c.9 1.5 2.1 2.2 3.6 2.2s2.7-.7 3.6-2.2"/></svg>
           </button>
-          <button type="button" class="icon-btn" data-act="gif" aria-label="GIF" data-tip="GIF">
+          <button type="button" class="icon-btn" data-act="gif" aria-expanded="false" aria-label="GIF" data-tip="GIF">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M6.2 9.1h2.3v1.15H7.35v.7h1.05v1H7.35V15H6.2V9.1zm3.35 0h2.55v1.15h-1.4V15H9.55V9.1zm3.7 0h2.7v1.15h-1.55v.85h1.4v1.05h-1.4V15h-1.15V9.1z"/></svg>
           </button>
           <button type="button" class="icon-btn" data-act="attach" aria-label="Attach a feed, list, or starter pack" data-tip="Feed, list, or pack">
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5.2h16v2.1H4V5.2zm0 5.7h16v2.1H4v-2.1zm0 5.8h10.2v2.1H4V16.7z"/></svg>
           </button>
+          <button type="button" class="icon-btn style-btn" data-act="style" data-style="bold" aria-pressed="false" aria-label="Bold" data-tip="Bold">B</button>
+          <button type="button" class="icon-btn style-btn" data-act="style" data-style="italic" aria-pressed="false" aria-label="Italic" data-tip="Italic">I</button>
+          <button type="button" class="icon-btn style-btn" data-act="style" data-style="strike" aria-pressed="false" aria-label="Strikethrough" data-tip="Strikethrough">S</button>
+          <button type="button" class="icon-btn style-btn" data-act="style" data-style="mono" aria-pressed="false" aria-label="Monospace" data-tip="Monospace">M</button>
         </div>
         <span id="compose-count" class="count-ring" style="--p:0"><b>300</b></span>
       </div>

@@ -139,7 +139,11 @@ function featureHtml(slice, features, links, breaks) {
   };
   if (ai) return wrap('ai', '#/ai', false);
   if (mention?.did) return wrap('mention', profileHash(mention.did), false);
-  if (tag?.tag) return wrap('tag', `#/search/${encodeURIComponent(`#${tag.tag}`)}`, false);
+  if (tag?.tag) {
+    const name = String(tag.tag);
+    const query = name.startsWith('$') ? name : `#${name}`;
+    return wrap('tag', `#/search/${encodeURIComponent(query)}`, false);
+  }
   const href = link?.uri ? safeUrl(link.uri) : '';
   if (href) return wrap('link', href, true);
   return html;
@@ -151,6 +155,69 @@ function byteAt(source, index) {
 
 function overlaps(marks, start, end) {
   return marks.some((mark) => mark.start < end && start < mark.end);
+}
+
+// Same shape as Bluesky's tag scan: a new tag is still a tag. Emoji counts as a
+// boundary so a hash typed right after an emoji is included.
+const TAG_RE = /(^|[\s\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D\u20E3])[#＃]((?!\uFE0F)[^\s\u00AD\u2060\u200A\u200B\u200C\u200D\u20e2]*[^\d\s\p{P}\u00AD\u2060\u200A\u200B\u200C\u200D\u20e2]+[^\s\u00AD\u2060\u200A\u200B\u200C\u200D\u20e2]*)?/gu;
+const TRAILING_PUNCT_RE = /\p{P}+$/u;
+
+function tagMarks(source) {
+  const marks = [];
+  const re = new RegExp(TAG_RE.source, 'gu');
+  let match = re.exec(source);
+  while (match) {
+    if (match.index === re.lastIndex) re.lastIndex += 1;
+    let tag = match[2];
+    if (tag) {
+      tag = tag.trim().replace(TRAILING_PUNCT_RE, '');
+      if (tag && !(tag.length > 64 && graphemeLength(tag) > 64)) {
+        const at = match.index + match[1].length;
+        const text = `${source.charAt(at)}${tag}`;
+        const start = byteAt(source, at);
+        marks.push({
+          at,
+          text,
+          tag,
+          start,
+          end: start + encoder.encode(text).length,
+          features: [{ $type: 'app.bsky.richtext.facet#tag', tag }],
+        });
+      }
+    }
+    match = re.exec(source);
+  }
+  return marks;
+}
+
+function cashMarks(source) {
+  const marks = [];
+  const re = /(^|\s|\()\$([A-Za-z][A-Za-z0-9]{0,4})(?=\s|$|[.,;:!?)"'\u2019])/gu;
+  let match = re.exec(source);
+  while (match) {
+    const ticker = match[2].toUpperCase();
+    const at = match.index + match[1].length;
+    const text = `$${match[2]}`;
+    const start = byteAt(source, at);
+    marks.push({
+      start,
+      end: start + encoder.encode(text).length,
+      features: [{ $type: 'app.bsky.richtext.facet#tag', tag: `$${ticker}` }],
+    });
+    match = re.exec(source);
+  }
+  return marks;
+}
+
+export function tagFromQuery(query) {
+  const raw = String(query || '').replace(/^[#＃]/, '');
+  if (!raw || /\s/u.test(raw)) return '';
+  const source = `#${raw}`;
+  const marks = tagMarks(source);
+  if (marks.length !== 1 || marks[0].at !== 0) return '';
+  const rest = source.slice(marks[0].text.length);
+  if (rest && !TRAILING_PUNCT_RE.test(rest)) return '';
+  return marks[0].tag;
 }
 
 export function httpUrlRe() {
@@ -190,16 +257,19 @@ function syntheticMarks(source) {
     }
     match = mentionRe.exec(source);
   }
-  const tagRe = /(^|\s)#([\p{L}\p{N}_]{1,64})/gu;
-  match = tagRe.exec(source);
-  while (match) {
-    const tag = match[2];
-    const at = match.index + match[1].length;
-    const start = byteAt(source, at);
-    take(start, start + encoder.encode(`#${tag}`).length, [{ $type: 'app.bsky.richtext.facet#tag', tag }]);
-    match = tagRe.exec(source);
+  for (const mark of [...tagMarks(source), ...cashMarks(source)]) {
+    take(mark.start, mark.end, mark.features);
   }
   return marks;
+}
+
+export function plainFacets(text) {
+  return syntheticMarks(String(text ?? ''))
+    .map((mark) => ({
+      index: { byteStart: mark.start, byteEnd: mark.end },
+      features: mark.features.filter((feature) => !String(feature.$type || '').startsWith('libresky.')),
+    }))
+    .filter((facet) => facet.features.length);
 }
 
 export function richText(text, facets, options = {}) {
@@ -235,7 +305,9 @@ export function richText(text, facets, options = {}) {
 export function caretToken(text, caret) {
   const source = String(text || '');
   const at = Math.max(0, Math.min(source.length, Number(caret) || 0));
-  const match = source.slice(0, at).match(/(^|\s)([@#])([^\s@#]*)$/);
+  const head = source.slice(0, at);
+  const match = head.match(/(^|\s)([@#])([^\s@#]*)$/u)
+    || head.match(/([\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D\u20E3])(#)([^\s#]*)$/u);
   if (!match) return null;
   return { sigil: match[2], query: match[3], start: at - match[3].length - 1 };
 }
@@ -561,6 +633,160 @@ export function accountGone(actor) {
   if (name === 'account deleted' || name === 'deleted account') return true;
   if (actor.did && !handle) return true;
   return false;
+}
+
+// Bluesky stores post and chat text as plain UTF-8. Bold, italic, bold italic,
+// and monospace are Unicode letters, and strikethrough is a combiner, so other
+// Bluesky apps show the style without a formatting facet.
+const STYLE_REV = new Map();
+
+function mapStyle(start, base, count, flags) {
+  for (let i = 0; i < count; i += 1) {
+    STYLE_REV.set(start + i, { base: String.fromCodePoint(base + i), ...flags });
+  }
+}
+
+mapStyle(0x1D5D4, 0x41, 26, { bold: true, italic: false, mono: false });
+mapStyle(0x1D5EE, 0x61, 26, { bold: true, italic: false, mono: false });
+mapStyle(0x1D7EC, 0x30, 10, { bold: true, italic: false, mono: false });
+mapStyle(0x1D608, 0x41, 26, { bold: false, italic: true, mono: false });
+mapStyle(0x1D622, 0x61, 26, { bold: false, italic: true, mono: false });
+mapStyle(0x1D63C, 0x41, 26, { bold: true, italic: true, mono: false });
+mapStyle(0x1D656, 0x61, 26, { bold: true, italic: true, mono: false });
+mapStyle(0x1D670, 0x41, 26, { bold: false, italic: false, mono: true });
+mapStyle(0x1D68A, 0x61, 26, { bold: false, italic: false, mono: true });
+mapStyle(0x1D7F6, 0x30, 10, { bold: false, italic: false, mono: true });
+
+function readStyled(text) {
+  const parts = [];
+  for (let i = 0; i < text.length;) {
+    const cp = text.codePointAt(i);
+    const raw = String.fromCodePoint(cp);
+    i += raw.length;
+    let strike = false;
+    while (i < text.length && text[i] === '\u0336') {
+      strike = true;
+      i += 1;
+    }
+    const known = STYLE_REV.get(cp);
+    if (known) parts.push({ base: known.base, bold: known.bold, italic: known.italic, mono: known.mono, strike });
+    else parts.push({ base: raw, bold: false, italic: false, mono: false, strike });
+  }
+  return parts;
+}
+
+function canStyle(part, style) {
+  const letter = /^[A-Za-z]$/.test(part.base);
+  const digit = /^[0-9]$/.test(part.base);
+  if (style === 'strike') return part.base !== '\n' && part.base !== '\r';
+  if (style === 'italic') return letter;
+  if (style === 'bold' || style === 'mono') return letter || digit;
+  return false;
+}
+
+function encodeStyled(part) {
+  const letter = /^[A-Za-z]$/.test(part.base);
+  const digit = /^[0-9]$/.test(part.base);
+  const code = part.base.codePointAt(0);
+  let ch = part.base;
+  if (part.mono && (letter || digit)) {
+    const start = digit ? 0x1D7F6 : (code >= 0x61 ? 0x1D68A : 0x1D670);
+    const base = digit ? 0x30 : (code >= 0x61 ? 0x61 : 0x41);
+    ch = String.fromCodePoint(start + code - base);
+  } else if (part.bold && part.italic && letter) {
+    const start = code >= 0x61 ? 0x1D656 : 0x1D63C;
+    const base = code >= 0x61 ? 0x61 : 0x41;
+    ch = String.fromCodePoint(start + code - base);
+  } else if (part.bold && (letter || digit)) {
+    const start = digit ? 0x1D7EC : (code >= 0x61 ? 0x1D5EE : 0x1D5D4);
+    const base = digit ? 0x30 : (code >= 0x61 ? 0x61 : 0x41);
+    ch = String.fromCodePoint(start + code - base);
+  } else if (part.italic && letter) {
+    const start = code >= 0x61 ? 0x1D622 : 0x1D608;
+    const base = code >= 0x61 ? 0x61 : 0x41;
+    ch = String.fromCodePoint(start + code - base);
+  }
+  if (part.strike && part.base !== '\n' && part.base !== '\r') ch += '\u0336';
+  return ch;
+}
+
+function snapIndex(text, index) {
+  const at = Math.max(0, Math.min(text.length, Number(index) || 0));
+  if (at <= 0 || at >= text.length) return at;
+  const code = text.charCodeAt(at);
+  const prev = text.charCodeAt(at - 1);
+  if (code >= 0xDC00 && code <= 0xDFFF && prev >= 0xD800 && prev <= 0xDBFF) return at - 1;
+  return at;
+}
+
+function rewriteRange(text, start, end, edit) {
+  const source = String(text ?? '');
+  const from = snapIndex(source, start);
+  const to = Math.max(from, snapIndex(source, end));
+  const next = readStyled(source.slice(from, to)).map(edit).map(encodeStyled).join('');
+  return { text: source.slice(0, from) + next + source.slice(to), start: from, end: from + next.length };
+}
+
+export function toggleStyle(text, start, end, style) {
+  const source = String(text ?? '');
+  const from = snapIndex(source, start);
+  const to = Math.max(from, snapIndex(source, end));
+  const parts = readStyled(source.slice(from, to));
+  const applicable = parts.filter((part) => canStyle(part, style));
+  if (!applicable.length) return { text: source, start: from, end: to };
+  const turnOn = applicable.some((part) => !part[style]);
+  return rewriteRange(source, from, to, (part) => {
+    if (!canStyle(part, style)) return part;
+    const next = { ...part, [style]: turnOn };
+    if (turnOn && style === 'mono') {
+      next.bold = false;
+      next.italic = false;
+    }
+    if (turnOn && (style === 'bold' || style === 'italic')) next.mono = false;
+    return next;
+  });
+}
+
+export function forceStyles(text, start, end, styles) {
+  const wanted = styles instanceof Set ? styles : new Set(styles || []);
+  if (!wanted.size) {
+    const source = String(text ?? '');
+    const from = snapIndex(source, start);
+    const to = Math.max(from, snapIndex(source, end));
+    return { text: source, start: from, end: to };
+  }
+  return rewriteRange(text, start, end, (part) => {
+    const next = { ...part };
+    if (wanted.has('mono') && canStyle(part, 'mono')) {
+      next.mono = true;
+      next.bold = false;
+      next.italic = false;
+    } else {
+      if (wanted.has('bold') && canStyle(part, 'bold')) {
+        next.bold = true;
+        next.mono = false;
+      }
+      if (wanted.has('italic') && canStyle(part, 'italic')) {
+        next.italic = true;
+        next.mono = false;
+      }
+    }
+    if (wanted.has('strike') && canStyle(part, 'strike')) next.strike = true;
+    return next;
+  });
+}
+
+export function styleFlags(text, start, end) {
+  const source = String(text ?? '');
+  const from = snapIndex(source, start);
+  const to = Math.max(from, snapIndex(source, end));
+  const parts = readStyled(source.slice(from, to));
+  const flags = {};
+  for (const style of ['bold', 'italic', 'strike', 'mono']) {
+    const applicable = parts.filter((part) => canStyle(part, style));
+    flags[style] = Boolean(applicable.length) && applicable.every((part) => part[style]);
+  }
+  return flags;
 }
 
 export function splitAtUri(uri) {
