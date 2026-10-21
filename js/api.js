@@ -264,8 +264,8 @@ export function getProfile(actor, signal) {
   return xrpc('app.bsky.actor.getProfile', { params: { actor }, signal });
 }
 
-export function getAuthorFeed(actor, filter, cursor, signal) {
-  return xrpc('app.bsky.feed.getAuthorFeed', { params: { actor, filter, limit: 30, cursor }, signal });
+export function getAuthorFeed(actor, filter, cursor, signal, limit = 30) {
+  return xrpc('app.bsky.feed.getAuthorFeed', { params: { actor, filter, limit, cursor }, signal });
 }
 
 export function getActorLikes(actor, cursor, signal) {
@@ -479,12 +479,12 @@ export function applySavedFeeds(preferences, items) {
   return next;
 }
 
-export function getFollowers(actor, cursor, signal) {
-  return xrpc('app.bsky.graph.getFollowers', { params: { actor, limit: 30, cursor }, signal });
+export function getFollowers(actor, cursor, signal, limit = 30) {
+  return xrpc('app.bsky.graph.getFollowers', { params: { actor, limit, cursor }, signal });
 }
 
-export function getFollows(actor, cursor, signal) {
-  return xrpc('app.bsky.graph.getFollows', { params: { actor, limit: 30, cursor }, signal });
+export function getFollows(actor, cursor, signal, limit = 30) {
+  return xrpc('app.bsky.graph.getFollows', { params: { actor, limit, cursor }, signal });
 }
 
 export function getLists(actor, cursor) {

@@ -40,7 +40,7 @@ export function avatar(url, label, size) {
   return `<span class="avatar ${size || ''}" data-initial="${initial}">${src ? `<img src="${attr(src)}" alt="" onerror="this.remove()">` : ''}</span>`;
 }
 
-function accountIcon(actor, size, extraClass = '') {
+export function accountIcon(actor, size, extraClass = '') {
   const id = typeof actor === 'string' ? actor : (actor?.handle || actor?.did || '');
   const name = (typeof actor === 'string' ? actor : (actor?.displayName || actor?.handle)) || 'Account';
   const face = avatar(typeof actor === 'string' ? '' : actor?.avatar, name, size);

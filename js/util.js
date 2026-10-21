@@ -800,3 +800,121 @@ export function splitAtUri(uri) {
     rkey: raw.slice(last + 1),
   };
 }
+
+const CLEANUP_DAY = 24 * 60 * 60 * 1000;
+
+function didOfAtUri(uri) {
+  const repo = splitAtUri(uri)?.repo || '';
+  return repo.startsWith('did:') ? repo : '';
+}
+
+function handleLooksRandom(handle) {
+  const name = String(handle || '').split('.')[0].replace(/[^a-z0-9]/gi, '').toLowerCase();
+  if (name.length < 8) return false;
+  const digits = (name.match(/\d/g) || []).length;
+  if (digits >= 4 && digits / name.length >= 0.25) return true;
+  if (name.length >= 10 && /[bcdfghjklmnpqrstvwxyz]{6,}/.test(name)) return true;
+  return name.length >= 10 && digits >= 3 && !/[aeiou]{2}/.test(name);
+}
+
+export function followSpam(person, now = Date.now()) {
+  const reasons = [];
+  let score = 0;
+  const add = (points, label) => {
+    score += points;
+    reasons.push(label);
+  };
+  if (!person?.avatar) add(1, 'No picture');
+  if (!String(person?.displayName || '').trim()) add(1, 'No name');
+  const bio = String(person?.description || '').trim();
+  if (!bio) add(1, 'No bio');
+  const posts = person?.posts;
+  if (posts === 0) add(2, 'No posts');
+  else if (typeof posts === 'number' && posts < 3) add(1, 'Few posts');
+  const created = Number(person?.createdAt) || 0;
+  if (created > 0 && created <= now) {
+    const age = now - created;
+    if (age < 7 * CLEANUP_DAY) add(2, 'New account');
+    else if (age < 30 * CLEANUP_DAY) add(1, 'Young account');
+  }
+  const followers = Number(person?.followers) || 0;
+  const follows = person?.follows;
+  if (typeof follows === 'number' && follows >= 400 && followers * 15 < follows) add(2, 'Follows many, few follow back');
+  if (handleLooksRandom(person?.handle)) add(2, 'Random handle');
+  const pitch = `${person?.displayName || ''} ${bio}`.toLowerCase();
+  if (/\b(follow\s*back|follow4follow|f4f|follow\s*for\s*follow)\b/.test(pitch)) add(2, 'Follow-for-follow pitch');
+  const bare = !person?.avatar && !bio && (typeof posts !== 'number' || posts < 3);
+  const likely = score >= 4 || (posts === 0 && !person?.avatar && (!bio || handleLooksRandom(person?.handle)));
+  return { score, reasons, likely, bare };
+}
+
+export function shouldFollowBack(person, { skipSpam = true, held = false, now = Date.now() } = {}) {
+  if (!person?.did) return { yes: false, reason: 'Missing account' };
+  if (person.followingUri) return { yes: false, reason: 'Already following' };
+  if (held) return { yes: false, reason: 'You unfollowed them' };
+  if (skipSpam) {
+    const report = followSpam(person, now);
+    if (report.likely) return { yes: false, reason: report.reasons.slice(0, 2).join(', ') || 'Likely spam' };
+  }
+  return { yes: true, reason: '' };
+}
+
+export function followCleanupMatch(person, filters = {}, now = Date.now()) {
+  const followers = Number(person?.followers) || 0;
+  const popularity = filters.popularity || 'any';
+  if (popularity === 'under-100' && followers >= 100) return false;
+  if (popularity === 'under-1k' && followers >= 1000) return false;
+  if (popularity === 'under-10k' && followers >= 10000) return false;
+  if (popularity === 'over-10k' && followers < 10000) return false;
+  const mutual = filters.mutual || 'any';
+  if (mutual === 'yes' && !person?.mutual) return false;
+  if (mutual === 'no' && person?.mutual) return false;
+  const reply = filters.reply || 'any';
+  const at = Number(person?.replyAt) || 0;
+  if (reply !== 'any') {
+    if (!at && !filters.replyReady) return false;
+    if (reply === 'none' && at) return false;
+    if ((reply === '30' || reply === '90' || reply === '365') && at && at >= now - Number(reply) * CLEANUP_DAY) return false;
+  }
+  const spam = filters.spam || 'any';
+  if (spam !== 'any') {
+    const report = followSpam(person, now);
+    if (spam === 'likely' && !report.likely) return false;
+    if (spam === 'bare' && !report.bare) return false;
+    if (spam === 'accident' && (person?.mutual || (!report.likely && !report.bare))) return false;
+  }
+  const recent = filters.recent || 'any';
+  if (recent === '7' || recent === '30') {
+    const followedAt = Number(person?.followedAt) || 0;
+    if (!followedAt && !filters.datesReady) return false;
+    if (!followedAt || followedAt < now - Number(recent) * CLEANUP_DAY) return false;
+  }
+  const q = String(filters.q || '').trim().toLowerCase().replace(/^@/, '');
+  if (q) {
+    const name = String(person?.displayName || '').toLowerCase();
+    const handle = String(person?.handle || '').toLowerCase();
+    if (!name.includes(q) && !handle.includes(q)) return false;
+  }
+  return true;
+}
+
+export function replyTargets(item, selfDid = '') {
+  const post = item?.post;
+  const record = post?.record;
+  if (!record?.reply) return [];
+  const at = Date.parse(post?.indexedAt || record.createdAt || '');
+  if (!Number.isFinite(at)) return [];
+  const ids = new Set();
+  const add = (did) => {
+    const value = String(did || '');
+    if (!value.startsWith('did:') || value === selfDid) return;
+    ids.add(value);
+  };
+  add(item?.reply?.parent?.author?.did);
+  add(item?.reply?.root?.author?.did);
+  add(didOfAtUri(item?.reply?.parent?.uri));
+  add(didOfAtUri(item?.reply?.root?.uri));
+  add(didOfAtUri(record.reply?.parent?.uri));
+  add(didOfAtUri(record.reply?.root?.uri));
+  return [...ids].map((did) => ({ did, at }));
+}

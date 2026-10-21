@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aiFromPreference, aiPreference, claimLegacyAi, clearAi, loadAi, prepareAi, replyText, responsesBody, saveAi } from '../js/ai.js';
+import { aiFromPreference, aiPreference, chatExtras, claimLegacyAi, clearAi, loadAi, prepareAi, replyText, responsesBody, saveAi } from '../js/ai.js';
 import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, resetPosts, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
+import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, ownUnread, pageCard as pageSummary, parseCallMessage, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
@@ -79,6 +79,13 @@ assert.equal(grokBody.reasoning.effort, 'low');
 assert.equal(grokBody.max_output_tokens > 800, true);
 assert.equal(grokBody.input[0].role, 'system');
 assert.equal(grokBody.input[1].content, 'hello');
+const deepseekAccount = prepareAi({ provider: 'deepseek', model: 'deepseek-v4-pro', base: 'https://evil.example/v1', apiKey: 'sk-deepseek-test-key' });
+assert.equal(deepseekAccount.model, 'deepseek-v4-pro');
+assert.equal(deepseekAccount.base, 'https://api.deepseek.com');
+assert.equal(deepseekAccount.kind, 'chat');
+assert.deepEqual(chatExtras(deepseekAccount), { max_tokens: 800, thinking: { type: 'disabled' } });
+assert.equal(chatExtras({ provider: 'openai' }).max_completion_tokens, 2000);
+assert.equal(replyText({ choices: [{ message: { content: '', reasoning_content: 'because' } }] }), 'because');
 const localAccount = prepareAi({ provider: 'custom', model: 'llama', base: 'http://127.0.0.1:11434/v1/chat/completions', apiKey: 'local-key-1234' });
 assert.equal(localAccount.base, 'http://127.0.0.1:11434/v1');
 try {
@@ -455,6 +462,95 @@ const homeHtml = `<title>The White Witch™</title>
 <img src="https://thewhitewitchtm.github.io/emojigames/assets/images/preview.jpg" alt="" width="1200" height="630">`;
 assert.equal(pageSummary(homeHtml, 'https://thewhitewitchtm.github.io/').image, 'https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg');
 assert.equal(pageSummary('<meta property="og:image" content="/cover.jpg"><img src="https://cdn.example/other.jpg" width="1200" height="630">', 'https://example.com/posts/1').image, 'https://example.com/cover.jpg');
+
+const cleanupNow = Date.parse('2026-10-21T12:00:00Z');
+const cleanupDay = 24 * 60 * 60 * 1000;
+const quietFollow = { handle: 'quiet.bsky.social', displayName: 'Quiet', followers: 12, mutual: false, replyAt: 0 };
+const starFollow = { handle: 'star.bsky.social', displayName: 'Star', followers: 20000, mutual: true, replyAt: cleanupNow - 2 * cleanupDay };
+const palFollow = { handle: 'pal.bsky.social', displayName: 'Pal', followers: 400, mutual: true, replyAt: cleanupNow - 40 * cleanupDay };
+assert.equal(followCleanupMatch(quietFollow, { popularity: 'under-100', mutual: 'no', reply: 'none', replyReady: true }, cleanupNow), true);
+assert.equal(followCleanupMatch(quietFollow, { reply: 'none' }, cleanupNow), false);
+assert.equal(followCleanupMatch({ ...quietFollow, followers: 100 }, { popularity: 'under-100' }, cleanupNow), false);
+assert.equal(followCleanupMatch(starFollow, { popularity: 'under-100' }, cleanupNow), false);
+assert.equal(followCleanupMatch(starFollow, { popularity: 'over-10k', mutual: 'yes' }, cleanupNow), true);
+assert.equal(followCleanupMatch(palFollow, { popularity: 'under-1k', reply: '30' }, cleanupNow), true);
+assert.equal(followCleanupMatch(palFollow, { reply: '90' }, cleanupNow), false);
+assert.equal(followCleanupMatch(starFollow, { reply: '30' }, cleanupNow), false);
+assert.equal(followCleanupMatch(quietFollow, { reply: '365', replyReady: true }, cleanupNow), true);
+assert.equal(followCleanupMatch(starFollow, { q: '@Star' }, cleanupNow), true);
+assert.equal(followCleanupMatch(starFollow, { q: 'quiet' }, cleanupNow), false);
+const spamFollow = {
+  handle: 'xq7k2m9p4t.bsky.social',
+  displayName: '',
+  description: 'follow back f4f',
+  avatar: '',
+  followers: 2,
+  follows: 1800,
+  posts: 0,
+  createdAt: cleanupNow - 2 * cleanupDay,
+  mutual: false,
+  replyAt: 0,
+  followedAt: cleanupNow - cleanupDay,
+};
+const neighbor = {
+  did: 'did:neighbor',
+  handle: 'neighbor.bsky.social',
+  displayName: 'Neighbor',
+  description: 'I post about birds.',
+  avatar: 'https://example.com/a.jpg',
+  followers: 80,
+  follows: 40,
+  posts: 120,
+  createdAt: cleanupNow - 400 * cleanupDay,
+  mutual: true,
+  followedAt: cleanupNow - 20 * cleanupDay,
+};
+const bareFollow = { handle: 'bare.bsky.social', displayName: 'Bare', description: '', avatar: '', followers: 4, posts: 1, mutual: false, followedAt: cleanupNow - 3 * cleanupDay };
+assert.equal(followSpam(spamFollow, cleanupNow).likely, true);
+assert.equal(followSpam(neighbor, cleanupNow).likely, false);
+assert.equal(followSpam(bareFollow, cleanupNow).bare, true);
+assert.equal(followSpam(bareFollow, cleanupNow).likely, false);
+assert.equal(followCleanupMatch(spamFollow, { spam: 'likely' }, cleanupNow), true);
+assert.equal(followCleanupMatch(neighbor, { spam: 'likely' }, cleanupNow), false);
+assert.equal(followCleanupMatch(bareFollow, { spam: 'bare' }, cleanupNow), true);
+assert.equal(followCleanupMatch(spamFollow, { spam: 'accident' }, cleanupNow), true);
+assert.equal(followCleanupMatch({ ...spamFollow, mutual: true }, { spam: 'accident' }, cleanupNow), false);
+assert.equal(followCleanupMatch(spamFollow, { recent: '7', datesReady: true }, cleanupNow), true);
+assert.equal(followCleanupMatch(neighbor, { recent: '7', datesReady: true }, cleanupNow), false);
+assert.equal(followCleanupMatch({ ...spamFollow, followedAt: 0 }, { recent: '7' }, cleanupNow), false);
+assert.equal(shouldFollowBack(spamFollow, { skipSpam: true, now: cleanupNow }).yes, false);
+assert.equal(shouldFollowBack(neighbor, { skipSpam: true, now: cleanupNow }).yes, true);
+assert.equal(shouldFollowBack({ ...neighbor, followingUri: 'at://did/app.bsky.graph.follow/1' }, { now: cleanupNow }).yes, false);
+assert.equal(shouldFollowBack(neighbor, { held: true, now: cleanupNow }).reason, 'You unfollowed them');
+const replyHits = replyTargets({
+  post: {
+    indexedAt: '2026-10-01T00:00:00.000Z',
+    record: {
+      reply: {
+        parent: { uri: 'at://did:parent/app.bsky.feed.post/a' },
+        root: { uri: 'at://did:root/app.bsky.feed.post/b' },
+      },
+    },
+  },
+  reply: {
+    parent: { uri: 'at://did:parent/app.bsky.feed.post/a', author: { did: 'did:parent' } },
+    root: { notFound: true, uri: 'at://did:root/app.bsky.feed.post/b' },
+  },
+}, 'did:me');
+assert.deepEqual(replyHits.map((item) => item.did).sort(), ['did:parent', 'did:root']);
+assert.equal(replyHits[0].at, Date.parse('2026-10-01T00:00:00.000Z'));
+assert.equal(replyTargets({
+  post: {
+    record: {
+      createdAt: '2026-10-01T00:00:00.000Z',
+      reply: {
+        parent: { uri: 'at://did:me/app.bsky.feed.post/a' },
+        root: { uri: 'at://did:me/app.bsky.feed.post/a' },
+      },
+    },
+  },
+}, 'did:me').length, 0);
+assert.equal(replyTargets({ post: { record: { text: 'hi', createdAt: '2026-10-01T00:00:00.000Z' } } }, 'did:me').length, 0);
 
 const feedUrl = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed='
   + encodeURIComponent('at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot')

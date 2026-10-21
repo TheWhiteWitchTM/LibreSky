@@ -27,7 +27,7 @@ Voice and Video sit on an open chat and on someone else’s profile. A call reac
 
 ## Ask in the same breath
 
-Type `@ai` or `@si`. Settings can hold a Grok, Gemini, OpenAI, or other account on your Bluesky account, and those tags ask that account. The key follows that login. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) explains how.
+Type `@ai` or `@si`. Settings can hold a Grok, Gemini, OpenAI, DeepSeek, or other account on your Bluesky account, and those tags ask that account. The key follows that login. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) explains how.
 
 ## A desk of your own
 

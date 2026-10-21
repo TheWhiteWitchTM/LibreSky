@@ -36,6 +36,10 @@ const A11Y_KEY = 'libresky.a11y';
 const THEMES = new Set(['light', 'dark', 'contrast-light', 'contrast-dark']);
 const CALL_KEY = 'libresky.calls';
 const CALL_ALLOWS = new Set(['all', 'following', 'none']);
+const FOLLOW_KEY = 'libresky.followDesk';
+const FOLLOW_HOLD_KEY = 'libresky.followHold';
+const FOLLOW_DAY_KEY = 'libresky.followBackDay';
+const FOLLOW_CAPS = new Set([20, 40, 100]);
 const FEED_TYPE = 'app.bsky.actor.defs#feedViewPref';
 const THREAD_TYPE = 'app.bsky.actor.defs#threadViewPref';
 const MUTED_TYPE = 'app.bsky.actor.defs#mutedWordsPref';
@@ -192,6 +196,93 @@ export function saveCallAllow(allow) {
   const next = CALL_ALLOWS.has(allow) ? allow : 'all';
   writeJson(CALL_KEY, { allow: next });
   queueClient();
+  return next;
+}
+
+export function followDeskPrefs() {
+  const saved = readJson(FOLLOW_KEY) || {};
+  const cap = Number(saved.cap);
+  return {
+    auto: flag(saved.auto, false),
+    skipSpam: flag(saved.skipSpam, true),
+    cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+  };
+}
+
+export function saveFollowDeskPrefs(partial) {
+  const next = { ...followDeskPrefs(), ...partial };
+  const cap = Number(next.cap);
+  const saved = {
+    auto: Boolean(next.auto),
+    skipSpam: Boolean(next.skipSpam),
+    cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+  };
+  writeJson(FOLLOW_KEY, saved);
+  queueClient();
+  return followDeskPrefs();
+}
+
+function followMap(key) {
+  const saved = readJson(key);
+  return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+}
+
+export function followHoldSet(did) {
+  if (!did) return new Set();
+  const list = followMap(FOLLOW_HOLD_KEY)[did];
+  return new Set((Array.isArray(list) ? list : []).filter((item) => typeof item === 'string' && item.startsWith('did:')));
+}
+
+export function holdFollowTargets(owner, targets) {
+  if (!owner) return new Set();
+  const map = followMap(FOLLOW_HOLD_KEY);
+  const set = followHoldSet(owner);
+  (targets || []).forEach((id) => {
+    if (typeof id === 'string' && id.startsWith('did:')) set.add(id);
+  });
+  const list = [...set].slice(-400);
+  map[owner] = list;
+  writeJson(FOLLOW_HOLD_KEY, map);
+  return new Set(list);
+}
+
+export function dropFollowHold(owner, target) {
+  if (!owner || !target) return;
+  const map = followMap(FOLLOW_HOLD_KEY);
+  const list = (Array.isArray(map[owner]) ? map[owner] : []).filter((id) => id !== target);
+  if (list.length) map[owner] = list;
+  else delete map[owner];
+  writeJson(FOLLOW_HOLD_KEY, map);
+}
+
+export function releaseFollowHold(owner) {
+  const map = followMap(FOLLOW_HOLD_KEY);
+  if (owner) delete map[owner];
+  writeJson(FOLLOW_HOLD_KEY, map);
+}
+
+function localDay(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function followBackToday(owner, now = new Date()) {
+  if (!owner) return 0;
+  const row = followMap(FOLLOW_DAY_KEY)[owner];
+  if (!row || row.day !== localDay(now)) return 0;
+  return Number(row.count) || 0;
+}
+
+export function noteFollowBack(owner, count = 1, now = new Date()) {
+  if (!owner) return 0;
+  const map = followMap(FOLLOW_DAY_KEY);
+  const day = localDay(now);
+  const prev = map[owner]?.day === day ? Number(map[owner].count) || 0 : 0;
+  const next = prev + Math.max(0, Number(count) || 0);
+  map[owner] = { day, count: next };
+  writeJson(FOLLOW_DAY_KEY, map);
   return next;
 }
 
@@ -403,6 +494,14 @@ function applyClient(record) {
   if (record.languages && typeof record.languages === 'object') saveLanguagePrefs(record.languages);
   if (Array.isArray(record.emoji)) writeJson(EMOJI_KEY, record.emoji.filter((item) => typeof item === 'string').slice(0, 24));
   if (record.calls && CALL_ALLOWS.has(record.calls.allow)) writeJson(CALL_KEY, { allow: record.calls.allow });
+  if (record.follows && typeof record.follows === 'object') {
+    const cap = Number(record.follows.cap);
+    writeJson(FOLLOW_KEY, {
+      auto: Boolean(record.follows.auto),
+      skipSpam: typeof record.follows.skipSpam === 'boolean' ? record.follows.skipSpam : true,
+      cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+    });
+  }
   if (record.a11y && typeof record.a11y === 'object') {
     writeJson(A11Y_KEY, {
       reader: Boolean(record.a11y.reader),
@@ -458,6 +557,7 @@ function clientRecord() {
     a11y: a11yPrefs(),
     emoji: recentEmoji(),
     calls: { allow: callAllow() },
+    follows: followDeskPrefs(),
   };
 }
 

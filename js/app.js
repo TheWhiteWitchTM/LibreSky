@@ -1,6 +1,7 @@
 import * as api from './api.js';
 import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
 import {
+  accountIcon,
   actorHtml,
   avatar,
   callBannerHtml,
@@ -52,7 +53,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, loadAi, prepareAi, providerById, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, forceStyles, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, richText, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, ownUnread, parseCallMessage, parseHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -67,8 +68,16 @@ import {
   commitAiAccount,
   pullAccountPrefs,
   saveA11yPrefs,
+  dropFollowHold,
+  followBackToday,
+  followDeskPrefs,
+  followHoldSet,
+  holdFollowTargets,
+  noteFollowBack,
+  releaseFollowHold,
   saveCallAllow,
   saveFeedView,
+  saveFollowDeskPrefs,
   saveSearchPrefs,
   saveThreadPrefs,
   saveVoicePrefs,
@@ -445,6 +454,10 @@ async function loadMe() {
   rememberCurrent();
   refreshBadge();
   loadRail();
+  if (did && followDeskPrefs().auto) {
+    const owner = did;
+    setTimeout(() => { if (myDid() === owner) runFollowBack(false); }, 5000);
+  }
 }
 
 function rememberCurrent() {
@@ -2375,7 +2388,7 @@ function aiSettingsHtml() {
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
+    <p class="dim">Gemini uses a free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Grok uses an xAI key from <a href="https://console.x.ai/team/default/api-keys" target="_blank" rel="noopener noreferrer">console.x.ai</a>. OpenAI uses a key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">platform.openai.com</a>. DeepSeek uses a key from <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a> and calls api.deepseek.com. That key is billed by DeepSeek. Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.</p>`;
 }
 
 function readAiForm() {
@@ -2593,6 +2606,12 @@ function onPrefToggle(name, checked) {
   } else if (name === 'a11y.reader') {
     applyA11y(saveA11yPrefs({ reader: checked }));
     return;
+  } else if (name === 'follow.auto' || name === 'follow.skipSpam') {
+    const key = name === 'follow.auto' ? 'auto' : 'skipSpam';
+    saveFollowDeskPrefs({ [key]: checked });
+    paintFollowBack();
+    if (name === 'follow.auto' && checked) runFollowBack(false);
+    return;
   } else return;
   const feedId = name.startsWith('feed.') ? tuneFeed : 'home';
   if (feedId === 'home' && !parseHash()[0]) route();
@@ -2675,6 +2694,7 @@ function fillVoiceSelect() {
 
 const SETTINGS_TABS = [
   ['you', 'You'],
+  ['follows', 'Follows'],
   ['safety', 'Safety'],
   ['display', 'Display'],
   ['feeds', 'Feeds'],
@@ -2747,6 +2767,7 @@ function showSettings() {
     <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
     ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
     ${profileSettingsHtml()}`)}
+    ${settingsPanel('follows', followCleanupPanel())}
     ${settingsPanel('safety', `<h2>Muted accounts</h2>
     <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
     <h2>Blocked accounts</h2>
@@ -2777,6 +2798,7 @@ function showSettings() {
   loadSettingsLists(token);
   loadChatAllow(token);
   fillVoiceSelect();
+  if (settingsTab === 'follows') loadFollowCleanup(token);
 }
 
 function selectSettingsTab(id) {
@@ -2790,6 +2812,723 @@ function selectSettingsTab(id) {
   document.querySelectorAll('[data-settings-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== id;
   });
+  if (id === 'follows') loadFollowCleanup();
+}
+
+const CLEANUP_UNFOLLOW_CAP = 30;
+const CLEANUP_REPLY_PAGES = 40;
+const CLEANUP_REPLY_YEAR = 366 * 24 * 60 * 60 * 1000;
+
+function blankFollowCleanup(did = '') {
+  return {
+    did,
+    people: [],
+    replyAt: new Map(),
+    scan: 'idle',
+    scanNote: '',
+    scanCursor: '',
+    postsSeen: 0,
+    dates: 'idle',
+    filters: { popularity: 'any', mutual: 'any', reply: 'any', spam: 'any', recent: 'any', sort: 'name', q: '' },
+    selected: new Set(),
+    undo: readFollowUndo(did),
+    shown: 200,
+    busy: false,
+    loading: false,
+    followsLoaded: false,
+    moreFollows: false,
+    loadError: '',
+  };
+}
+
+let followCleanup = blankFollowCleanup();
+let cleanupLoadId = 0;
+let cleanupScanId = 0;
+let cleanupDateId = 0;
+const followBack = { busy: false, note: '' };
+let followBackRun = 0;
+
+function readFollowUndo(did) {
+  if (!did) return [];
+  try {
+    const data = JSON.parse(sessionStorage.getItem('libresky.followUndo') || 'null');
+    if (data?.did !== did || !Array.isArray(data.people)) return [];
+    return data.people.filter((person) => person?.did).slice(0, 80);
+  } catch {
+    return [];
+  }
+}
+
+function writeFollowUndo(did, people) {
+  followCleanup.undo = (people || []).slice(0, 80);
+  try {
+    if (!did || !followCleanup.undo.length) sessionStorage.removeItem('libresky.followUndo');
+    else sessionStorage.setItem('libresky.followUndo', JSON.stringify({ did, people: followCleanup.undo }));
+  } catch { /* this tab can still undo from memory */ }
+}
+
+function optionalCount(value, prev) {
+  if (value == null || value === '') return prev ?? null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : (prev ?? null);
+}
+
+function personFromActor(actor, prev) {
+  const created = Date.parse(actor?.createdAt || '');
+  return {
+    did: actor.did,
+    handle: actor.handle || prev?.handle || '',
+    displayName: actor.displayName || prev?.displayName || '',
+    description: typeof actor.description === 'string' ? actor.description : (prev?.description || ''),
+    avatar: actor.avatar || prev?.avatar || '',
+    followers: Number(actor.followersCount ?? prev?.followers) || 0,
+    follows: optionalCount(actor.followsCount, prev?.follows),
+    posts: optionalCount(actor.postsCount, prev?.posts),
+    createdAt: Number.isFinite(created) ? created : (prev?.createdAt || 0),
+    followedAt: prev?.followedAt || 0,
+    mutual: Boolean(actor.viewer?.followedBy || prev?.mutual),
+    followingUri: actor.viewer?.following || prev?.followingUri || '',
+    replyAt: followCleanup.replyAt.get(actor.did) || prev?.replyAt || 0,
+  };
+}
+
+function followBackStatusText() {
+  if (!signedIn()) return 'Sign in to follow people back.';
+  const prefs = followDeskPrefs();
+  const owner = myDid();
+  const today = followBackToday(owner);
+  const held = followHoldSet(owner).size;
+  const skip = prefs.skipSpam ? 'Accounts that look like spam are skipped.' : 'Accounts that look like spam are included.';
+  const heldNote = held ? ` ${fullCount(held)} unfollowed ${held === 1 ? 'account is' : 'accounts are'} held, so auto follow back leaves them.` : '';
+  const extra = followBack.note ? ` ${followBack.note}` : '';
+  const mode = prefs.auto ? 'on' : 'off';
+  return `Auto follow back is ${mode}. Today ${fullCount(today)} of ${fullCount(prefs.cap)}. ${skip}${heldNote}${extra}`;
+}
+
+function paintFollowBack() {
+  const status = $('followback-status');
+  if (status) status.textContent = followBackStatusText();
+  const now = $('followback-now');
+  const release = $('followback-release');
+  const held = signedIn() ? followHoldSet(myDid()).size : 0;
+  if (now) now.disabled = followBack.busy || !signedIn();
+  if (release) {
+    release.disabled = followBack.busy || !held;
+    release.textContent = held ? `Release ${fullCount(held)} held` : 'Release held';
+  }
+  document.querySelectorAll('[data-follow-cap]').forEach((button) => {
+    button.disabled = followBack.busy;
+  });
+}
+
+function followBackPanel() {
+  const prefs = followDeskPrefs();
+  const caps = [20, 40, 100].map((cap) => `<button type="button" data-follow-cap="${cap}" aria-pressed="${prefs.cap === cap ? 'true' : 'false'}">${cap} a day</button>`).join('');
+  return `<h2>Follow back</h2>
+    <p class="dim">While LibreSky is open, this follows people who follow you. It skips anyone you unfollow here until you release them. A long run pauses if Bluesky asks for a break, and the daily count resets at midnight on this computer.</p>
+    ${switchRow('follow.auto', 'Auto follow back', prefs.auto, 'Runs when you are signed in and this tab is open.')}
+    ${switchRow('follow.skipSpam', 'Skip likely spam', prefs.skipSpam, 'New empty accounts, random handles, and follow-for-follow pitches stay unfollowed.')}
+    <h3>Pace</h3>
+    <div class="segmented wrap" role="group" aria-label="Follow back pace">${caps}</div>
+    <p id="followback-status" class="dim">${escapeHtml(followBackStatusText())}</p>
+    <div class="toolbar">
+      <button type="button" class="primary small" id="followback-now" data-act="followback-now">Follow back now</button>
+      <button type="button" class="text-btn" id="followback-release" data-act="followback-release">Release held</button>
+    </div>`;
+}
+
+function followCleanupPanel() {
+  const filters = followCleanup.filters;
+  const choice = (key, options) => options.map(([id, label]) => `<button type="button" data-cleanup="${key}" data-value="${id}" aria-pressed="${filters[key] === id ? 'true' : 'false'}">${label}</button>`).join('');
+  const note = signedIn() ? 'Loading people you follow…' : 'Sign in to load people you follow.';
+  return `${followBackPanel()}
+    <h2>Clean up follows</h2>
+    <p class="dim">Find accounts you followed without looking, especially empty ones and ones that do not follow you back. Each row says why it looks off. Unfollow keeps them off auto follow back until you release them, and Follow them again puts the last batch back.</p>
+    <h3>Looks like</h3>
+    <div class="segmented wrap" role="group" aria-label="Looks like">${choice('spam', [['any', 'Anyone'], ['likely', 'Likely spam'], ['bare', 'Bare account'], ['accident', 'Followed by accident']])}</div>
+    <h3>You followed them</h3>
+    <div class="segmented wrap" role="group" aria-label="You followed them">${choice('recent', [['any', 'Any time'], ['7', 'Past 7 days'], ['30', 'Past 30 days']])}</div>
+    <h3>Followers</h3>
+    <div class="segmented wrap" role="group" aria-label="Followers">${choice('popularity', [['any', 'Any'], ['under-100', 'Under 100'], ['under-1k', 'Under 1,000'], ['under-10k', 'Under 10,000'], ['over-10k', '10,000 or more']])}</div>
+    <h3>Follows you back</h3>
+    <div class="segmented wrap" role="group" aria-label="Follows you back">${choice('mutual', [['any', 'Anyone'], ['yes', 'Follows you'], ['no', 'Does not follow you']])}</div>
+    <h3>Your last reply</h3>
+    <div class="segmented wrap" role="group" aria-label="Your last reply">${choice('reply', [['any', 'Any time'], ['none', 'No reply found'], ['30', 'Not in 30 days'], ['90', 'Not in 90 days'], ['365', 'Not in a year']])}</div>
+    <h3>Sort</h3>
+    <div class="segmented wrap" role="group" aria-label="Sort">${choice('sort', [['name', 'Name'], ['spam', 'Most likely spam'], ['recent', 'Followed recently'], ['followers', 'Fewest followers'], ['followers-desc', 'Most followers'], ['reply', 'Oldest reply']])}</div>
+    <input id="cleanup-find" class="lang-find" placeholder="Name or handle" aria-label="Find a person you follow" maxlength="80" autocomplete="off" value="${escapeHtml(filters.q)}">
+    <p id="cleanup-status" class="dim">${note}</p>
+    <div class="toolbar">
+      <button type="button" class="text-btn" data-act="cleanup-select">Select matches</button>
+      <button type="button" class="text-btn" data-act="cleanup-select-spam">Select likely spam</button>
+      <button type="button" class="text-btn" data-act="cleanup-clear">Clear</button>
+      <button type="button" class="text-btn" id="cleanup-undo" data-act="cleanup-undo" hidden>Follow them again</button>
+      <button type="button" class="danger" id="cleanup-spam" data-act="cleanup-spam">Unfollow likely spam</button>
+      <button type="button" class="danger" id="cleanup-unfollow" data-act="cleanup-unfollow" disabled>Unfollow selected</button>
+    </div>
+    <div id="cleanup-list" class="directory"></div>`;
+}
+
+function cleanupName(a, b) {
+  const left = a.displayName || a.handle || '';
+  const right = b.displayName || b.handle || '';
+  return left.localeCompare(right, undefined, { sensitivity: 'base' });
+}
+
+function cleanupMatches() {
+  const now = Date.now();
+  const filters = {
+    ...followCleanup.filters,
+    replyReady: followCleanup.scan === 'done' || followCleanup.scan === 'capped',
+    datesReady: followCleanup.dates === 'done' || followCleanup.dates === 'error',
+  };
+  const list = followCleanup.people.filter((person) => followCleanupMatch(person, filters, now));
+  const sort = filters.sort;
+  list.sort((a, b) => {
+    if (sort === 'followers') return a.followers - b.followers || cleanupName(a, b);
+    if (sort === 'followers-desc') return b.followers - a.followers || cleanupName(a, b);
+    if (sort === 'reply') return (a.replyAt || 0) - (b.replyAt || 0) || cleanupName(a, b);
+    if (sort === 'recent') return (b.followedAt || 0) - (a.followedAt || 0) || cleanupName(a, b);
+    if (sort === 'spam') return followSpam(b, now).score - followSpam(a, now).score || cleanupName(a, b);
+    return cleanupName(a, b);
+  });
+  return list;
+}
+
+function cleanupPicked(matches) {
+  return matches.filter((person) => followCleanup.selected.has(person.did) && person.followingUri);
+}
+
+function cleanupReplyLabel(person) {
+  if (person.replyAt) return `You replied ${timeAgo(new Date(person.replyAt).toISOString())}`;
+  if (followCleanup.scan === 'done' || followCleanup.scan === 'capped') return 'No reply in checked posts';
+  if (followCleanup.scan === 'error') return 'Last reply unavailable';
+  return 'Last reply still loading';
+}
+
+function cleanupStatusText(matches) {
+  if (!signedIn()) return 'Sign in to load people you follow.';
+  if (!followCleanup.people.length && followCleanup.loading) return 'Loading people you follow…';
+  if (!followCleanup.people.length) return followCleanup.loadError || 'You do not follow anyone yet.';
+  const matchCount = matches.length;
+  const picked = matches.filter((person) => followCleanup.selected.has(person.did)).length;
+  const matchLabel = `${fullCount(matchCount)} ${matchCount === 1 ? 'match' : 'matches'}`;
+  const totalLabel = `${fullCount(followCleanup.people.length)} following${followCleanup.moreFollows ? ' loaded' : ''}`;
+  const selectedLabel = picked ? ` · ${fullCount(picked)} selected` : '';
+  const loading = followCleanup.loading ? ' Loading the rest…' : '';
+  const note = followCleanup.scanNote ? ` ${followCleanup.scanNote}` : '';
+  const dates = followCleanup.dates === 'running' ? ' Checking when you followed them…' : '';
+  const extra = followCleanup.loadError ? ` ${followCleanup.loadError}` : '';
+  return `${matchLabel} · ${totalLabel}${selectedLabel}.${loading}${dates}${note}${extra}`;
+}
+
+function cleanupEmptyHtml() {
+  if (!signedIn()) return '<p class="dim">Sign in to load people you follow.</p>';
+  if (followCleanup.loading && !followCleanup.people.length) return '<p class="dim">Loading people you follow…</p>';
+  if (!followCleanup.people.length) return '<p class="dim">You do not follow anyone yet.</p>';
+  if (followCleanup.filters.reply !== 'any' && followCleanup.scan !== 'done' && followCleanup.scan !== 'capped') {
+    return '<p class="dim">Last reply is still loading. Matches show up as your posts are checked.</p>';
+  }
+  if ((followCleanup.filters.recent === '7' || followCleanup.filters.recent === '30') && followCleanup.dates !== 'done' && followCleanup.dates !== 'error') {
+    return '<p class="dim">The date you followed them is still loading.</p>';
+  }
+  return '<p class="dim">Nothing matches these filters.</p>';
+}
+
+function cleanupWhy(person) {
+  const reasons = followSpam(person).reasons.slice(0, 3);
+  if (!reasons.length) return '';
+  return `<span class="why">${reasons.map((reason) => `<span class="why-chip">${escapeHtml(reason)}</span>`).join('')}</span>`;
+}
+
+function cleanupRow(person) {
+  const name = person.displayName || person.handle || 'Account';
+  const on = followCleanup.selected.has(person.did);
+  const mutual = person.mutual ? 'Follows you' : 'Does not follow you';
+  const followed = person.followedAt ? ` · You followed ${timeAgo(new Date(person.followedAt).toISOString())}` : '';
+  const meta = `${fullCount(person.followers)} followers · ${mutual} · ${cleanupReplyLabel(person)}${followed}`;
+  const unfollow = person.followingUri ? '' : ' disabled';
+  return `<div class="person cleanup-person${on ? ' on' : ''}">
+    <label class="cleanup-check"><input type="checkbox" data-cleanup-did="${escapeHtml(person.did)}"${on ? ' checked' : ''} aria-label="Select ${escapeHtml(name)}"></label>
+    ${accountIcon(person)}
+    <a class="person-link" href="${profileHash(person)}"><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(person.handle || '')}</span><span class="snip">${escapeHtml(meta)}</span>${cleanupWhy(person)}</a>
+    <button type="button" class="danger mini" data-act="cleanup-one" data-did="${escapeHtml(person.did)}"${unfollow}>Unfollow</button>
+  </div>`;
+}
+
+function paintCleanupChrome(matches = cleanupMatches()) {
+  const status = $('cleanup-status');
+  if (status) status.textContent = cleanupStatusText(matches);
+  const button = $('cleanup-unfollow');
+  const picked = cleanupPicked(matches);
+  if (button && !followCleanup.busy) {
+    button.disabled = !picked.length;
+    button.textContent = picked.length ? `Unfollow ${fullCount(picked.length)}` : 'Unfollow selected';
+  }
+  const select = document.querySelector('[data-act="cleanup-select"]');
+  if (select) select.disabled = followCleanup.busy || !matches.some((person) => person.followingUri);
+  const spam = document.querySelector('[data-act="cleanup-select-spam"]');
+  if (spam) spam.disabled = followCleanup.busy || !matches.some((person) => person.followingUri && followSpam(person).likely);
+  const drop = $('cleanup-spam');
+  if (drop) drop.disabled = followCleanup.busy || !followCleanup.people.some((person) => person.followingUri && followSpam(person).likely);
+  const undo = $('cleanup-undo');
+  if (undo) {
+    const count = followCleanup.undo.length;
+    undo.hidden = !count;
+    undo.disabled = followCleanup.busy || !count;
+    undo.textContent = count ? `Follow ${fullCount(count)} again` : 'Follow them again';
+  }
+  paintFollowBack();
+}
+
+function paintFollowCleanup(options = {}) {
+  const matches = cleanupMatches();
+  paintCleanupChrome(matches);
+  const list = $('cleanup-list');
+  if (!list || options.list === false) return;
+  const visible = matches.slice(0, followCleanup.shown);
+  const left = matches.length - visible.length;
+  const more = left > 0
+    ? `<button type="button" class="text-btn cleanup-more" data-act="cleanup-more">Show ${fullCount(Math.min(200, left))} more</button>`
+    : '';
+  list.innerHTML = visible.length ? visible.map(cleanupRow).join('') + more : cleanupEmptyHtml();
+}
+
+function setCleanupFilter(key, value) {
+  if (!Object.prototype.hasOwnProperty.call(followCleanup.filters, key)) return;
+  if (followCleanup.filters[key] === value) return;
+  followCleanup.filters[key] = value;
+  followCleanup.shown = 200;
+  document.querySelectorAll(`[data-cleanup="${key}"]`).forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.value === value ? 'true' : 'false');
+  });
+  paintFollowCleanup();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadFollowCleanup(token = generation) {
+  if (!$('cleanup-list')) return;
+  if (!signedIn()) {
+    paintFollowCleanup();
+    return;
+  }
+  const did = myDid();
+  if (followCleanup.did !== did) {
+    cleanupScanId += 1;
+    cleanupLoadId += 1;
+    followCleanup = blankFollowCleanup(did);
+  }
+  if (followCleanup.followsLoaded) {
+    paintFollowCleanup();
+    if (followCleanup.scan === 'idle' || followCleanup.scan === 'error') scanCleanupReplies();
+    if (followCleanup.dates === 'idle' || followCleanup.dates === 'error') scanFollowDates();
+    return;
+  }
+  if (followCleanup.loading && followCleanup.loadToken === token) return;
+  if (followCleanup.loading) cleanupLoadId += 1;
+  const loadId = ++cleanupLoadId;
+  followCleanup.loading = true;
+  followCleanup.loadToken = token;
+  followCleanup.loadError = '';
+  paintFollowCleanup();
+  const seen = new Map();
+  let cursor = '';
+  let previous = '';
+  let more = false;
+  try {
+    for (let page = 0; page < 100; page += 1) {
+      if (loadId !== cleanupLoadId || followCleanup.did !== did) return;
+      const data = await api.getFollows(did, cursor || undefined, undefined, 100);
+      if (loadId !== cleanupLoadId || followCleanup.did !== did) return;
+      (data.follows || []).forEach((actor) => {
+        if (!actor?.did || actor.did === did) return;
+        seen.set(actor.did, personFromActor(actor, seen.get(actor.did)));
+      });
+      followCleanup.people = [...seen.values()];
+      const ids = (data.follows || []).map((actor) => actor?.did || '').join(',');
+      if (!data.cursor || data.cursor === cursor || (ids && ids === previous)) {
+        more = false;
+        break;
+      }
+      previous = ids;
+      cursor = data.cursor;
+      more = page === 99;
+      if (page % 2 === 1) paintFollowCleanup();
+    }
+    if (loadId !== cleanupLoadId || followCleanup.did !== did) return;
+    followCleanup.moreFollows = more;
+    followCleanup.followsLoaded = true;
+    followCleanup.loading = false;
+    paintFollowCleanup();
+    scanCleanupReplies();
+    scanFollowDates();
+  } catch (error) {
+    if (loadId !== cleanupLoadId || followCleanup.did !== did) return;
+    followCleanup.loading = false;
+    followCleanup.loadError = error.message || 'Could not load people you follow.';
+    paintFollowCleanup();
+    if (followCleanup.people.length) {
+      scanCleanupReplies();
+      scanFollowDates();
+    }
+  }
+}
+
+async function scanCleanupReplies() {
+  if (!signedIn() || !followCleanup.people.length) return;
+  if (followCleanup.scan === 'running' || followCleanup.scan === 'done' || followCleanup.scan === 'capped') return;
+  const did = followCleanup.did;
+  const mine = ++cleanupScanId;
+  followCleanup.scan = 'running';
+  followCleanup.scanNote = followCleanup.postsSeen
+    ? `Checking your posts for replies… ${fullCount(followCleanup.postsSeen)} posts`
+    : 'Checking your posts for replies…';
+  paintFollowCleanup({ list: false });
+  let cursor = followCleanup.scanCursor || '';
+  let previous = '';
+  let oldest = Date.now();
+  try {
+    for (let page = 0; page < CLEANUP_REPLY_PAGES; page += 1) {
+      if (mine !== cleanupScanId || followCleanup.did !== did) return;
+      const data = await api.getAuthorFeed(did, 'posts_with_replies', cursor || undefined, undefined, 100);
+      if (mine !== cleanupScanId || followCleanup.did !== did) return;
+      const feed = data.feed || [];
+      feed.forEach((item) => {
+        const when = Date.parse(item?.post?.indexedAt || item?.post?.record?.createdAt || '');
+        if (Number.isFinite(when)) oldest = Math.min(oldest, when);
+        replyTargets(item, did).forEach((hit) => {
+          const prev = followCleanup.replyAt.get(hit.did) || 0;
+          if (hit.at > prev) followCleanup.replyAt.set(hit.did, hit.at);
+        });
+      });
+      let changed = false;
+      followCleanup.people.forEach((person) => {
+        const at = followCleanup.replyAt.get(person.did) || 0;
+        if (at > person.replyAt) {
+          person.replyAt = at;
+          changed = true;
+        }
+      });
+      followCleanup.postsSeen += feed.length;
+      followCleanup.scanNote = `Checking your posts for replies… ${fullCount(followCleanup.postsSeen)} posts`;
+      const ids = feed.map((item) => item?.post?.uri || '').join(',');
+      const stop = !data.cursor || data.cursor === cursor || (ids && ids === previous);
+      const aged = oldest < Date.now() - CLEANUP_REPLY_YEAR;
+      const replyView = followCleanup.filters.reply !== 'any' || followCleanup.filters.sort === 'reply';
+      paintFollowCleanup({ list: changed && replyView });
+      if (stop || aged) {
+        followCleanup.scan = 'done';
+        followCleanup.scanNote = aged
+          ? 'Last reply looks through your posts from about the past year.'
+          : 'Last reply looks through the posts loaded from your account.';
+        followCleanup.scanCursor = '';
+        paintFollowCleanup();
+        return;
+      }
+      previous = ids;
+      cursor = data.cursor || '';
+      followCleanup.scanCursor = cursor;
+      await delay(120);
+    }
+    if (mine !== cleanupScanId) return;
+    followCleanup.scan = 'capped';
+    followCleanup.scanNote = `Last reply looks through your newest ${fullCount(followCleanup.postsSeen)} posts. Older replies are not included.`;
+    paintFollowCleanup();
+  } catch (error) {
+    if (mine !== cleanupScanId) return;
+    followCleanup.scan = 'error';
+    followCleanup.scanNote = error.message || 'Could not check your replies.';
+    paintFollowCleanup();
+  }
+}
+
+async function unfollowCleanup(people, button) {
+  if (followCleanup.busy) return;
+  const due = (people || []).filter((person) => person?.followingUri && followCleanup.people.some((item) => item.did === person.did));
+  if (!due.length) {
+    toast('Select people to unfollow.');
+    return;
+  }
+  const batch = due.slice(0, CLEANUP_UNFOLLOW_CAP);
+  const rest = due.length - batch.length;
+  if (batch.length > 1) {
+    const message = rest
+      ? `Unfollow ${batch.length} of ${due.length} people now? The rest stay selected. Bluesky slows down a long run.`
+      : `Unfollow ${batch.length} people?`;
+    if (!window.confirm(message)) return;
+  }
+  followCleanup.busy = true;
+  if (button) button.disabled = true;
+  let done = 0;
+  let limited = false;
+  let stopped = '';
+  const removed = [];
+  try {
+    for (let index = 0; index < batch.length; index += 1) {
+      const person = batch[index];
+      if (button?.isConnected) button.textContent = `Unfollowing ${index + 1} of ${batch.length}…`;
+      try {
+        await api.deleteRecord(person.followingUri);
+      } catch (error) {
+        if (error?.status === 429) {
+          limited = true;
+          break;
+        }
+        if (error?.status !== 400) {
+          stopped = error.message || `Could not unfollow @${person.handle || 'that account'}`;
+          break;
+        }
+      }
+      done += 1;
+      removed.push(person);
+      followCleanup.people = followCleanup.people.filter((item) => item.did !== person.did);
+      followCleanup.selected.delete(person.did);
+      followCache.set(person.did, false);
+      syncFollow(person.did, '');
+      if (index < batch.length - 1) await delay(300);
+    }
+  } finally {
+    if (removed.length) {
+      holdFollowTargets(followCleanup.did, removed.map((person) => person.did));
+      const kept = followCleanup.undo.filter((item) => !removed.some((person) => person.did === item.did));
+      writeFollowUndo(followCleanup.did, [...removed.map(undoPerson), ...kept]);
+    }
+    followCleanup.busy = false;
+    paintFollowCleanup();
+  }
+  const noun = done === 1 ? 'person' : 'people';
+  const tail = limited
+    ? ' Bluesky asked for a pause. The rest stay selected.'
+    : (rest && !stopped ? ' The rest stay selected.' : '');
+  if (stopped) toast(done ? `Unfollowed ${done} ${noun}. ${stopped}` : stopped);
+  else toast(done ? `Unfollowed ${done} ${noun}.${tail}` : 'Nobody was unfollowed.');
+}
+
+function undoPerson(person) {
+  return {
+    did: person.did,
+    handle: person.handle || '',
+    displayName: person.displayName || '',
+    description: person.description || '',
+    avatar: person.avatar || '',
+    followers: person.followers || 0,
+    follows: person.follows ?? null,
+    posts: person.posts ?? null,
+    createdAt: person.createdAt || 0,
+    followedAt: person.followedAt || 0,
+    mutual: Boolean(person.mutual),
+  };
+}
+
+async function scanFollowDates() {
+  if (!signedIn() || !followCleanup.people.length) return;
+  if (followCleanup.dates === 'running' || followCleanup.dates === 'done') return;
+  const did = followCleanup.did;
+  const mine = ++cleanupDateId;
+  followCleanup.dates = 'running';
+  paintFollowCleanup({ list: false });
+  const byDid = new Map(followCleanup.people.map((person) => [person.did, person]));
+  let cursor = '';
+  let previous = '';
+  try {
+    for (let page = 0; page < 100; page += 1) {
+      if (mine !== cleanupDateId || followCleanup.did !== did) return;
+      const data = await api.listRecords('app.bsky.graph.follow', cursor || undefined);
+      if (mine !== cleanupDateId || followCleanup.did !== did) return;
+      let changed = false;
+      (data.records || []).forEach((record) => {
+        const row = byDid.get(record?.value?.subject);
+        if (!row) return;
+        if (!row.followingUri && record.uri) {
+          row.followingUri = record.uri;
+          changed = true;
+        }
+        const at = Date.parse(record?.value?.createdAt || '');
+        if (Number.isFinite(at) && at !== row.followedAt) {
+          row.followedAt = at;
+          changed = true;
+        }
+      });
+      const wantsDates = followCleanup.filters.recent !== 'any' || followCleanup.filters.sort === 'recent';
+      if (changed) paintFollowCleanup({ list: wantsDates });
+      const ids = (data.records || []).map((record) => record?.uri || '').join(',');
+      if (!data.cursor || data.cursor === cursor || (ids && ids === previous)) {
+        followCleanup.dates = 'done';
+        paintFollowCleanup();
+        return;
+      }
+      previous = ids;
+      cursor = data.cursor;
+      await delay(80);
+    }
+    if (mine !== cleanupDateId) return;
+    followCleanup.dates = 'done';
+    paintFollowCleanup();
+  } catch {
+    if (mine !== cleanupDateId) return;
+    followCleanup.dates = 'error';
+    paintFollowCleanup();
+  }
+}
+
+async function undoCleanup(button) {
+  if (followCleanup.busy) return;
+  const due = followCleanup.undo.slice(0, CLEANUP_UNFOLLOW_CAP);
+  if (!due.length) {
+    toast('Nobody is waiting to be followed again.');
+    return;
+  }
+  const rest = followCleanup.undo.length - due.length;
+  const message = rest
+    ? `Follow ${due.length} of ${followCleanup.undo.length} people again? The rest stay on the button.`
+    : `Follow ${due.length} ${due.length === 1 ? 'person' : 'people'} again?`;
+  if (!window.confirm(message)) return;
+  followCleanup.busy = true;
+  if (button) button.disabled = true;
+  const owner = followCleanup.did;
+  let done = 0;
+  let limited = false;
+  let stopped = '';
+  try {
+    for (let index = 0; index < due.length; index += 1) {
+      const person = due[index];
+      if (button?.isConnected) button.textContent = `Following ${index + 1} of ${due.length}…`;
+      try {
+        const created = await api.follow(person.did);
+        const uri = created?.uri || '';
+        dropFollowHold(owner, person.did);
+        followCache.set(person.did, true);
+        syncFollow(person.did, uri);
+        const row = followCleanup.people.find((item) => item.did === person.did);
+        if (row) row.followingUri = uri || row.followingUri;
+        else followCleanup.people.push({ ...undoPerson(person), followingUri: uri, replyAt: followCleanup.replyAt.get(person.did) || 0 });
+        done += 1;
+      } catch (error) {
+        if (error?.status === 429) limited = true;
+        else stopped = error.message || `Could not follow @${person.handle || 'that account'}`;
+        break;
+      }
+      if (index < due.length - 1) await delay(900);
+    }
+  } finally {
+    writeFollowUndo(owner, followCleanup.undo.slice(done));
+    followCleanup.busy = false;
+    paintFollowCleanup();
+  }
+  const noun = done === 1 ? 'person' : 'people';
+  const tail = limited ? ' Bluesky asked for a pause. The rest stay on the button.' : (rest && !stopped ? ' The rest stay on the button.' : '');
+  if (stopped) toast(done ? `Followed ${done} ${noun} again. ${stopped}` : stopped);
+  else toast(done ? `Followed ${done} ${noun} again.${tail}` : 'Nobody was followed.');
+}
+
+function armFollowBack() {
+  if (armFollowBack.timer) return;
+  armFollowBack.timer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (!signedIn() || !followDeskPrefs().auto) return;
+    runFollowBack(false);
+  }, 3 * 60 * 1000);
+}
+
+async function runFollowBack(manual) {
+  if (!signedIn()) {
+    if (manual) requireSignIn();
+    return;
+  }
+  const prefs = followDeskPrefs();
+  if (!manual && !prefs.auto) return;
+  if (followBack.busy) {
+    if (manual) toast('Follow back is already running.');
+    return;
+  }
+  const owner = myDid();
+  const run = ++followBackRun;
+  followBack.busy = true;
+  followBack.note = 'Looking at people who follow you…';
+  paintFollowBack();
+  const held = followHoldSet(owner);
+  let followed = 0;
+  let skipped = 0;
+  let heldCount = 0;
+  let limited = false;
+  let stopped = '';
+  let used = followBackToday(owner);
+  const cap = prefs.cap;
+  try {
+    let cursor = '';
+    let previous = '';
+    for (let page = 0; page < 8 && used < cap && !limited && !stopped; page += 1) {
+      if (run !== followBackRun || myDid() !== owner) return;
+      const data = await api.getFollowers(owner, cursor || undefined, undefined, 100);
+      if (run !== followBackRun || myDid() !== owner) return;
+      const list = data.followers || [];
+      for (const actor of list) {
+        if (run !== followBackRun || myDid() !== owner) return;
+        if (!actor?.did || actor.did === owner || used >= cap) continue;
+        const createdAt = Date.parse(actor.createdAt || '');
+        const person = {
+          did: actor.did,
+          handle: actor.handle || '',
+          displayName: actor.displayName || '',
+          description: typeof actor.description === 'string' ? actor.description : '',
+          avatar: actor.avatar || '',
+          followers: Number(actor.followersCount) || 0,
+          follows: optionalCount(actor.followsCount, null),
+          posts: optionalCount(actor.postsCount, null),
+          createdAt: Number.isFinite(createdAt) ? createdAt : 0,
+          followingUri: actor.viewer?.following || '',
+        };
+        const choice = shouldFollowBack(person, { skipSpam: prefs.skipSpam, held: held.has(actor.did) });
+        if (!choice.yes) {
+          if (choice.reason === 'You unfollowed them') heldCount += 1;
+          else if (choice.reason && choice.reason !== 'Already following') skipped += 1;
+          continue;
+        }
+        try {
+          const created = await api.follow(actor.did);
+          followed += 1;
+          used = noteFollowBack(owner, 1);
+          dropFollowHold(owner, actor.did);
+          held.delete(actor.did);
+          followCache.set(actor.did, true);
+          syncFollow(actor.did, created?.uri || '');
+          followBack.note = `Followed back ${fullCount(followed)}.`;
+          paintFollowBack();
+        } catch (error) {
+          if (error?.status === 429) limited = true;
+          else stopped = error.message || 'Could not follow back.';
+          break;
+        }
+        if (used < cap && !limited) await delay(900);
+      }
+      const ids = list.map((actor) => actor?.did || '').join(',');
+      if (!data.cursor || data.cursor === cursor || (ids && ids === previous)) break;
+      previous = ids;
+      cursor = data.cursor;
+    }
+  } catch (error) {
+    if (run === followBackRun && myDid() === owner) stopped = stopped || error.message || 'Could not load people who follow you.';
+  } finally {
+    if (run !== followBackRun) return;
+    followBack.busy = false;
+    if (myDid() !== owner) {
+      followBack.note = '';
+      paintFollowBack();
+      return;
+    }
+    const bits = [followed ? `Followed back ${fullCount(followed)}` : 'No one new to follow back'];
+    if (skipped) bits.push(`skipped ${fullCount(skipped)} that look like spam`);
+    if (heldCount) bits.push(`${fullCount(heldCount)} held`);
+    if (followed && used >= cap) bits.push(`today’s pace is ${fullCount(cap)}`);
+    if (limited) bits.push('Bluesky asked for a pause');
+    followBack.note = `${bits.join('. ')}.`;
+    if (stopped) followBack.note = `${followBack.note} ${stopped}`;
+    paintFollowBack();
+    if (manual || followed) toast(followBack.note);
+  }
 }
 
 function allowButtons(kind, current) {
@@ -3896,22 +4635,22 @@ function showSuggest(box, area) {
     const rect = area.getBoundingClientRect();
     point = { x: rect.left, y: rect.bottom, top: rect.top };
   }
-  const width = Math.min(320, window.innerWidth - 16);
-  const left = Math.max(8, Math.min(point.x, window.innerWidth - width - 8));
-  box.style.width = `${width}px`;
-  box.style.left = `${left}px`;
+  const frame = viewportFrame();
+  const width = Math.min(320, frame.width - 16);
+  const left = Math.max(8, Math.min(point.x, frame.width - width - 8));
+  box.style.width = `${Math.round(width)}px`;
   box.style.right = 'auto';
   box.style.bottom = 'auto';
   box.style.transform = 'none';
   mountFloat(box, area);
   const height = box.offsetHeight || 200;
-  const spaceBelow = window.innerHeight - point.y;
+  const spaceBelow = frame.height - point.y;
   const spaceAbove = point.top;
   let top;
-  if (spaceBelow < 220 && spaceAbove > spaceBelow) top = point.top - height - 6;
-  else top = point.y + 6;
-  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-  box.style.top = `${top}px`;
+  if (spaceBelow < 220 && spaceAbove > spaceBelow) top = point.top - height - 4;
+  else top = point.y + 4;
+  top = Math.max(8, Math.min(top, frame.height - height - 8));
+  pinBox(box, left, top);
 }
 
 function scheduleSuggest(area) {
@@ -4400,6 +5139,40 @@ function toggleAppMenu() {
   hideTip();
   menu.hidden = false;
   button.setAttribute('aria-expanded', 'true');
+  placeAppMenu();
+  requestAnimationFrame(() => { if (!menu.hidden) placeAppMenu(); });
+}
+
+function viewportFrame() {
+  const root = document.documentElement;
+  const view = window.visualViewport;
+  return {
+    width: Math.round(view?.width || root.clientWidth || window.innerWidth),
+    height: Math.round(view?.height || root.clientHeight || window.innerHeight),
+  };
+}
+
+function pinBox(box, left, top) {
+  box.style.margin = '0';
+  box.style.left = `${Math.round(left)}px`;
+  box.style.top = `${Math.round(top)}px`;
+}
+
+function placeAppMenu() {
+  const menu = $('app-menu');
+  const button = $('app-menu-btn');
+  if (!menu || !button || menu.hidden) return;
+  const rect = button.getBoundingClientRect();
+  const frame = viewportFrame();
+  const width = menu.offsetWidth || 248;
+  const height = menu.offsetHeight || 0;
+  let left = rect.left;
+  let top = rect.bottom + 4;
+  if (left + width > frame.width - 8) left = frame.width - width - 8;
+  if (top + height > frame.height - 8 && rect.top - height - 4 >= 8) top = rect.top - height - 4;
+  menu.style.position = 'fixed';
+  menu.style.right = 'auto';
+  pinBox(menu, Math.max(8, left), Math.max(8, top));
 }
 
 function closeMenu() {
@@ -4414,19 +5187,20 @@ function closeMenu() {
 
 function placeMenu(menu, anchor) {
   const rect = anchor.getBoundingClientRect();
+  const frame = viewportFrame();
   const width = menu.offsetWidth || 250;
   const height = menu.offsetHeight || 0;
-  const gap = 6;
-  let left = rect.right - width;
-  if (left < 8) left = rect.left;
-  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  const gap = 4;
+  const center = rect.left + rect.width / 2;
+  let left = center > frame.width / 2 ? rect.right - width : rect.left;
+  left = Math.max(8, Math.min(left, frame.width - width - 8));
   let top = rect.bottom + gap;
   const above = rect.top - height - gap;
-  if (top + height > window.innerHeight - 8 && above >= 8) top = above;
-  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
+  if (top + height > frame.height - 8 && above >= 8) top = above;
+  top = Math.max(8, Math.min(top, frame.height - height - 8));
   menu.style.bottom = 'auto';
+  menu.style.right = 'auto';
+  pinBox(menu, left, top);
 }
 
 function openMenu(anchor, items) {
@@ -4437,7 +5211,10 @@ function openMenu(anchor, items) {
   menu._anchor = anchor || null;
   menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
   menu.hidden = false;
-  if (anchor?.getBoundingClientRect) placeMenu(menu, anchor);
+  if (anchor?.getBoundingClientRect) {
+    placeMenu(menu, anchor);
+    requestAnimationFrame(() => { if (!menu.hidden && menu._anchor === anchor) placeMenu(menu, anchor); });
+  }
   if (anchor) anchor.setAttribute('aria-expanded', 'true');
 }
 
@@ -5126,20 +5903,20 @@ function placeHover(card, anchor) {
   const rowRect = row?.getBoundingClientRect();
   const avoidTop = rowRect ? rowRect.top : rect.top;
   const avoidBottom = rowRect ? rowRect.bottom : rect.bottom;
-  const width = Math.min(320, window.innerWidth - 16);
-  card.style.width = `${width}px`;
+  const frame = viewportFrame();
+  const width = Math.min(320, frame.width - 16);
+  card.style.width = `${Math.round(width)}px`;
   card.style.right = 'auto';
   showFloat(card);
   const height = card.offsetHeight || 220;
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-  const below = avoidBottom + 8;
-  const above = avoidTop - height - 8;
+  const left = Math.max(8, Math.min(rect.left, frame.width - width - 8));
+  const below = avoidBottom + 4;
+  const above = avoidTop - height - 4;
   let top = below;
-  if (below + height > window.innerHeight - 8 && above >= 8) top = above;
-  else if (below + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+  if (below + height > frame.height - 8 && above >= 8) top = above;
+  else if (below + height > frame.height - 8) top = Math.max(8, frame.height - height - 8);
   if (top < 8) top = 8;
-  card.style.left = `${left}px`;
-  card.style.top = `${top}px`;
+  pinBox(card, left, top);
 }
 
 function closeHover() {
@@ -5979,6 +6756,70 @@ async function handleChromeAct(act, event) {
   if (act === 'bookmarks-cleanup') {
     event.preventDefault();
     await cleanupBookmarks(button);
+    return true;
+  }
+  if (act === 'cleanup-select' || act === 'cleanup-select-spam') {
+    event.preventDefault();
+    cleanupMatches().forEach((person) => {
+      if (!person.followingUri) return;
+      if (act === 'cleanup-select-spam' && !followSpam(person).likely) return;
+      followCleanup.selected.add(person.did);
+    });
+    paintFollowCleanup();
+    return true;
+  }
+  if (act === 'cleanup-clear') {
+    event.preventDefault();
+    followCleanup.selected.clear();
+    paintFollowCleanup();
+    return true;
+  }
+  if (act === 'cleanup-spam') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const picked = followCleanup.people.filter((person) => person.followingUri && followSpam(person).likely);
+    if (!picked.length) {
+      toast('No loaded accounts look like spam.');
+      return true;
+    }
+    followCleanup.selected = new Set(picked.map((person) => person.did));
+    paintFollowCleanup();
+    await unfollowCleanup(picked, button);
+    return true;
+  }
+  if (act === 'cleanup-undo') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    await undoCleanup(button);
+    return true;
+  }
+  if (act === 'followback-now') {
+    event.preventDefault();
+    await runFollowBack(true);
+    return true;
+  }
+  if (act === 'followback-release') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    releaseFollowHold(myDid());
+    followBack.note = 'Held accounts can be followed back again.';
+    paintFollowBack();
+    toast('Held accounts released.');
+    return true;
+  }
+  if (act === 'cleanup-more') {
+    event.preventDefault();
+    followCleanup.shown += 200;
+    paintFollowCleanup();
+    return true;
+  }
+  if (act === 'cleanup-unfollow' || act === 'cleanup-one') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const picked = act === 'cleanup-one'
+      ? followCleanup.people.filter((person) => person.did === (button?.dataset.did || ''))
+      : cleanupPicked(cleanupMatches());
+    await unfollowCleanup(picked, button);
     return true;
   }
   if (act === 'list-new') {
@@ -6861,8 +7702,18 @@ async function toggleFollow(button) {
     if (existing) {
       await api.deleteRecord(existing);
       syncFollow(did, '');
+      holdFollowTargets(myDid(), [did]);
+      const row = followCleanup.people.find((person) => person.did === did);
+      if (row) {
+        writeFollowUndo(followCleanup.did || myDid(), [undoPerson(row), ...followCleanup.undo.filter((person) => person.did !== did)]);
+        followCleanup.people = followCleanup.people.filter((person) => person.did !== did);
+        followCleanup.selected.delete(did);
+        if ($('cleanup-list')) paintFollowCleanup();
+      }
     } else {
       syncFollow(did, (await api.follow(did)).uri);
+      dropFollowHold(myDid(), did);
+      if ($('followback-status')) paintFollowBack();
     }
   } catch (error) { toast(error.message); }
 }
@@ -7671,6 +8522,13 @@ function bind() {
     if (event.target.id === 'chat-text' || event.target.id === 'ai-text') scheduleSuggest(event.target);
   });
   $('view').addEventListener('change', (event) => {
+    if (event.target?.dataset?.cleanupDid) {
+      const did = event.target.dataset.cleanupDid;
+      if (event.target.checked) followCleanup.selected.add(did);
+      else followCleanup.selected.delete(did);
+      event.target.closest('.cleanup-person')?.classList.toggle('on', event.target.checked);
+      paintCleanupChrome();
+    }
     if (event.target.id === 'ai-provider') syncAiFields();
     if (event.target.id === 'voice-pick') saveVoicePrefs({ voiceURI: event.target.value || '' });
     if (event.target.dataset?.volume) playSound(event.target.dataset.volume, { preview: true });
@@ -7715,6 +8573,12 @@ function bind() {
     shiftEnterSends(event);
   });
   $('view').addEventListener('input', (event) => {
+    if (event.target.id === 'cleanup-find') {
+      followCleanup.filters.q = event.target.value;
+      followCleanup.shown = 200;
+      paintFollowCleanup();
+      return;
+    }
     if (event.target.id === 'ai-model') {
       event.target.dataset.auto = '0';
       return;
@@ -7803,6 +8667,22 @@ function bind() {
     const settingsTabId = event.target.closest('[data-settings-tab]')?.dataset.settingsTab;
     if (settingsTabId) {
       selectSettingsTab(settingsTabId);
+      return;
+    }
+    const cleanupButton = event.target.closest('[data-cleanup]');
+    if (cleanupButton?.dataset.value) {
+      event.preventDefault();
+      setCleanupFilter(cleanupButton.dataset.cleanup, cleanupButton.dataset.value);
+      return;
+    }
+    const followCap = event.target.closest('[data-follow-cap]')?.dataset.followCap;
+    if (followCap) {
+      event.preventDefault();
+      saveFollowDeskPrefs({ cap: Number(followCap) });
+      document.querySelectorAll('[data-follow-cap]').forEach((button) => {
+        button.setAttribute('aria-pressed', button.dataset.followCap === String(followDeskPrefs().cap) ? 'true' : 'false');
+      });
+      paintFollowBack();
       return;
     }
     const theme = event.target.dataset?.themeSet;
@@ -7913,25 +8793,25 @@ function placeTip(node, text) {
     } catch { /* the tip stays in the page */ }
   }
   const rect = node.getBoundingClientRect();
+  const frame = viewportFrame();
   const width = tip.offsetWidth || 80;
   const height = tip.offsetHeight || 28;
-  const nearBottom = rect.bottom > window.innerHeight - 72;
+  const nearBottom = rect.bottom > frame.height - 72;
   let left;
   let top;
   if (nearBottom) {
     left = rect.left + (rect.width / 2) - (width / 2);
     top = rect.top - height - 8;
   } else if (rect.left < 300) {
-    left = rect.right + 10;
+    left = rect.right + 8;
     top = rect.top + (rect.height / 2) - (height / 2);
   } else {
     left = rect.left + (rect.width / 2) - (width / 2);
     top = rect.bottom + 8;
   }
-  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-  top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  left = Math.max(8, Math.min(left, frame.width - width - 8));
+  top = Math.max(8, Math.min(top, frame.height - height - 8));
+  pinBox(tip, left, top);
 }
 
 function bindTips() {
@@ -8400,9 +9280,29 @@ async function boot() {
   else if (offerSignIn()) openGate();
   document.getElementById('boot-error')?.remove();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') refreshBadge();
+    if (document.visibilityState === 'visible') {
+      refreshBadge();
+      if (signedIn() && followDeskPrefs().auto) runFollowBack(false);
+    }
   });
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 15000);
+  window.addEventListener('resize', placeOpenLayers);
+  window.addEventListener('scroll', placeOpenLayers, true);
+  window.visualViewport?.addEventListener('resize', placeOpenLayers);
+  window.visualViewport?.addEventListener('scroll', placeOpenLayers);
+  armFollowBack();
+}
+
+function placeOpenLayers() {
+  const menu = $('menu');
+  if (menu && !menu.hidden) {
+    if (menu._anchor?.isConnected) placeMenu(menu, menu._anchor);
+    else closeMenu();
+  }
+  const appMenu = $('app-menu');
+  if (appMenu && !appMenu.hidden) placeAppMenu();
+  const card = $('hovercard');
+  if (card && !card.hidden && card._anchor?.isConnected) placeHover(card, card._anchor);
 }
 
 boot().catch((error) => {

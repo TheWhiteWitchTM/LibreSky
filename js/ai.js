@@ -17,6 +17,7 @@ export const AI_PROVIDERS = [
   { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', kind: 'gemini' },
   { id: 'grok', label: 'Grok', model: 'grok-4.7', base: 'https://api.x.ai/v1', kind: 'responses' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-5-mini', base: 'https://api.openai.com/v1', kind: 'chat' },
+  { id: 'deepseek', label: 'DeepSeek', model: 'deepseek-flash', base: 'https://api.deepseek.com', kind: 'chat' },
   { id: 'custom', label: 'Other', model: '', kind: 'chat' },
 ];
 
@@ -300,6 +301,8 @@ export function replyText(data) {
     const text = choice.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('').trim();
     if (text) return text;
   }
+  const reasoning = data.choices?.[0]?.message?.reasoning_content;
+  if (typeof reasoning === 'string' && reasoning.trim()) return reasoning.trim();
   const parts = data.candidates?.[0]?.content?.parts;
   if (Array.isArray(parts)) {
     const text = parts.filter((part) => !part?.thought).map((part) => part?.text || '').join('').trim();
@@ -312,6 +315,13 @@ export function replyText(data) {
     throw new Error('The account used its reply limit before it wrote an answer.');
   }
   throw new Error('The account sent an empty reply.');
+}
+
+export function chatExtras(account) {
+  if (account?.provider === 'openai') return { max_completion_tokens: 2000 };
+  // DeepSeek thinks by default. A short LibreSky reply wants the answer, not a hidden chain of thought.
+  if (account?.provider === 'deepseek') return { max_tokens: 800, thinking: { type: 'disabled' } };
+  return { max_tokens: 800 };
 }
 
 export function responsesBody(account, history) {
@@ -331,6 +341,9 @@ export function responsesBody(account, history) {
 function explainAiError(provider, message) {
   if (provider === 'grok' && /incorrect api key|invalid api key/i.test(message || '')) {
     return 'xAI refused this key. The key from console.x.ai is the one api.x.ai accepts.';
+  }
+  if (provider === 'deepseek' && /invalid api key|authentication fails|unauthorized/i.test(message || '')) {
+    return 'DeepSeek refused this key. The key from platform.deepseek.com is the one api.deepseek.com accepts.';
   }
   return message;
 }
@@ -385,9 +398,8 @@ export async function askAi(config, messages, signal, note = '') {
           role: item.role === 'assistant' || item.role === 'system' ? item.role : 'user',
           content: String(item.content || ''),
         })),
+        ...chatExtras(account),
       };
-      if (account.provider === 'openai') body.max_completion_tokens = 2000;
-      else body.max_tokens = 800;
     }
     let res;
     try {
