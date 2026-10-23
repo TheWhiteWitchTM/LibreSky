@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-23-facets';
+const CACHE = 'libresky-2026-10-24-local';
 
 const SHELL = [
   './',

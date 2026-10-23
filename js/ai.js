@@ -63,6 +63,7 @@ export const AI_PROVIDERS = [
   { id: 'together', label: 'Together', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', base: 'https://api.together.xyz/v1', kind: 'chat', keyUrl: 'https://api.together.ai/settings/api-keys', keyLabel: 'api.together.ai' },
   { id: 'cerebras', label: 'Cerebras', model: 'llama3.1-8b', base: 'https://api.cerebras.ai/v1', kind: 'chat', keyUrl: 'https://cloud.cerebras.ai', keyLabel: 'cloud.cerebras.ai' },
   { id: 'pollinations', label: 'Pollinations (free)', model: 'openai', base: 'https://text.pollinations.ai', kind: 'pollinations', keyOptional: true, keyUrl: 'https://enter.pollinations.ai', keyLabel: 'enter.pollinations.ai' },
+  { id: 'local', label: 'Local', model: '', base: 'http://127.0.0.1:11434/v1', kind: 'chat', keyOptional: true, local: true },
   { id: 'custom', label: 'Other', model: '', kind: 'chat' },
 ];
 
@@ -321,6 +322,91 @@ function cleanBase(value) {
   return `${url.origin}${path}`;
 }
 
+export function localModelNames(data) {
+  const rows = Array.isArray(data?.models) ? data.models : (Array.isArray(data?.data) ? data.data : []);
+  const names = [];
+  const seen = new Set();
+  for (const item of rows) {
+    const raw = typeof item === 'string' ? item : (item?.name || item?.model || item?.id || '');
+    const name = String(raw || '').trim();
+    if (!name || seen.has(name) || name.length > 120) continue;
+    seen.add(name);
+    names.push(name);
+    if (names.length >= 40) break;
+  }
+  return names;
+}
+
+export function localProbes(extraBase = '') {
+  const presets = [
+    'http://127.0.0.1:11434/v1',
+    'http://localhost:11434/v1',
+    'http://127.0.0.1:1234/v1',
+    'http://127.0.0.1:8080/v1',
+  ];
+  const list = [];
+  const seen = new Set();
+  const add = (value) => {
+    let clean = '';
+    try { clean = cleanBase(value); } catch { clean = ''; }
+    if (!clean || seen.has(clean)) return;
+    seen.add(clean);
+    let tags = '';
+    try {
+      const url = new URL(clean);
+      if (url.port === '11434') tags = `${url.origin}/api/tags`;
+    } catch { tags = ''; }
+    list.push({ base: clean, tags });
+  };
+  if (extraBase) add(extraBase);
+  presets.forEach(add);
+  return list;
+}
+
+async function readModelUrl(url, signal) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+      signal,
+    });
+  } catch {
+    return null;
+  }
+  if (!res?.ok) return null;
+  let data = null;
+  try { data = await res.json(); } catch { return null; }
+  if (!data || typeof data !== 'object') return null;
+  if (!Array.isArray(data.models) && !Array.isArray(data.data)) return null;
+  return localModelNames(data);
+}
+
+async function readLocalProbe(probe) {
+  const signal = AbortSignal.timeout ? AbortSignal.timeout(1200) : undefined;
+  if (probe.tags) {
+    const tagged = await readModelUrl(probe.tags, signal);
+    if (tagged) return tagged;
+  }
+  return readModelUrl(`${probe.base}/models`, signal);
+}
+
+export async function detectLocalAi(extraBase = '') {
+  const probes = localProbes(extraBase);
+  const found = await Promise.all(probes.map(async (probe) => {
+    try {
+      const models = await readLocalProbe(probe);
+      return models ? { base: probe.base, models } : null;
+    } catch {
+      return null;
+    }
+  }));
+  return found.find(Boolean) || null;
+}
+
 function cleanKey(value) {
   let key = String(value || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
   key = key.replace(/^bearer\s+/i, '').trim();
@@ -336,9 +422,10 @@ function cleanKey(value) {
 export function prepareAi(input) {
   const provider = providerById(input?.provider);
   const custom = provider.id === 'custom';
-  const model = cleanModel(input?.model, custom ? '' : provider.model);
+  const adjustable = custom || provider.local;
+  const model = cleanModel(input?.model, adjustable ? '' : provider.model);
   const skipBase = provider.kind === 'gemini' || provider.kind === 'pollinations';
-  const base = skipBase ? (provider.base || '') : cleanBase(custom ? input?.base : provider.base);
+  const base = skipBase ? (provider.base || '') : cleanBase(adjustable ? (input?.base || provider.base) : provider.base);
   const typed = String(input?.apiKey || '').trim();
   const apiKey = !typed && provider.keyOptional ? '' : cleanKey(input?.apiKey);
   return { provider: provider.id, model, base, apiKey, kind: provider.kind };
@@ -500,7 +587,7 @@ export async function askAi(config, messages, signal, note = '') {
       body = responsesBody(account, history);
     } else {
       url = `${account.base}/chat/completions`;
-      headers.Authorization = `Bearer ${key}`;
+      if (key) headers.Authorization = `Bearer ${key}`;
       if (account.provider === 'openrouter') {
         headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://thewhitewitchtm.github.io/LibreSky';
         headers['X-Title'] = 'LibreSky';
@@ -511,6 +598,9 @@ export async function askAi(config, messages, signal, note = '') {
         ...chatExtras(account),
       };
     }
+    const unreachable = account.provider === 'local'
+      ? 'This browser could not reach the local server. Check that it is running and the address is right.'
+      : 'This browser could not reach that account. Check the address and the key.';
     let res;
     try {
       res = await fetch(url, {
@@ -527,10 +617,10 @@ export async function askAi(config, messages, signal, note = '') {
         try {
           res = await fetch(getUrl, { signal, redirect: 'error' });
         } catch {
-          throw new Error('This browser could not reach that account. Check the address and the key.');
+          throw new Error(unreachable);
         }
       } else {
-        throw new Error('This browser could not reach that account. Check the address and the key.');
+        throw new Error(unreachable);
       }
     }
     const text = await readBody(res, key);

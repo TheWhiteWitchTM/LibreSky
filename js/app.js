@@ -54,7 +54,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, draftRewriteMessages, fitDraft, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
+import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, detectLocalAi, draftRewriteMessages, fitDraft, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -1589,7 +1589,7 @@ async function showMessages(convoId) {
       });
       const rows = main.map((convo) => convoHtml(convo, mine)).join('');
       const entry = requestEntryHtml(waiting || reported, people);
-      $('view').innerHTML = `<div class="toolbar"><button type="button" class="primary small" data-act="new-chat">New message</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Start a chat with someone you follow.')}`;
+      $('view').innerHTML = `<div class="toolbar"><form id="new-chat" class="new-chat"><input id="new-chat-handle" placeholder="Enter a handle" aria-label="Handle" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="253"><button class="primary small" type="submit">New chat</button></form><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Enter a handle, then press New chat.')}`;
       refreshBadge();
       return;
     }
@@ -2465,6 +2465,7 @@ let aiPendingNote = 'Page';
 
 function aiKeyHelp(provider) {
   const item = providerById(provider);
+  if (item.local) return 'Local uses a server on this computer that accepts chat completions. Find local looks for one and lists its models. The address can be changed. A key is optional.';
   if (item.id === 'custom') {
     return 'Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.';
   }
@@ -2478,41 +2479,61 @@ function aiSettingsHtml() {
   const saved = loadAi();
   const provider = saved?.provider || 'grok';
   const known = providerById(provider);
+  const local = Boolean(known.local);
   const model = saved?.model || known.model || '';
+  const showBase = provider === 'custom' || local;
+  const baseValue = showBase ? (saved?.base || known.base || '') : '';
   const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
-  const keyHint = saved?.apiKey ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account';
-  const usingFallback = !saved?.apiKey;
+  const keyHint = local
+    ? 'Optional'
+    : saved?.apiKey
+      ? 'Saved on your Bluesky account. Type a new key to replace it.'
+      : 'Paste the key from that account';
+  const localOn = Boolean(saved && providerById(saved.provider).local);
+  const usingFallback = !saved?.apiKey && !localOn;
   const status = saved?.apiKey
     ? `${AI_NAME} is on for this account.`
-    : `${AI_NAME} is on with a free public model until you save a key.`;
+    : localOn
+      ? `${AI_NAME} uses the local server on this account.`
+      : `${AI_NAME} is on with a free public model until you save a key.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  const directory = AI_PROVIDERS.filter((item) => item.keyUrl).map((item) => {
+  const directory = AI_PROVIDERS.map((item) => {
+    if (item.local) return `<li>${escapeHtml(item.label)} · on this computer</li>`;
+    if (!item.keyUrl) return '';
     const extra = item.keyOptional ? ' · works without a key' : '';
     return `<li><a href="${escapeHtml(item.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>${extra}</li>`;
   }).join('');
-  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. Without a key it uses a free public model so you still have something. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
+  const tail = localOn
+    ? 'Find local looks for a server on this computer. A key is optional.'
+    : usingFallback
+      ? 'A key is optional. Pick a provider and open its site to create one.'
+      : 'Replace the key by pasting a new one and saving.';
+  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. Without a key it uses a free public model so you still have something. Local uses a server on this computer. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
     <form id="ai-form" class="ai-form" autocomplete="off">
       <label>Provider
         <select id="ai-provider">${options}</select>
       </label>
       <label>Model
-        <input id="ai-model" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off">
+        <input id="ai-model" list="ai-model-list" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off">
+        <datalist id="ai-model-list"></datalist>
       </label>
-      <label id="ai-base-label"${provider === 'custom' ? '' : ' hidden'}>API address
-        <input id="ai-base" value="${escapeHtml(provider === 'custom' ? (saved?.base || '') : '')}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://example.com/v1">
+      <label id="ai-base-label"${showBase ? '' : ' hidden'}>API address
+        <input id="ai-base" value="${escapeHtml(baseValue)}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="http://127.0.0.1:11434/v1">
       </label>
-      <label>API key
+      <label id="ai-key-label"><span id="ai-key-name">${local ? 'API key, optional' : 'API key'}</span>
         <input id="ai-key" type="text" name="provider-secret" maxlength="2000" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" placeholder="${escapeHtml(keyHint)}">
       </label>
       <p class="dim" id="ai-key-help">${aiKeyHelp(provider)}</p>
+      <p class="dim" id="ai-local"${local ? '' : ' hidden'}></p>
       <div class="toolbar">
         <button class="primary small" type="submit">Save</button>
         <button type="button" class="text-btn" id="ai-check" data-act="ai-check">Check</button>
+        <button type="button" class="text-btn" id="ai-find" data-act="ai-find"${local ? '' : ' hidden'}>Find local</button>
         ${remove}
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">${usingFallback ? 'A key is optional. Pick a provider and open its site to create one.' : 'Replace the key by pasting a new one and saving.'}</p>
+    <p class="dim">${tail}</p>
     <ul class="ai-key-list dim">${directory}</ul>`;
 }
 
@@ -2527,20 +2548,91 @@ function readAiForm() {
   });
 }
 
+let localFindSeq = 0;
+
 function syncAiFields() {
   const select = $('ai-provider');
   const model = $('ai-model');
   if (!select || !model) return;
   const item = providerById(select.value);
   const baseLabel = $('ai-base-label');
-  if (baseLabel) baseLabel.hidden = item.id !== 'custom';
+  const baseInput = $('ai-base');
+  const showBase = item.id === 'custom' || item.local;
+  if (baseLabel) baseLabel.hidden = !showBase;
+  if (baseInput && item.local && !baseInput.value.trim()) baseInput.value = item.base || '';
   const help = $('ai-key-help');
   if (help) help.innerHTML = aiKeyHelp(select.value);
+  const keyName = $('ai-key-name');
+  if (keyName) keyName.textContent = item.keyOptional && item.local ? 'API key, optional' : 'API key';
+  const key = $('ai-key');
+  if (key && !key.value) {
+    const savedKey = loadAi()?.apiKey;
+    key.placeholder = item.local
+      ? 'Optional'
+      : (savedKey ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account');
+  }
+  const find = $('ai-find');
+  const localLine = $('ai-local');
+  if (find) find.hidden = !item.local;
+  if (!item.local) {
+    localFindSeq += 1;
+    if (localLine) {
+      localLine.hidden = true;
+      localLine.textContent = '';
+    }
+  }
   const current = model.value.trim();
   const known = AI_PROVIDERS.some((provider) => provider.model && provider.model === current);
   if (model.dataset.auto === '1' || !current || known) {
     model.value = item.model || '';
     model.dataset.auto = '1';
+  }
+  if (item.local) findLocalAi();
+}
+
+async function findLocalAi({ replaceBase = false } = {}) {
+  const seq = ++localFindSeq;
+  const button = $('ai-find');
+  const line = $('ai-local');
+  if ($('ai-provider')?.value !== 'local') return;
+  if (button) button.disabled = true;
+  if (line) {
+    line.hidden = false;
+    line.textContent = 'Looking on this computer…';
+  }
+  const typed = String($('ai-base')?.value || '').trim().replace(/\/+$/, '');
+  try {
+    const found = await detectLocalAi(typed);
+    if (seq !== localFindSeq || !$('ai-form')?.isConnected || $('ai-provider')?.value !== 'local') return;
+    if (!found) {
+      if (line) line.textContent = 'No local server answered. Start it, or type its address. A site on https sometimes cannot reach this computer.';
+      return;
+    }
+    const foundBase = String(found.base || '').replace(/\/+$/, '');
+    const matched = !typed || foundBase === typed;
+    if (!matched && !replaceBase) {
+      if (line) line.textContent = `No answer at ${typed}. Another server answered at ${found.base}. Press Find local to use it.`;
+      return;
+    }
+    const base = $('ai-base');
+    if (base) base.value = found.base;
+    const list = $('ai-model-list');
+    if (list) list.innerHTML = found.models.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
+    const model = $('ai-model');
+    if (model && found.models.length && !model.value.trim()) {
+      model.value = found.models[0];
+      model.dataset.auto = '1';
+    }
+    if (line) {
+      const count = found.models.length;
+      line.textContent = count
+        ? `Local server answered at ${found.base}. ${count} ${count === 1 ? 'model' : 'models'}.`
+        : `Local server answered at ${found.base}. It did not list a model, so type the model name.`;
+    }
+  } catch (error) {
+    if (seq === localFindSeq && line?.isConnected) line.textContent = error.message || 'Could not look for a local server.';
+  } finally {
+    if (seq === localFindSeq && button?.isConnected) button.disabled = false;
   }
 }
 
@@ -2926,6 +3018,7 @@ function showSettings() {
   loadChatAllow(token);
   fillVoiceSelect();
   if (settingsTab === 'follows') loadFollowCleanup(token);
+  if ($('ai-provider')?.value === 'local') findLocalAi();
 }
 
 function selectSettingsTab(id) {
@@ -4710,7 +4803,9 @@ function paintGhost(area) {
   const ghost = $('type-ghost');
   const box = $('suggest');
   if (!ghost || !area || !box || box.hidden) return hideGhost();
-  const token = caretToken(area.value, area.selectionStart) || caretWord(area.value, area.selectionStart);
+  const token = area.id === 'new-chat-handle'
+    ? { query: String(area.value || '').replace(/^@+/, '') }
+    : (caretToken(area.value, area.selectionStart) || caretWord(area.value, area.selectionStart));
   const insert = box.querySelector('.suggest-row.on')?.dataset.insert || '';
   const query = token?.query || '';
   if (!token || !insert || !query || !insert.toLowerCase().startsWith(query.toLowerCase())) return hideGhost();
@@ -4813,8 +4908,31 @@ function wordSuggestRows(area) {
   return completeWord(word.query, langs).map((item, index) => suggestRow(index, item, escapeHtml(item)));
 }
 
+async function refreshHandleSuggest(area) {
+  const query = String(area.value || '').trim().replace(/^@+/, '');
+  if (query.length < 1) return hideSuggest();
+  const seq = ++suggestSeq;
+  const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
+  try {
+    const items = (await api.searchActorsTypeahead(query, signal)).actors || [];
+    if (seq !== suggestSeq) return;
+    if (document.activeElement !== area) return hideSuggest();
+    const rows = items.filter((actor) => actor?.handle).slice(0, 6).map((actor, index) => suggestRow(
+      index,
+      actor.handle,
+      `${escapeHtml(actor.displayName || actor.handle)}<span class="handle">@${escapeHtml(actor.handle)}</span>`,
+    ));
+    paintSuggest(area, rows);
+  } catch {
+    if (seq !== suggestSeq) return;
+    if (document.activeElement !== area) return;
+    hideSuggest();
+  }
+}
+
 async function refreshSuggest(area) {
   if (!area?.isConnected) return hideSuggest();
+  if (area.id === 'new-chat-handle') return refreshHandleSuggest(area);
   const token = caretToken(area.value, area.selectionStart);
   if (!token) return paintSuggest(area, wordSuggestRows(area));
   const leads = token.sigil === '@' ? aiSuggestRows(token.query) : [];
@@ -4869,6 +4987,14 @@ function suggestRow(index, insert, body) {
 function applySuggest(insert) {
   const area = suggestArea;
   if (!area || !insert) return;
+  if (area.id === 'new-chat-handle') {
+    area.value = String(insert).replace(/^@+/, '');
+    hideSuggest();
+    const end = area.value.length;
+    area.focus();
+    area.setSelectionRange?.(end, end);
+    return;
+  }
   const token = caretToken(area.value, area.selectionStart) || caretWord(area.value, area.selectionStart);
   if (!token) return hideSuggest();
   const after = area.value.slice(area.selectionStart);
@@ -4899,7 +5025,9 @@ function onSuggestKey(event) {
   const items = [...box.querySelectorAll('button')];
   if (!items.length) return false;
   const current = items.findIndex((button) => button.classList.contains('on'));
-  const token = caretToken(event.target.value, event.target.selectionStart);
+  const token = event.target?.id === 'new-chat-handle'
+    ? { sigil: '@', query: String(event.target.value || '').replace(/^@+/, '') }
+    : caretToken(event.target.value, event.target.selectionStart);
   if (!token && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return false;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
@@ -6597,7 +6725,6 @@ async function followedSubjects() {
 
 async function followAllBack(button) {
   if (!signedIn()) return requireSignIn();
-  if (!window.confirm('Follow everyone who follows you and you do not follow back? Each person is followed once, and extra follow records for the same person are removed. This stops after 80 new follows. Run it again to continue.')) return;
   if (button) {
     button.disabled = true;
     button.textContent = 'Checking…';
@@ -7551,6 +7678,11 @@ async function onClick(event) {
     checkAiForm();
     return;
   }
+  if (act === 'ai-find') {
+    event.preventDefault();
+    findLocalAi({ replaceBase: true });
+    return;
+  }
   if (act === 'thread-reply') {
     const item = posts.get(event.target.closest('[data-uri]')?.dataset.uri);
     if (item?.post) openComposer({ reply: item.post });
@@ -8065,15 +8197,30 @@ async function convoIdFor(peerDid) {
 }
 
 async function newChat() {
-  const handle = window.prompt('Message which handle?');
-  if (!handle) return;
+  const input = $('new-chat-handle');
+  const handle = (input?.value || '').trim().replace(/^@+/, '');
+  hideSuggest();
+  if (!handle) {
+    toast('Enter a handle.');
+    input?.focus();
+    return;
+  }
+  if (!signedIn()) return requireSignIn();
+  const button = input?.form?.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  if (input) input.disabled = true;
   try {
-    const did = await api.resolveHandle(handle.trim().replace(/^@/, ''));
-    const data = await api.convoForMember(did);
-    const id = data.convo?.id;
-    if (!id) throw new Error('Could not open that conversation.');
+    const did = await api.resolveHandle(handle);
+    const id = await convoIdFor(did);
     location.hash = `#/messages/${encodeURIComponent(id)}`;
-  } catch (error) { toast(error.message); }
+  } catch (error) {
+    toast(error.message || 'Could not open that chat.');
+    if (button?.isConnected) button.disabled = false;
+    if (input?.isConnected) {
+      input.disabled = false;
+      input.focus();
+    }
+  }
 }
 
 let lightbox = { images: [], index: 0 };
@@ -8611,7 +8758,7 @@ function bind() {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
-    if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text')) hideSuggest();
+    if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
     if (!event.target.closest('#hovercard, [data-act="account-card"]')) closeHover();
   });
   document.addEventListener('pointerover', scheduleHover);
@@ -8884,6 +9031,10 @@ function bind() {
       const media = event.submitter?.dataset?.media === 'video' ? 'video' : 'audio';
       startCallToHandle(media);
     }
+    if (event.target.id === 'new-chat') {
+      event.preventDefault();
+      newChat();
+    }
     if (event.target.id === 'list-add') {
       event.preventDefault();
       const input = $('list-add-handle');
@@ -8916,10 +9067,10 @@ function bind() {
     }
   });
   $('view').addEventListener('keyup', (event) => {
-    if (event.target.id === 'chat-text' || event.target.id === 'ai-text') scheduleSuggest(event.target);
+    if (event.target.id === 'chat-text' || event.target.id === 'ai-text' || event.target.id === 'new-chat-handle') scheduleSuggest(event.target);
   });
   $('view').addEventListener('click', (event) => {
-    if (event.target.id === 'chat-text' || event.target.id === 'ai-text') scheduleSuggest(event.target);
+    if (event.target.id === 'chat-text' || event.target.id === 'ai-text' || event.target.id === 'new-chat-handle') scheduleSuggest(event.target);
   });
   $('view').addEventListener('change', (event) => {
     if (event.target?.dataset?.cleanupDid) {
@@ -8952,6 +9103,10 @@ function bind() {
       event.preventDefault();
       event.stopPropagation();
       closePicker();
+      return;
+    }
+    if (event.target.id === 'new-chat-handle') {
+      onSuggestKey(event);
       return;
     }
     const tab = event.target.closest?.('[data-settings-tab]');
@@ -9011,6 +9166,10 @@ function bind() {
       applyA11y(saved);
       const label = $('post-scale-label');
       if (label) label.textContent = `${saved.scale}%`;
+    }
+    if (event.target.id === 'new-chat-handle') {
+      scheduleSuggest(event.target);
+      return;
     }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
     if (event.target.id === 'chat-text' && !event.isComposing) {
@@ -9141,7 +9300,7 @@ function bind() {
   });
   window.addEventListener('scroll', (event) => {
     const target = event.target;
-    if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text' || target?.id === 'ai-text') return;
+    if (target?.id === 'suggest' || target?.id === 'chat-text' || target?.id === 'compose-text' || target?.id === 'ai-text' || target?.id === 'new-chat-handle') return;
     hideSuggest();
   }, true);
   bindTips();
