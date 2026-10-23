@@ -1,9 +1,19 @@
 const { app, BrowserWindow, shell } = require('electron');
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { forgetApi, startControl } = require('./open.cjs');
 
 const PORT = 47321;
+const PROFILE = path.join(os.homedir(), '.local', 'state', 'libresky', 'electron');
+
+app.setName('LibreSky');
+if (process.platform === 'linux') {
+  app.setDesktopName('libresky');
+  app.commandLine.appendSwitch('class', 'libresky');
+  app.setPath('userData', PROFILE);
+}
 const ROOT = path.join(__dirname, 'www');
 const SITE = 'https://thewhitewitchtm.github.io/LibreSky';
 const TYPES = {
@@ -23,8 +33,53 @@ const TYPES = {
 };
 
 let server = null;
+let control = null;
 let port = PORT;
 let win = null;
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function raiseWindow() {
+  if (!win) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  try { app.focus({ steal: true }); } catch { /* Wayland can refuse a stolen focus */ }
+  return true;
+}
+
+async function pageWhere() {
+  if (!win) return { hash: '', title: '' };
+  try {
+    const state = await win.webContents.executeJavaScript('({ hash: location.hash || "", title: document.title || "" })', true);
+    if (!state || typeof state !== 'object') return { hash: '', title: '' };
+    return { hash: String(state.hash || '').slice(0, 300), title: String(state.title || '').slice(0, 180) };
+  } catch {
+    return { hash: '', title: '' };
+  }
+}
+
+async function openHash(hash) {
+  if (!win) return { ok: false, error: 'LibreSky is not open.' };
+  raiseWindow();
+  const deadline = Date.now() + 15000;
+  while (win.webContents.isLoading() && Date.now() < deadline) await wait(200);
+  while (Date.now() < deadline) {
+    try {
+      const shown = await win.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}; location.hash`, true);
+      if (shown === hash) {
+        raiseWindow();
+        return { ok: true, hash, href: `http://127.0.0.1:${port}/${hash}` };
+      }
+    } catch {
+      /* the page is still booting */
+    }
+    await wait(300);
+  }
+  return { ok: false, error: 'LibreSky did not open that post.' };
+}
 
 function insideRoot(file) {
   const root = path.resolve(ROOT);
@@ -173,6 +228,11 @@ if (!locked) {
   app.whenReady().then(async () => {
     await startServer();
     createWindow();
+    control = await startControl({
+      focus: raiseWindow,
+      open: openHash,
+      where: pageWhere,
+    });
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -182,6 +242,8 @@ if (!locked) {
   });
   app.on('window-all-closed', () => {
     server?.close();
+    control?.close();
+    forgetApi();
     app.quit();
   });
 }
