@@ -1,10 +1,14 @@
-You are improving LibreSky at /home/andreas/Projects/LibreSky. This is an unattended update. Finish it in one pass.
+You are improving LibreSky at /home/andreas/Projects/LibreSky. This is an unattended update on a small credit budget. Finish in one pass, or stop without publishing.
 
-Read CHANGES.md, README.md, js/call.js, and js/ai.js. Pick one real improvement to AI Assist or to voice and video calls. Prefer a gap that X, the Bluesky app, or other Bluesky clients already cover. Keep the change small enough to finish and test. Match the surrounding code. Do not add dependencies. Do not store an app password, a token, or any other secret in the repo or the client.
+Read CHANGES.md, then js/ai.js and js/call.js. Do not search the repository. Do not open other directories. Do not start a subagent. Do not use the web.
 
-Add a new dated section at the top of the entries in CHANGES.md, in the same voice as that file. Update README.md, CORPORATE.md, and llms.txt so they stay true. If index.html describes the feature you changed, update that copy too. Bump the cache name in sw.js when HTML, CSS, or JS changes. Do not invent features.
+Pick one small fix you can see in those files. Prefer a gap in AI Assist or in voice and video calls. Keep it small enough to finish in this pass. Match the surrounding code. Do not add dependencies. Do not store an app password, a token, or any other secret in the repo or the client.
 
-Run npm run smoke. Fix failures you caused.
+If you cannot see a small fix in those files, stop. Do not commit, push, or post.
+
+Otherwise edit only the files that fix needs. Add a new dated section at the top of the entries in CHANGES.md, in the same voice as that file. Update README.md, CORPORATE.md, and llms.txt so they stay true. If index.html describes the feature you changed, update that copy too. Bump the cache name in sw.js when HTML, CSS, or JS changes. Do not invent features.
+
+Run npm run smoke. Fix failures you caused. If smoke still fails, do not commit and do not post.
 
 Commit only the files you changed for this update. Do not commit secrets or files you did not mean to change. Push to the existing branch.
 

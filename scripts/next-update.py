@@ -90,11 +90,33 @@ def main() -> int:
         log("missing prompt")
         return 1
     grok = os.environ.get("GROK_BIN") or str(Path.home() / ".grok" / "bin" / "grok")
-    log("start update")
+    # Default Grok Build is high effort, with subagents and web search. That is
+    # what emptied the Super balance. This pass stays on grok-4.7 (not Fast,
+    # which is twice the price), low effort, no subagents, no web, and a turn cap.
+    env = os.environ.copy()
+    env["GROK_MEMORY"] = "0"
+    env["GROK_DISABLE_AUTOUPDATER"] = "1"
+    log("start update grok-4.7 low")
     result = subprocess.run(
-        [grok, "--no-plan", "--always-approve", "--no-auto-update", "-p", prompt],
+        [
+            grok,
+            "-m",
+            "grok-4.7",
+            "--effort",
+            "low",
+            "--max-turns",
+            "24",
+            "--no-subagents",
+            "--disable-web-search",
+            "--no-plan",
+            "--always-approve",
+            "--no-auto-update",
+            "-p",
+            prompt,
+        ],
         cwd=ROOT,
         check=False,
+        env=env,
     )
     if result.returncode != 0:
         log(f"update failed {result.returncode}")
