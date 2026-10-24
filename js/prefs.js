@@ -6,6 +6,7 @@ import {
   aiFromPreference,
   aiPreference,
   claimLegacyAi,
+  listRemoteAi,
   loadAi,
   setAiAccountSynced,
   storeAiAccount,
@@ -615,9 +616,11 @@ function applyPulledAi(list, did) {
     return true;
   }
   if (remote) {
+    const before = listRemoteAi().map((item) => `${item.id}:${item.provider}:${item.model}:${item.apiKey}`).join('|');
     const current = loadAi();
     storeAiAccount(did, remote, true);
-    return !current || current.apiKey !== remote.apiKey || current.provider !== remote.provider || current.model !== remote.model || current.base !== remote.base;
+    const after = listRemoteAi().map((item) => `${item.id}:${item.provider}:${item.model}:${item.apiKey}`).join('|');
+    return before !== after || !current || current.apiKey !== remote.apiKey || current.provider !== remote.provider || current.model !== remote.model || current.base !== remote.base || current.id !== remote.id;
   }
   if (loadAi() && !aiAccountSynced(did)) {
     dirtyAi = true;

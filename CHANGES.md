@@ -10,6 +10,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 - Emoji and GIF pickers open over the writing box, next to the buttons, so you do not scroll to find them.
 - A Flags button sits next to Emoji in the post box and in chat.
 - AI Assist settings live on the AI page. Config on that page opens them. Account AI and local AI are separate. Local stays in this browser. Find local lists models on this computer, and the desktop app can reach that server.
+- AI Assist can keep several remote AIs. The AI page picks Free, any remote, or Local. Local lists the models on this computer, and each model is a button.
 
 ## 22 October 2026
 

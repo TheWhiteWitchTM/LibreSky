@@ -100,7 +100,7 @@ function sendFile(res, file, status = 200) {
   });
 }
 
-const LOCAL_AI_PORTS = new Set([11434, 1234, 8080, 1337, 4891, 12434, 5000, 3000, 12345]);
+const LOCAL_AI_PORTS = new Set([11434, 47320, 1234, 8080, 1337, 4891, 12434, 5000, 5001, 8000, 7860, 3000, 12345]);
 
 function proxyLocalAi(req, res, pathname, search) {
   const match = pathname.match(/^\/local-ai\/(\d+)(\/.*)?$/);

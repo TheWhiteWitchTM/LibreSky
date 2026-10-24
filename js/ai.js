@@ -13,6 +13,8 @@ const DESKTOP_PORT_MAX = 47340;
 export const AI_PREF_TYPE = 'app.bsky.actor.defs#libreskyAi';
 
 const memory = new Map();
+const remoteBooks = new Map();
+const REMOTE_CAP = 8;
 
 export const AI_SYSTEM = 'You are the assistant a person reaches in LibreSky by tagging @ai or @si. Those tags are not Bluesky accounts. Reply in plain text, usually one short paragraph, and stay under 700 characters unless the question needs more.';
 
@@ -110,6 +112,21 @@ export function rewriteLocalUrl(url) {
   }
 }
 
+function localFetch(url, options = {}) {
+  const init = {
+    ...options,
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+  };
+  try {
+    return fetch(url, { ...init, targetAddressSpace: 'loopback' });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    return fetch(url, init);
+  }
+}
+
 function readLocalRecord() {
   try {
     const raw = localStorage.getItem(LOCAL_AI_KEY);
@@ -139,6 +156,7 @@ export function saveLocalAi(input) {
       base: next.base,
       apiKey: next.apiKey || '',
       api: next.api || '',
+      runtime: next.runtime || '',
     }));
   } catch {
     /* this browser can still use the in-memory copy for the tab */
@@ -153,16 +171,16 @@ export function clearLocalAi() {
 export function aiSource() {
   try {
     const raw = localStorage.getItem(AI_SOURCE_KEY);
-    if (raw === 'local' || raw === 'account') return raw;
+    if (raw === 'local' || raw === 'account' || raw === 'free') return raw;
   } catch {
     /* fall through */
   }
-  if (loadAi()?.apiKey) return 'account';
-  return loadLocalAi() ? 'local' : 'account';
+  if (loadAi()?.apiKey || listRemoteAi().length) return 'account';
+  return loadLocalAi() ? 'local' : 'free';
 }
 
 export function setAiSource(source) {
-  const next = source === 'local' ? 'local' : 'account';
+  const next = source === 'local' ? 'local' : (source === 'free' ? 'free' : 'account');
   try { localStorage.setItem(AI_SOURCE_KEY, next); } catch { /* the next ask still reads the other store */ }
   return next;
 }
@@ -181,10 +199,12 @@ export function adoptLocalFromCloud(config) {
 }
 
 export function activeAi() {
-  if (aiSource() === 'local') {
+  const source = aiSource();
+  if (source === 'free') return fallbackAi();
+  if (source === 'local') {
     const local = loadLocalAi();
     if (local) return local;
-    return fallbackAi();
+    return { provider: 'local', model: '', base: '', apiKey: '', kind: 'chat', api: '', runtime: '' };
   }
   return resolveAi(loadAi());
 }
@@ -272,7 +292,7 @@ export function loadAi() {
   }
   if (!saved.apiKey && !keyOptional(saved.provider)) return null;
   try {
-    return prepareAi(saved);
+    return { ...prepareAi(saved), id: saved.id || '' };
   } catch {
     return null;
   }
@@ -298,37 +318,139 @@ export function claimLegacyAi(did) {
   }
   if (!legacy) legacy = readLegacy();
   if (!legacy) return null;
-  memory.set(did, { ...legacy, synced: false });
+  const row = { ...legacy, id: newRemoteId(), synced: false };
+  memory.set(did, row);
+  remoteBooks.set(did, [row]);
   dropLegacy();
-  return legacy;
+  return row;
+}
+
+function newRemoteId() {
+  return `r${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function rememberRemote(did, input, synced) {
+  const next = prepareAi(input);
+  const book = remoteBooks.get(did) || [];
+  const explicit = String(input?.id || '').trim();
+  const same = book.find((item) => item.provider === next.provider && item.model === next.model && (item.base || '') === (next.base || ''));
+  const id = (explicit || same?.id || newRemoteId()).slice(0, 40);
+  const row = { ...next, id };
+  const rest = book.filter((item) => item.id !== id);
+  remoteBooks.set(did, [...rest, row].slice(-REMOTE_CAP));
+  putAccount(did, row, synced);
+  return row;
+}
+
+function replaceRemotes(did, remotes, activeId, synced) {
+  const rows = [];
+  for (const item of remotes || []) {
+    if (!item || item.provider === 'local') continue;
+    try {
+      const ready = prepareAi(item);
+      rows.push({ ...ready, id: String(item.id || newRemoteId()).slice(0, 40) });
+    } catch {
+      /* a broken row is left out of the book */
+    }
+  }
+  const trimmed = rows.slice(0, REMOTE_CAP);
+  remoteBooks.set(did, trimmed);
+  const active = trimmed.find((item) => item.id === activeId) || trimmed[trimmed.length - 1];
+  if (active) putAccount(did, active, synced);
+  else putAccount(did, null, false);
+  return active || null;
+}
+
+export function listRemoteAi() {
+  const did = currentDid();
+  if (!did) return [];
+  return (remoteBooks.get(did) || []).map((item) => {
+    try {
+      return { ...prepareAi(item), id: item.id || '' };
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+}
+
+export function setActiveRemote(id) {
+  const did = currentDid();
+  const row = (remoteBooks.get(did) || []).find((item) => item.id === id);
+  if (!row) return null;
+  putAccount(did, row, Boolean(memory.get(did)?.synced));
+  aiWatch();
+  return { ...row };
+}
+
+export function removeRemoteAi(id) {
+  const did = currentDid();
+  const book = (remoteBooks.get(did) || []).filter((item) => item.id !== id);
+  remoteBooks.set(did, book);
+  const current = did ? memory.get(did) : null;
+  if (!book.length) putAccount(did, null, false);
+  else if (!current || current.id === id || !book.some((item) => item.id === current.id)) putAccount(did, book[book.length - 1], false);
+  aiWatch();
+  return loadAi();
 }
 
 export function storeAiAccount(did, input, synced) {
   if (!did) return;
   if (!input) {
     putAccount(did, null, false);
+    remoteBooks.delete(did);
     return;
   }
-  putAccount(did, prepareAi(input), synced);
+  if (Array.isArray(input.remotes)) {
+    replaceRemotes(did, input.remotes, input.id, synced);
+    return;
+  }
+  rememberRemote(did, input, synced);
 }
 
 export function aiPreference(config) {
-  if (!config) return null;
-  if (config.provider === 'local' || config.local) return null;
-  if (!config.apiKey && !keyOptional(config.provider)) return null;
-  return {
+  if (config?.provider === 'local' || config?.local) return null;
+  const remotes = listRemoteAi();
+  const active = config || remotes[remotes.length - 1];
+  if (!active) return null;
+  if (!active.apiKey && !keyOptional(active.provider)) return null;
+  const body = {
     $type: AI_PREF_TYPE,
-    provider: config.provider,
-    model: config.model,
-    base: config.base || '',
-    apiKey: config.apiKey || '',
+    provider: active.provider,
+    model: active.model,
+    base: active.base || '',
+    apiKey: active.apiKey || '',
   };
+  if (remotes.length) {
+    body.remotes = remotes.map((item) => ({
+      id: item.id,
+      provider: item.provider,
+      model: item.model,
+      base: item.base || '',
+      apiKey: item.apiKey || '',
+    }));
+    body.active = active.id || '';
+  }
+  return body;
 }
 
 export function aiFromPreference(pref) {
   if (!pref || pref.$type !== AI_PREF_TYPE) return null;
   if (pref.provider === 'local') {
     try { return prepareAi(pref); } catch { return null; }
+  }
+  if (Array.isArray(pref.remotes) && pref.remotes.length) {
+    const remotes = [];
+    for (const item of pref.remotes) {
+      if (!item || item.provider === 'local') continue;
+      try {
+        remotes.push({ ...prepareAi(item), id: String(item.id || '').slice(0, 40) });
+      } catch {
+        /* a broken row is left out */
+      }
+    }
+    if (!remotes.length) return null;
+    const active = remotes.find((item) => item.id && item.id === pref.active) || remotes[remotes.length - 1];
+    return { ...active, remotes };
   }
   if (!pref.apiKey && !keyOptional(pref.provider)) return null;
   try {
@@ -341,16 +463,17 @@ export function aiFromPreference(pref) {
 export function saveAi(input) {
   const did = currentDid();
   if (!did) throw new Error('Sign in to save the key on your account.');
-  const next = prepareAi(input);
-  putAccount(did, next, false);
+  const next = rememberRemote(did, input, false);
   aiWatch();
   return next;
 }
 
 export function clearAi() {
   const did = currentDid();
-  if (did) putAccount(did, null, false);
-  else dropLegacy();
+  if (did) {
+    putAccount(did, null, false);
+    remoteBooks.delete(did);
+  } else dropLegacy();
   aiWatch();
 }
 
@@ -410,6 +533,7 @@ function logAiCall({ account, note, started, ok, asked = '', text = '', error = 
 }
 
 export function aiReady(config) {
+  if (config?.provider === 'local' && !config.model) return false;
   const account = resolveAi(config);
   return Boolean(account?.model && account?.kind);
 }
@@ -452,9 +576,30 @@ export function localModelNames(data) {
   return names;
 }
 
+export function localRuntimeName(base, api = '', hinted = '') {
+  const hint = cleanRuntime(hinted);
+  if (hint) return hint;
+  let port = '';
+  try { port = new URL(base).port; } catch { port = ''; }
+  if (port === '11434' || api === 'ollama') return 'Ollama';
+  if (port === '1234') return 'LM Studio';
+  if (port === '4891') return 'GPT4All';
+  if (port === '1337') return 'Jan';
+  if (port === '12434') return 'Docker Model Runner';
+  if (port === '8000') return 'vLLM';
+  if (port === '7860') return 'Text generation web UI';
+  if (port === '5001') return 'KoboldCpp';
+  return 'Local server';
+}
+
+function bridgePort(base) {
+  try { return new URL(base).port === '47320'; } catch { return false; }
+}
+
 export function localProbes(extraBase = '') {
   const presets = [
     'http://127.0.0.1:11434/v1',
+    'http://127.0.0.1:47320/v1',
     'http://localhost:11434/v1',
     'http://127.0.0.1:1234/v1',
     'http://127.0.0.1:8080/v1',
@@ -462,6 +607,9 @@ export function localProbes(extraBase = '') {
     'http://127.0.0.1:4891/v1',
     'http://127.0.0.1:12434/v1',
     'http://127.0.0.1:5000/v1',
+    'http://127.0.0.1:5001/v1',
+    'http://127.0.0.1:8000/v1',
+    'http://127.0.0.1:7860/v1',
   ];
   const list = [];
   const seen = new Set();
@@ -482,15 +630,17 @@ export function localProbes(extraBase = '') {
   return list;
 }
 
+function probeWait() {
+  const httpsPage = typeof location !== 'undefined' && location.protocol === 'https:' && !onDesktopApp();
+  return httpsPage ? 20000 : 2500;
+}
+
 async function readModelUrl(url, signal) {
   let res;
   try {
-    res = await fetch(rewriteLocalUrl(url), {
+    res = await localFetch(rewriteLocalUrl(url), {
       method: 'GET',
       headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error',
       signal,
     });
   } catch {
@@ -501,31 +651,63 @@ async function readModelUrl(url, signal) {
   try { data = await res.json(); } catch { return null; }
   if (!data || typeof data !== 'object') return null;
   if (!Array.isArray(data.models) && !Array.isArray(data.data)) return null;
-  return localModelNames(data);
+  const meta = data.libresky && typeof data.libresky === 'object' ? data.libresky : {};
+  return {
+    names: localModelNames(data),
+    runtime: cleanRuntime(meta.runtime),
+    api: meta.api === 'ollama' || meta.api === 'openai' ? meta.api : '',
+  };
 }
 
 async function readLocalProbe(probe) {
-  const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+  const wait = probeWait();
   if (probe.tags) {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(wait) : undefined;
     const tagged = await readModelUrl(probe.tags, signal);
-    if (tagged) return { models: tagged, api: 'ollama' };
+    if (tagged?.names?.length) {
+      return { models: tagged.names, api: 'ollama', runtime: tagged.runtime || localRuntimeName(probe.base, 'ollama') };
+    }
   }
+  const signal = AbortSignal.timeout ? AbortSignal.timeout(wait) : undefined;
   const openai = await readModelUrl(`${probe.base}/models`, signal);
-  if (openai) return { models: openai, api: 'openai' };
+  if (openai?.names?.length) {
+    const api = openai.api || 'openai';
+    return { models: openai.names, api, runtime: openai.runtime || localRuntimeName(probe.base, api) };
+  }
   return null;
 }
 
-export async function detectLocalAi(extraBase = '') {
+export async function detectLocalServers(extraBase = '') {
   const probes = localProbes(extraBase);
   const found = await Promise.all(probes.map(async (probe) => {
     try {
       const hit = await readLocalProbe(probe);
-      return hit ? { base: probe.base, models: hit.models, api: hit.api } : null;
+      return hit?.models?.length ? { base: probe.base, models: hit.models, api: hit.api, runtime: hit.runtime } : null;
     } catch {
       return null;
     }
   }));
-  return found.find((item) => item && item.models) || null;
+  const hits = [];
+  const seen = new Set();
+  for (const item of found) {
+    if (!item) continue;
+    let key = item.base;
+    try {
+      const url = new URL(item.base);
+      const host = url.hostname === 'localhost' ? '127.0.0.1' : url.hostname;
+      key = `${host}:${url.port}`;
+    } catch { /* keep the raw address */ }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push(item);
+  }
+  const direct = hits.filter((item) => !bridgePort(item.base));
+  return direct.length ? direct : hits;
+}
+
+export async function detectLocalAi(extraBase = '') {
+  const servers = await detectLocalServers(extraBase);
+  return servers[0] || null;
 }
 
 function cleanKey(value) {
@@ -550,7 +732,14 @@ export function prepareAi(input) {
   const typed = String(input?.apiKey || '').trim();
   const apiKey = !typed && provider.keyOptional ? '' : cleanKey(input?.apiKey);
   const api = provider.local && (input?.api === 'ollama' || input?.api === 'openai') ? input.api : '';
-  return { provider: provider.id, model, base, apiKey, kind: provider.kind, api };
+  const runtime = provider.local ? (cleanRuntime(input?.runtime) || localRuntimeName(base, api)) : '';
+  return { provider: provider.id, model, base, apiKey, kind: provider.kind, api, runtime };
+}
+
+function cleanRuntime(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text || text.length > 40 || !/^[A-Za-z0-9 .+-]+$/.test(text)) return '';
+  return text;
 }
 
 function scrub(message, key) {
@@ -663,18 +852,16 @@ async function fetchLocalChat(account, chatMessages, headers, body, signal) {
   const openaiUrl = rewriteLocalUrl(`${account.base}/chat/completions`);
   const ollamaUrl = rewriteLocalUrl(`${origin}/api/chat`);
   const ollamaBody = JSON.stringify({ model: account.model, messages: chatMessages, stream: false });
-  const openai = () => fetch(openaiUrl, {
+  const openai = () => localFetch(openaiUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
-    redirect: 'error',
     signal,
   });
-  const ollama = () => fetch(ollamaUrl, {
+  const ollama = () => localFetch(ollamaUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: ollamaBody,
-    redirect: 'error',
     signal,
   });
   const preferOllama = account.api === 'ollama' || /:(11434)(?:\/|$)/.test(account.base);

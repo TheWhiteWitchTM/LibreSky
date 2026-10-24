@@ -54,7 +54,7 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalAi, draftRewriteMessages, fitDraft, loadAi, loadLocalAi, prepareAi, providerById, resolveAi, saveLocalAi, setAiSource, subscribeAiLog } from './ai.js';
+import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -1279,9 +1279,22 @@ async function showBrowse() {
 
 const AI_NAME = 'AI Assist';
 
+function aiChoiceName() {
+  const source = aiSource();
+  const active = activeAi();
+  if (source === 'free' || active?.fallback) return 'Free';
+  if (source === 'local' || active?.provider === 'local') {
+    if (!active?.model) return 'Local';
+    return active.runtime || localRuntimeName(active.base, active.api);
+  }
+  if (active?.provider) return providerById(active.provider).label;
+  return 'Free';
+}
+
 function aiStripHtml() {
   if (!aiReady(activeAi())) return '';
-  return `<form class="ai-inline" id="ai-inline"><span class="ai-inline-label">${AI_NAME}</span><input name="ask" maxlength="2000" placeholder="Ask ${AI_NAME}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${AI_NAME}"><button class="primary small" type="submit">Ask</button></form>`;
+  const name = escapeHtml(aiChoiceName());
+  return `<form class="ai-inline" id="ai-inline"><a class="ai-inline-label" href="#/ai">${AI_NAME} · ${name}</a><input name="ask" maxlength="2000" placeholder="Ask ${AI_NAME}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${AI_NAME}"><button class="primary small" type="submit">Ask</button></form>`;
 }
 
 function homeLead(banner) {
@@ -2484,12 +2497,38 @@ function aiKeyHelp(provider) {
   return `Get a ${escapeHtml(item.label)} key from ${link}.`;
 }
 
-function aiSourceButtons() {
+function remoteLabel(item, remotes) {
+  const name = providerById(item.provider).label;
+  const twins = remotes.filter((other) => other.provider === item.provider).length > 1;
+  return twins ? `${name} · ${item.model}` : name;
+}
+
+function aiPickButtons() {
   const source = aiSource();
-  return `<div class="segmented wrap" role="group" aria-label="Which AI to ask">
-    <button type="button" data-ai-source="account" aria-pressed="${source === 'account' ? 'true' : 'false'}">Account AI</button>
-    <button type="button" data-ai-source="local" aria-pressed="${source === 'local' ? 'true' : 'false'}">Local AI</button>
-  </div>`;
+  const remotes = listRemoteAi();
+  const activeId = loadAi()?.id || '';
+  const local = loadLocalAi();
+  const localName = local?.model ? `Local · ${local.runtime || localRuntimeName(local.base, local.api)}` : 'Local';
+  const buttons = [
+    `<button type="button" data-ai-pick="free" aria-pressed="${source === 'free' ? 'true' : 'false'}">Free</button>`,
+    ...remotes.map((item) => {
+      const on = source === 'account' && item.id === activeId;
+      return `<button type="button" data-ai-pick="remote" data-ai-id="${escapeHtml(item.id)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(remoteLabel(item, remotes))}</button>`;
+    }),
+    `<button type="button" data-ai-pick="local" aria-pressed="${source === 'local' ? 'true' : 'false'}">${escapeHtml(localName)}</button>`,
+  ];
+  return `<div class="segmented wrap ai-picks" role="group" aria-label="Which AI answers">${buttons.join('')}</div>`;
+}
+
+function remoteListHtml() {
+  const remotes = listRemoteAi();
+  const activeId = loadAi()?.id || '';
+  const source = aiSource();
+  if (!remotes.length) return '<p class="dim">No remote AI is saved yet. Add one below, then pick it here or on AI Assist.</p>';
+  return remotes.map((item) => {
+    const on = source === 'account' && item.id === activeId;
+    return `<div class="person ai-remote"><span class="person-link"><strong>${escapeHtml(providerById(item.provider).label)}</strong><span class="handle">${escapeHtml(item.model)}</span></span><button type="button" class="text-btn mini" data-ai-use="${escapeHtml(item.id)}" aria-pressed="${on ? 'true' : 'false'}">${on ? 'In use' : 'Use'}</button><button type="button" class="danger mini" data-ai-drop="${escapeHtml(item.id)}">Remove</button></div>`;
+  }).join('');
 }
 
 function aiAccountFormHtml() {
@@ -2502,10 +2541,10 @@ function aiAccountFormHtml() {
   const keyHint = saved?.apiKey
     ? 'Saved on your Bluesky account. Type a new key to replace it.'
     : 'Paste the key from that account';
-  const status = saved?.apiKey
-    ? `${AI_NAME} is on for this account.`
-    : `${AI_NAME} uses a free public model until you save a key.`;
-  const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
+  const count = listRemoteAi().length;
+  const status = count
+    ? `${count} remote ${count === 1 ? 'AI is' : 'AIs are'} saved on this Bluesky account.`
+    : `${AI_NAME} uses a free public model until you add a key.`;
   const directory = cloudProviders().map((item) => {
     if (!item.keyUrl) return '';
     const extra = item.keyOptional ? ' · works without a key' : '';
@@ -2526,9 +2565,8 @@ function aiAccountFormHtml() {
       </label>
       <p class="dim" id="ai-key-help">${aiKeyHelp(provider)}</p>
       <div class="toolbar">
-        <button class="primary small" type="submit">Save</button>
+        <button class="primary small" type="submit">Add</button>
         <button type="button" class="text-btn" id="ai-check" data-act="ai-check">Check</button>
-        ${remove}
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
@@ -2541,15 +2579,16 @@ function aiLocalFormHtml() {
   const model = saved?.model || '';
   const baseValue = saved?.base || known.base || 'http://127.0.0.1:11434/v1';
   const status = saved
-    ? `Local AI is on this computer at ${saved.base}.`
-    : 'No local server is saved in this browser yet.';
+    ? `${saved.runtime || localRuntimeName(saved.base, saved.api)} is on this computer${saved.model ? ` · ${saved.model}` : ''}.`
+    : 'No local model is saved in this browser yet. Find local lists what is running on this computer.';
   const remove = saved ? '<button type="button" class="danger" id="ai-local-clear" data-act="ai-local-clear">Remove</button>' : '';
   return `<form id="ai-local-form" class="ai-form" autocomplete="off">
+      <div id="ai-model-picks" class="ai-models"></div>
       <label>API address
         <input id="ai-local-base" value="${escapeHtml(baseValue)}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="http://127.0.0.1:11434/v1">
       </label>
       <label>Model
-        <input id="ai-local-model" list="ai-model-list" value="${escapeHtml(model)}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Detected after Find local">
+        <input id="ai-local-model" list="ai-model-list" value="${escapeHtml(model)}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Pick a model above, or type one">
         <datalist id="ai-model-list"></datalist>
       </label>
       <label>API key, optional
@@ -2567,15 +2606,15 @@ function aiLocalFormHtml() {
     </form>`;
 }
 
-function aiSettingsHtml() {
-  return `<p class="dim">${AI_NAME} answers on this page, on Home, and as a check on profiles and posts. Account AI follows this login. Local AI stays in this browser, on this computer. Without either, a free public model still answers. <a class="text-link" href="#/ai">@ai and @si</a> use whichever you pick below.</p>
-    <h3>Ask with</h3>
-    ${aiSourceButtons()}
-    <h3>Account AI</h3>
-    <p class="dim">A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile.</p>
+function aiSettingsHtml({ page = 'settings' } = {}) {
+  const localHere = page !== 'ai';
+  return `<p class="dim">${AI_NAME} answers on this page, on Home, and as a check on profiles and posts. Each remote AI follows this login. Local AI stays in this browser, on this computer. Free is a public model. <a class="text-link" href="#/ai">@ai and @si</a> use whichever you pick.</p>
+    ${page === 'settings' ? `<h3>Use</h3>${aiPickButtons()}` : ''}
+    <h3>Remote AI</h3>
+    <p class="dim">Add more than one. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile. Pick one above, or on AI Assist.</p>
+    ${remoteListHtml()}
     ${aiAccountFormHtml()}
-    <h3>Local AI</h3>
-    ${aiLocalFormHtml()}`;
+    ${localHere ? `<h3>Local AI</h3>${aiLocalFormHtml()}` : ''}`;
 }
 
 function readAiForm() {
@@ -2593,16 +2632,20 @@ function readLocalForm(found = null) {
   const saved = loadLocalAi();
   const typed = $('ai-local-key')?.value || '';
   const model = $('ai-local-model')?.value.trim() || found?.models?.[0] || saved?.model || '';
+  const base = $('ai-local-base')?.value || found?.base || saved?.base || '';
+  const hit = found || localHits.find((item) => String(item.base || '').replace(/\/+$/, '') === String(base).trim().replace(/\/+$/, ''));
   return prepareAi({
     provider: 'local',
     model,
-    base: $('ai-local-base')?.value || found?.base || saved?.base || '',
+    base,
     apiKey: typed.trim() || saved?.apiKey || '',
-    api: found?.api || saved?.api || '',
+    api: hit?.api || saved?.api || '',
+    runtime: hit?.runtime || saved?.runtime || '',
   });
 }
 
 let localFindSeq = 0;
+let localHits = [];
 
 function syncAiFields() {
   const select = $('ai-provider');
@@ -2627,16 +2670,46 @@ function syncAiFields() {
   }
 }
 
-function paintLocalModels(found) {
+function paintLocalModels(foundList) {
+  const found = (Array.isArray(foundList) ? foundList : (foundList ? [foundList] : [])).filter((hit) => hit?.models?.length);
+  const saved = loadLocalAi();
+  const picks = $('ai-model-picks');
+  if (picks) {
+    picks.innerHTML = found.map((hit) => {
+      const title = `${hit.runtime || localRuntimeName(hit.base, hit.api)} · ${hit.models.length} ${hit.models.length === 1 ? 'model' : 'models'}`;
+      const chips = hit.models.map((name) => {
+        const on = aiSource() === 'local' && saved?.model === name && String(saved?.base || '').replace(/\/+$/, '') === String(hit.base || '').replace(/\/+$/, '');
+        return `<button type="button" class="chip" data-ai-model="${escapeHtml(name)}" data-ai-base="${escapeHtml(hit.base || '')}" data-ai-api="${escapeHtml(hit.api || '')}" data-ai-runtime="${escapeHtml(hit.runtime || '')}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(name)}</button>`;
+      }).join('');
+      return `<p class="dim">${escapeHtml(title)}</p><div class="chips">${chips}</div>`;
+    }).join('');
+  }
   const list = $('ai-model-list');
-  if (list) list.innerHTML = (found?.models || []).map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
+  if (list) {
+    const names = [];
+    found.forEach((hit) => hit.models.forEach((name) => { if (!names.includes(name)) names.push(name); }));
+    list.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
+  }
+  const first = found[0];
   const model = $('ai-local-model');
-  if (model && found?.models?.length && !model.value.trim()) model.value = found.models[0];
+  if (model && first?.models?.length && !model.value.trim()) model.value = first.models[0];
   const base = $('ai-local-base');
-  if (base && found?.base) base.value = found.base;
+  if (base && first?.base) {
+    const current = base.value.trim().replace(/\/+$/, '');
+    const defaults = new Set(['', 'http://127.0.0.1:11434/v1', 'http://localhost:11434/v1', 'http://127.0.0.1:47320/v1']);
+    if (!current || defaults.has(current)) base.value = first.base;
+  }
 }
 
-async function findLocalAi({ replaceBase = false, silent = false, autosave = replaceBase } = {}) {
+function localMissText() {
+  const httpsPage = typeof location !== 'undefined' && location.protocol === 'https:' && !onDesktopApp();
+  if (httpsPage) {
+    return 'No local server answered. Start Ollama or another local server, allow local network access if Chrome asks, then press Find local. The desktop app can reach a server on this computer directly.';
+  }
+  return 'No local server answered. Start Ollama, LM Studio, or similar, then press Find local.';
+}
+
+async function findLocalAi({ replaceBase = false, silent = false } = {}) {
   const seq = ++localFindSeq;
   const button = $('ai-find');
   const line = $('ai-local');
@@ -2648,40 +2721,50 @@ async function findLocalAi({ replaceBase = false, silent = false, autosave = rep
   }
   const typed = String($('ai-local-base')?.value || '').trim().replace(/\/+$/, '');
   try {
-    const found = await detectLocalAi(typed);
+    const servers = await detectLocalServers(replaceBase ? typed : '');
     if (seq !== localFindSeq || !$('ai-local-form')?.isConnected) return null;
-    if (!found) {
-      if (line) {
-        line.textContent = typeof location !== 'undefined' && location.protocol === 'https:'
-          ? 'No local server answered. An https page often cannot reach a local http server. Use the desktop app, or type the address if this copy is local.'
-          : 'No local server answered. Start Ollama, LM Studio, or similar, then press Find local.';
-      }
+    const found = servers.filter((hit) => hit?.models?.length);
+    if (!found.length) {
+      localHits = [];
+      if (line) line.textContent = localMissText();
       return null;
     }
-    const foundBase = String(found.base || '').replace(/\/+$/, '');
-    const matched = !typed || foundBase === typed;
-    if (!matched && !replaceBase) {
-      if (line) line.textContent = `No answer at ${typed}. Another server answered at ${found.base}. Press Find local to use it.`;
-      return found;
-    }
-    paintLocalModels(found);
+    const typedHit = typed ? found.find((hit) => String(hit.base || '').replace(/\/+$/, '') === typed) : null;
+    const shown = !replaceBase && typed && !typedHit ? found : (typedHit ? [typedHit, ...found.filter((hit) => hit !== typedHit)] : found);
+    localHits = shown;
+    paintLocalModels(shown);
+    const names = [...new Set(shown.flatMap((hit) => hit.models))];
+    const runtimes = [...new Set(shown.map((hit) => hit.runtime || localRuntimeName(hit.base, hit.api)))];
     if (line) {
-      const count = found.models.length;
-      line.textContent = count
-        ? `Local server answered at ${found.base}. ${count} ${count === 1 ? 'model' : 'models'}.`
-        : `Local server answered at ${found.base}. It did not list a model, so type the model name.`;
+      const missed = typed && !typedHit ? ` No answer at ${typed}.` : '';
+      line.textContent = `${runtimes.join(' and ')} on this computer. ${names.length} ${names.length === 1 ? 'model' : 'models'}. Pick one.${missed}`;
     }
-    if (autosave && found.models[0]) {
+    const saved = loadLocalAi();
+    if (!saved && (replaceBase || aiSource() === 'local') && shown[0]?.models[0]) {
       try {
-        saveLocalAi({ provider: 'local', model: $('ai-local-model')?.value.trim() || found.models[0], base: found.base, api: found.api || '' });
+        const hit = shown[0];
+        const modelName = $('ai-local-model')?.value.trim() || hit.models[0];
+        saveLocalAi({ provider: 'local', model: modelName, base: hit.base, api: hit.api || '', runtime: hit.runtime || '' });
+        setAiSource('local');
+        paintLocalModels(shown);
         const status = $('ai-local-status');
-        if (status) status.textContent = `Local AI is on this computer at ${found.base}.`;
-        if (!silent) toast('Local AI found and saved in this browser');
+        if (status) status.textContent = `${hit.runtime || 'Local AI'} is on this computer · ${modelName}.`;
+        const readyLine = document.querySelector('.ai-ready-line');
+        const setupButton = readyLine?.querySelector('[data-act="ai-setup"]');
+        if (readyLine) {
+          readyLine.innerHTML = `<strong>${AI_NAME}</strong> is on with ${escapeHtml(hit.runtime || 'Local AI')} · ${escapeHtml(modelName)}. ${setupButton ? setupButton.outerHTML : ''}`;
+        }
+        const choice = document.querySelector('[data-ai-pick="local"]');
+        if (choice) {
+          choice.setAttribute('aria-pressed', 'true');
+          choice.textContent = `Local · ${hit.runtime || 'Local'}`;
+        }
+        if (!silent) toast(`${hit.runtime || 'Local AI'} · ${modelName}`);
       } catch {
-        /* the form still has the detected values */
+        /* the model buttons still choose one */
       }
     }
-    return found;
+    return shown[0];
   } catch (error) {
     if (seq === localFindSeq && line?.isConnected) line.textContent = error.message || 'Could not look for a local server.';
     return null;
@@ -2703,7 +2786,7 @@ async function saveAiForm(event) {
   try {
     await commitAiAccount(readAiForm());
     setAiSource('account');
-    toast(`${AI_NAME} saved on your Bluesky account`);
+    toast('Added that remote AI');
     refreshAiSettingsView();
   } catch (error) {
     toast(error.message || 'Could not save the key on your Bluesky account.');
@@ -3121,7 +3204,7 @@ function showSettings() {
       ${soundRow('posts', 'New posts on Home', sounds)}
     </div>
     ${voiceSettingsHtml()}`)}
-    ${settingsPanel('ai', `<h2>AI</h2><p class="dim"><a class="text-link" href="#/ai">Open AI Assist</a> to chat. Account AI and local AI are set here and on that page.</p>${aiSettingsHtml()}`)}
+    ${settingsPanel('ai', `<h2>AI</h2><p class="dim"><a class="text-link" href="#/ai">Open AI Assist</a> to chat and pick which AI answers. Remote AIs and local AI are set here and on that page.</p>${aiSettingsHtml()}`)}
   </section>`;
   loadSettingsLists(token);
   loadChatAllow(token);
@@ -3973,15 +4056,20 @@ async function loadBlockedAccounts(token = generation) {
 let aiSetupOpen = false;
 
 function aiStatusLine(active) {
-  const label = aiSetupOpen ? 'Hide settings' : 'Settings';
+  const label = aiSetupOpen ? 'Hide settings' : 'Add a remote AI';
   const setup = `<button type="button" class="text-btn" data-act="ai-setup">${label}</button>`;
-  if (active?.fallback) {
+  if (active?.provider === 'local' && !active.model) {
+    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is set to local. Pick a model below. ${setup}</p>`;
+  }
+  if (!active || active.fallback || aiSource() === 'free') {
     return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with a free public model. ${setup}</p>`;
   }
-  if (active?.provider === 'local') {
-    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with local AI. ${setup}</p>`;
+  if (active.provider === 'local') {
+    const runtime = active.runtime || localRuntimeName(active.base, active.api);
+    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with ${escapeHtml(runtime)}${active.model ? ` · ${escapeHtml(active.model)}` : ''}. ${setup}</p>`;
   }
-  return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. ${setup}</p>`;
+  const name = providerById(active.provider).label;
+  return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with ${escapeHtml(name)}${active.model ? ` · ${escapeHtml(active.model)}` : ''}. ${setup}</p>`;
 }
 
 function showAi() {
@@ -4000,30 +4088,25 @@ function showAi() {
       <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks"${waiting ? ' disabled' : ''}>Ask</button></span>
       <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
     </form>`;
-  const setup = `<div id="ai-setup" class="ai-setup"${aiSetupOpen ? '' : ' hidden'}>${aiSettingsHtml()}</div>`;
-  if (ready) {
-    const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
-    $('view').innerHTML = `<section class="settings ai-doc ai-live">
+  const setup = `<div id="ai-setup" class="ai-setup"${aiSetupOpen ? '' : ' hidden'}>${aiSettingsHtml({ page: 'ai' })}</div>`;
+  const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. Pick Free, a remote AI, or Local above. @ai and @si in a chat use that same choice and are not sent to the other person.</p>`;
+  $('view').innerHTML = `<section class="settings ai-doc ai-live">
       ${aiStatusLine(saved)}
+      ${aiPickButtons()}
+      <h3>Local AI</h3>
+      ${aiLocalFormHtml()}
       ${setup}
       <div class="messages ai-thread">${empty}${turns}</div>
       ${askForm}
     </section>`;
-  } else {
-    aiSetupOpen = true;
-    $('view').innerHTML = `<section class="settings ai-doc">
-      <h2>${AI_NAME}</h2>
-      <p>${AI_NAME} could not start. Settings below can add a key or a local server.</p>
-      ${setup}
-    </section>`;
-  }
   const area = $('ai-text');
   if (area) {
     paintFieldHighlight(area, $('ai-highlight'));
     applyFieldLanguage(area);
     fitChatInput(area);
   }
-  if (aiSetupOpen && $('ai-local-form') && !aiThread.length) findLocalAi({ silent: true });
+  if (localHits.length) paintLocalModels(localHits);
+  if ($('ai-local-form')) findLocalAi({ silent: true });
   const pending = aiPending;
   aiPending = '';
   if (pending && ready) askOnPage(pending);
@@ -9419,21 +9502,50 @@ function bind() {
       chooseChatAllow(chatChoice);
       return;
     }
-    const source = event.target.closest('[data-ai-source]')?.dataset.aiSource;
-    if (source === 'account' || source === 'local') {
+    const modelPick = event.target.closest('[data-ai-model]');
+    if (modelPick?.dataset.aiModel) {
       event.preventDefault();
-      if (source === 'local' && !loadLocalAi()) {
-        findLocalAi({ replaceBase: true }).then((found) => {
-          if (!found && !loadLocalAi()) {
-            toast('Find a local server first, or save one below.');
-            return;
-          }
-          setAiSource('local');
-          refreshAiSettingsView();
+      try {
+        saveLocalAi({
+          provider: 'local',
+          model: modelPick.dataset.aiModel,
+          base: modelPick.dataset.aiBase || '',
+          api: modelPick.dataset.aiApi || '',
+          runtime: modelPick.dataset.aiRuntime || '',
         });
-        return;
+        setAiSource('local');
+        toast(`${modelPick.dataset.aiRuntime || 'Local AI'} · ${modelPick.dataset.aiModel}`);
+        refreshAiSettingsView();
+      } catch (error) {
+        toast(error.message || 'Could not use that model.');
       }
-      setAiSource(source);
+      return;
+    }
+    const remoteUse = event.target.closest('[data-ai-use]')?.dataset.aiUse;
+    if (remoteUse) {
+      event.preventDefault();
+      if (setActiveRemote(remoteUse)) setAiSource('account');
+      refreshAiSettingsView();
+      return;
+    }
+    const remoteDrop = event.target.closest('[data-ai-drop]')?.dataset.aiDrop;
+    if (remoteDrop) {
+      event.preventDefault();
+      removeRemoteAi(remoteDrop);
+      if (!loadAi() && aiSource() === 'account') setAiSource('free');
+      toast('Removed that remote AI');
+      refreshAiSettingsView();
+      return;
+    }
+    const pick = event.target.closest('[data-ai-pick]')?.dataset.aiPick;
+    if (pick === 'free' || pick === 'local' || pick === 'remote') {
+      event.preventDefault();
+      if (pick === 'remote') {
+        const id = event.target.closest('[data-ai-pick]')?.dataset.aiId || '';
+        if (id && setActiveRemote(id)) setAiSource('account');
+      } else {
+        setAiSource(pick);
+      }
       refreshAiSettingsView();
       return;
     }
