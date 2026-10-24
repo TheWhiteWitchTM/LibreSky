@@ -219,3 +219,7 @@ export function emojiGroups(query) {
     return [name, rows];
   }).filter(([, rows]) => rows.length);
 }
+
+export function flagEmoji(query) {
+  return emojiGroups(query).find(([name]) => name === 'Flags')?.[1] || [];
+}

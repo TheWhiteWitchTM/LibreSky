@@ -3,6 +3,10 @@ import { graphemeLength } from './util.js';
 
 const AI_KEY = 'libresky.ai';
 const AI_MAP = 'libresky.aiAccounts';
+const LOCAL_AI_KEY = 'libresky.localAi';
+const AI_SOURCE_KEY = 'libresky.aiSource';
+const DESKTOP_PORT_MIN = 47321;
+const DESKTOP_PORT_MAX = 47340;
 
 // Private account preferences travel with the login. The profile record is public,
 // so the key must not be written there or in app.libresky.settings.
@@ -83,6 +87,108 @@ export function fallbackAi() {
   };
 }
 
+export function cloudProviders() {
+  return AI_PROVIDERS.filter((item) => !item.local);
+}
+
+export function onDesktopApp() {
+  if (typeof location === 'undefined') return false;
+  const n = Number(location.port);
+  const local = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+  return local && n >= DESKTOP_PORT_MIN && n <= DESKTOP_PORT_MAX;
+}
+
+export function rewriteLocalUrl(url) {
+  if (!onDesktopApp()) return url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return url;
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    return `${location.origin}/local-ai/${port}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function readLocalRecord() {
+  try {
+    const raw = localStorage.getItem(LOCAL_AI_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+export function loadLocalAi() {
+  const saved = readLocalRecord();
+  if (!saved) return null;
+  try {
+    return prepareAi({ ...saved, provider: 'local' });
+  } catch {
+    return null;
+  }
+}
+
+export function saveLocalAi(input) {
+  const next = prepareAi({ ...input, provider: 'local' });
+  try {
+    localStorage.setItem(LOCAL_AI_KEY, JSON.stringify({
+      provider: 'local',
+      model: next.model,
+      base: next.base,
+      apiKey: next.apiKey || '',
+      api: next.api || '',
+    }));
+  } catch {
+    /* this browser can still use the in-memory copy for the tab */
+  }
+  return next;
+}
+
+export function clearLocalAi() {
+  try { localStorage.removeItem(LOCAL_AI_KEY); } catch { /* already gone */ }
+}
+
+export function aiSource() {
+  try {
+    const raw = localStorage.getItem(AI_SOURCE_KEY);
+    if (raw === 'local' || raw === 'account') return raw;
+  } catch {
+    /* fall through */
+  }
+  if (loadAi()?.apiKey) return 'account';
+  return loadLocalAi() ? 'local' : 'account';
+}
+
+export function setAiSource(source) {
+  const next = source === 'local' ? 'local' : 'account';
+  try { localStorage.setItem(AI_SOURCE_KEY, next); } catch { /* the next ask still reads the other store */ }
+  return next;
+}
+
+export function adoptLocalFromCloud(config) {
+  if (!config || config.provider !== 'local') return false;
+  if (!loadLocalAi()) {
+    try { saveLocalAi(config); } catch { /* keep going so the cloud copy can still drop */ }
+  }
+  try {
+    if (!localStorage.getItem(AI_SOURCE_KEY)) localStorage.setItem(AI_SOURCE_KEY, 'local');
+  } catch {
+    /* source still defaults to local when a local record exists */
+  }
+  return true;
+}
+
+export function activeAi() {
+  if (aiSource() === 'local') {
+    const local = loadLocalAi();
+    if (local) return local;
+    return fallbackAi();
+  }
+  return resolveAi(loadAi());
+}
+
 function keyOptional(provider) {
   return Boolean(providerById(provider)?.keyOptional);
 }
@@ -159,6 +265,11 @@ export function loadAi() {
   if (!did) return null;
   const saved = memory.get(did);
   if (!saved || typeof saved !== 'object') return null;
+  if (saved.provider === 'local') {
+    adoptLocalFromCloud(saved);
+    memory.delete(did);
+    return null;
+  }
   if (!saved.apiKey && !keyOptional(saved.provider)) return null;
   try {
     return prepareAi(saved);
@@ -203,6 +314,7 @@ export function storeAiAccount(did, input, synced) {
 
 export function aiPreference(config) {
   if (!config) return null;
+  if (config.provider === 'local' || config.local) return null;
   if (!config.apiKey && !keyOptional(config.provider)) return null;
   return {
     $type: AI_PREF_TYPE,
@@ -215,6 +327,9 @@ export function aiPreference(config) {
 
 export function aiFromPreference(pref) {
   if (!pref || pref.$type !== AI_PREF_TYPE) return null;
+  if (pref.provider === 'local') {
+    try { return prepareAi(pref); } catch { return null; }
+  }
   if (!pref.apiKey && !keyOptional(pref.provider)) return null;
   try {
     return prepareAi(pref);
@@ -343,6 +458,10 @@ export function localProbes(extraBase = '') {
     'http://localhost:11434/v1',
     'http://127.0.0.1:1234/v1',
     'http://127.0.0.1:8080/v1',
+    'http://127.0.0.1:1337/v1',
+    'http://127.0.0.1:4891/v1',
+    'http://127.0.0.1:12434/v1',
+    'http://127.0.0.1:5000/v1',
   ];
   const list = [];
   const seen = new Set();
@@ -366,7 +485,7 @@ export function localProbes(extraBase = '') {
 async function readModelUrl(url, signal) {
   let res;
   try {
-    res = await fetch(url, {
+    res = await fetch(rewriteLocalUrl(url), {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -386,25 +505,27 @@ async function readModelUrl(url, signal) {
 }
 
 async function readLocalProbe(probe) {
-  const signal = AbortSignal.timeout ? AbortSignal.timeout(1200) : undefined;
+  const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
   if (probe.tags) {
     const tagged = await readModelUrl(probe.tags, signal);
-    if (tagged) return tagged;
+    if (tagged) return { models: tagged, api: 'ollama' };
   }
-  return readModelUrl(`${probe.base}/models`, signal);
+  const openai = await readModelUrl(`${probe.base}/models`, signal);
+  if (openai) return { models: openai, api: 'openai' };
+  return null;
 }
 
 export async function detectLocalAi(extraBase = '') {
   const probes = localProbes(extraBase);
   const found = await Promise.all(probes.map(async (probe) => {
     try {
-      const models = await readLocalProbe(probe);
-      return models ? { base: probe.base, models } : null;
+      const hit = await readLocalProbe(probe);
+      return hit ? { base: probe.base, models: hit.models, api: hit.api } : null;
     } catch {
       return null;
     }
   }));
-  return found.find(Boolean) || null;
+  return found.find((item) => item && item.models) || null;
 }
 
 function cleanKey(value) {
@@ -428,7 +549,8 @@ export function prepareAi(input) {
   const base = skipBase ? (provider.base || '') : cleanBase(adjustable ? (input?.base || provider.base) : provider.base);
   const typed = String(input?.apiKey || '').trim();
   const apiKey = !typed && provider.keyOptional ? '' : cleanKey(input?.apiKey);
-  return { provider: provider.id, model, base, apiKey, kind: provider.kind };
+  const api = provider.local && (input?.api === 'ollama' || input?.api === 'openai') ? input.api : '';
+  return { provider: provider.id, model, base, apiKey, kind: provider.kind, api };
 }
 
 function scrub(message, key) {
@@ -439,6 +561,8 @@ function scrub(message, key) {
 
 export function replyText(data) {
   if (!data || typeof data !== 'object') throw new Error('The account sent an empty reply.');
+  if (typeof data.message?.content === 'string' && data.message.content.trim()) return data.message.content.trim();
+  if (typeof data.response === 'string' && data.response.trim()) return data.response.trim();
   if (typeof data.output_text === 'string' && data.output_text.trim()) return data.output_text.trim();
   if (Array.isArray(data.output)) {
     const parts = [];
@@ -530,6 +654,48 @@ async function readBody(res, key) {
   throw new Error('The account sent an empty reply.');
 }
 
+function aborted(error) {
+  return error?.name === 'AbortError' || error?.name === 'TimeoutError';
+}
+
+async function fetchLocalChat(account, chatMessages, headers, body, signal) {
+  const origin = new URL(account.base).origin;
+  const openaiUrl = rewriteLocalUrl(`${account.base}/chat/completions`);
+  const ollamaUrl = rewriteLocalUrl(`${origin}/api/chat`);
+  const ollamaBody = JSON.stringify({ model: account.model, messages: chatMessages, stream: false });
+  const openai = () => fetch(openaiUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    redirect: 'error',
+    signal,
+  });
+  const ollama = () => fetch(ollamaUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: ollamaBody,
+    redirect: 'error',
+    signal,
+  });
+  const preferOllama = account.api === 'ollama' || /:(11434)(?:\/|$)/.test(account.base);
+  const first = preferOllama ? ollama : openai;
+  const second = preferOllama ? openai : ollama;
+  try {
+    const res = await first();
+    if (res?.ok) return res;
+    try {
+      const fallback = await second();
+      return fallback?.ok ? fallback : res;
+    } catch (error) {
+      if (aborted(error)) throw error;
+      return res;
+    }
+  } catch (error) {
+    if (aborted(error)) throw error;
+    return second();
+  }
+}
+
 export async function askAi(config, messages, signal, note = '') {
   const started = Date.now();
   let account = null;
@@ -598,20 +764,28 @@ export async function askAi(config, messages, signal, note = '') {
         ...chatExtras(account),
       };
     }
+    const httpsPage = typeof location !== 'undefined' && location.protocol === 'https:' && !onDesktopApp();
     const unreachable = account.provider === 'local'
-      ? 'This browser could not reach the local server. Check that it is running and the address is right.'
+      ? (httpsPage
+        ? 'This https page cannot reach a local http server. Use the LibreSky desktop app, or open a local copy of LibreSky.'
+        : 'This browser could not reach the local server. Start it, then press Find local.')
       : 'This browser could not reach that account. Check the address and the key.';
+    if (account.provider === 'local') url = rewriteLocalUrl(url);
     let res;
     try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        redirect: 'error',
-        signal,
-      });
+      if (account.provider === 'local') {
+        res = await fetchLocalChat(account, chatMessages, headers, body, signal);
+      } else {
+        res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          redirect: 'error',
+          signal,
+        });
+      }
     } catch (error) {
-      if (error?.name === 'AbortError') throw error;
+      if (aborted(error)) throw error;
       if (account.kind === 'pollinations' && asked) {
         const getUrl = `${account.base}/${encodeURIComponent(asked.slice(0, 500))}?model=${encodeURIComponent(account.model || 'openai')}`;
         try {
@@ -623,24 +797,25 @@ export async function askAi(config, messages, signal, note = '') {
         throw new Error(unreachable);
       }
     }
+    if (!res) throw new Error(unreachable);
     const text = await readBody(res, key);
     logAiCall({ account, note, started, ok: true, asked, text });
     return text;
   } catch (error) {
-    const aborted = error?.name === 'AbortError';
-    let message = aborted ? 'The account took too long.' : (error?.message || 'The account did not answer.');
-    if (!aborted) message = explainAiError(account?.provider || config?.provider, message);
+    const timedOut = aborted(error);
+    let message = timedOut ? 'The account took too long.' : (error?.message || 'The account did not answer.');
+    if (!timedOut) message = explainAiError(account?.provider || config?.provider, message);
     logAiCall({
       account,
       note,
       started,
       ok: false,
       asked,
-      error: aborted ? 'Timed out or cancelled.' : message,
+      error: timedOut ? 'Timed out or cancelled.' : message,
       key: account?.apiKey || config?.apiKey || '',
     });
     const wrapped = new Error(message);
-    if (aborted) wrapped.name = 'AbortError';
+    if (timedOut) wrapped.name = 'AbortError';
     throw wrapped;
   }
 }

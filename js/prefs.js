@@ -1,6 +1,7 @@
 import { getPreferences, patchPreferences, readClientSettings, writeClientSettings } from './api.js';
 import {
   AI_PREF_TYPE,
+  adoptLocalFromCloud,
   aiAccountSynced,
   aiFromPreference,
   aiPreference,
@@ -607,6 +608,12 @@ function applyPulledAi(list, did) {
   if (dirtyAi) return false;
   claimLegacyAi(did);
   const remote = aiFromPreference(list.find((item) => item?.$type === AI_PREF_TYPE));
+  if (remote?.provider === 'local') {
+    adoptLocalFromCloud(remote);
+    storeAiAccount(did, null, true);
+    dirtyAi = true;
+    return true;
+  }
   if (remote) {
     const current = loadAi();
     storeAiAccount(did, remote, true);

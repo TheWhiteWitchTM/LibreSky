@@ -1081,7 +1081,11 @@ button.avatar-btn:focus-visible {
 .ai-inline.offer:hover { background: var(--hover); }
 .ai-inline.offer strong { font-size: 15px; }
 .ai-inline.offer span { color: var(--text-2); font-size: 13px; font-weight: 500; }
-.ai-ready-line { margin: 0 0 8px; }
+.ai-ready-line { margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.ai-ready-line .text-btn { margin: 0; }
+.ai-setup { margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); border-radius: 16px; background: var(--search); }
+.ai-setup h3 { margin: 16px 0 8px; }
+.ai-setup h3:first-child { margin-top: 0; }
 .ai-empty { margin: 8px 0 12px; }
 .ai-live {
   display: flex;
@@ -1556,22 +1560,28 @@ a.person.request-entry { width: 100%; }
 #chat-form > .chat-field { grid-column: 1; grid-row: 1; }
 #chat-form > button[type="submit"],
 #chat-form > .tip-wrap { grid-column: 2; grid-row: 1; }
-#chat-form > .chat-tools { grid-column: 1 / -1; }
-#chat-form > .chat-hint { grid-column: 1 / -1; }
+#chat-form > .chat-tools { grid-column: 1 / -1; grid-row: 2; }
+#chat-form > .chat-hint { grid-column: 1 / -1; grid-row: 3; }
 #chat-picker:not([hidden]) {
   position: absolute;
   left: 8px;
   right: 8px;
-  bottom: calc(100% + 8px);
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  top: auto;
+  bottom: 100%;
+  margin-bottom: 8px;
   z-index: 6;
   display: flex;
   flex-direction: column;
-  height: min(240px, calc(100dvh - 240px));
-  max-height: min(240px, calc(100dvh - 240px));
+  height: min(280px, 42dvh);
+  max-height: min(280px, 42dvh);
   min-height: 0;
   overflow: hidden;
   background: transparent;
+  pointer-events: none;
 }
+#chat-picker:not([hidden]) > .picker { pointer-events: auto; }
 #chat-picker:not([hidden]) > .picker,
 #compose.picker-open #compose-picker:not([hidden]) > .picker {
   flex: 1 1 auto;
@@ -1927,11 +1937,12 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   overflow: hidden;
 }
 #compose[open] form {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
   gap: 8px;
 }
 #compose[open] .compose-stage {
@@ -1942,14 +1953,22 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 }
 #compose.picker-open .compose-stage { min-height: 120px; }
 #compose.picker-open #compose-picker:not([hidden]) {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 58px;
+  z-index: 8;
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
+  flex: none;
+  height: min(280px, 42dvh);
+  max-height: min(280px, 42dvh);
   min-height: 0;
-  max-height: min(220px, 34dvh);
   overflow: hidden;
   background: transparent;
+  pointer-events: none;
 }
+#compose.picker-open #compose-picker:not([hidden]) > .picker { pointer-events: auto; }
 #compose[open] .compose-write { min-height: 0; height: 100%; }
 #compose[open] .composer-field {
   flex: 1 1 auto;
@@ -1998,11 +2017,17 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 }
 #compose.picker-open:has(.picker-tall) .reply-control { margin-block: 0; }
 #compose.picker-open #compose-picker:not([hidden]):has(.picker-tall) {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 58px;
+  z-index: 8;
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
+  flex: none;
+  height: min(280px, 42dvh);
+  max-height: min(280px, 42dvh);
   min-height: 0;
-  max-height: min(220px, 34dvh);
   overflow: hidden;
 }
 #compose[open] .reply-control,
@@ -2048,7 +2073,7 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 .compose-dock {
   position: sticky;
   bottom: 0;
-  z-index: 3;
+  z-index: 9;
   flex: none;
   display: flex;
   justify-content: space-between;

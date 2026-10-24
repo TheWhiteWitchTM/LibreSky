@@ -1,4 +1,4 @@
-import { aiReady, loadAi } from './ai.js';
+import { activeAi, aiReady } from './ai.js';
 import { icon } from './icons.js';
 import {
   accountGone,
@@ -82,7 +82,7 @@ function verifiedMark(actor) {
 }
 
 function aiPostAction() {
-  if (!aiReady(loadAi())) return '';
+  if (!aiReady(activeAi())) return '';
   return `<button type="button" class="action ai" data-act="ai-post" aria-label="AI Assist">${icon('spark')}<span class="sr-name" aria-hidden="true">AI Assist</span></button>`;
 }
 

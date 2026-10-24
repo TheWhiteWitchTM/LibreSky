@@ -332,6 +332,25 @@ export function messageSender(message) {
   return message.sender?.did || '';
 }
 
+function nestedSentMessage(sent) {
+  if (!sent || typeof sent !== 'object') return null;
+  if (sent.sent && typeof sent.sent === 'object' && (sent.sent.id || sent.sent.text != null)) return sent.sent;
+  if (!sent.id && sent.message && typeof sent.message === 'object' && (sent.message.id || sent.message.text != null)) {
+    return sent.message;
+  }
+  return null;
+}
+
+export function normalizeSentMessage(sent, text, did) {
+  const nested = nestedSentMessage(sent);
+  const message = nested || (sent && typeof sent === 'object' ? sent : {});
+  const sender = message.sender || (did ? { did } : undefined);
+  const next = { ...message };
+  if (sender) next.sender = sender;
+  if (!next.text) next.text = text;
+  return next;
+}
+
 export function convoUnread(convo, me) {
   const count = Number(convo?.unreadCount) || 0;
   if (count < 1 || convo?.muted) return 0;

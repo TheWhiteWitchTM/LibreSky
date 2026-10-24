@@ -4,6 +4,13 @@ The paint is still wet. This is the record of the alpha you can [open today](htt
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 24 October 2026
+
+- Sending a chat with Send or Shift+Enter no longer draws the same message twice.
+- Emoji and GIF pickers open over the writing box, next to the buttons, so you do not scroll to find them.
+- A Flags button sits next to Emoji in the post box and in chat.
+- AI Assist settings live on the AI page. Config on that page opens them. Account AI and local AI are separate. Local stays in this browser. Find local lists models on this computer, and the desktop app can reach that server.
+
 ## 22 October 2026
 
 - A call can mute the microphone, turn the camera off, and show how long it has been connected. Mute and the camera stay on your side of the call.

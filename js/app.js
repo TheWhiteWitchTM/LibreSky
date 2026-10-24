@@ -54,12 +54,12 @@ import {
   signedIn,
   soundPrefs,
 } from './session.js';
-import { AI_PROVIDERS, AI_SYSTEM, AI_TIMEOUT_MS, aiLog, aiReady, askAi, clearAiLog, detectLocalAi, draftRewriteMessages, fitDraft, loadAi, prepareAi, providerById, resolveAi, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalAi, draftRewriteMessages, fitDraft, loadAi, loadLocalAi, prepareAi, providerById, resolveAi, saveLocalAi, setAiSource, subscribeAiLog } from './ai.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
-import { emojiGroups } from './emoji.js';
+import { emojiGroups, flagEmoji } from './emoji.js';
 import {
   a11yPrefs,
   callAllow,
@@ -1280,7 +1280,7 @@ async function showBrowse() {
 const AI_NAME = 'AI Assist';
 
 function aiStripHtml() {
-  if (!aiReady(loadAi())) return '';
+  if (!aiReady(activeAi())) return '';
   return `<form class="ai-inline" id="ai-inline"><span class="ai-inline-label">${AI_NAME}</span><input name="ask" maxlength="2000" placeholder="Ask ${AI_NAME}" autocomplete="off" enterkeyhint="send" aria-label="Ask ${AI_NAME}"><button class="primary small" type="submit">Ask</button></form>`;
 }
 
@@ -1529,7 +1529,16 @@ function watchOpenChat(convoId, peerDid, token) {
           const escapeId = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
           if (!message?.id || list.querySelector(`[data-id="${escapeId(message.id)}"]`)) return;
           const mine = messageSender(message) === myDid();
-          list.insertAdjacentHTML('beforeend', messageHtml(message, myDid(), chatOptions(messages, peerDid, convoId, !mine)));
+          const text = String(message.text || '').trim();
+          const pending = mine && text
+            ? [...list.querySelectorAll('.bubble.mine:not([data-id])')].find((node) => (node.querySelector('p')?.textContent || '').trim() === text)
+            : null;
+          const html = messageHtml(message, myDid(), chatOptions(messages, peerDid, convoId, !mine));
+          if (pending) {
+            pending.outerHTML = html;
+            return;
+          }
+          list.insertAdjacentHTML('beforeend', html);
           added = true;
           if (!mine) {
             fromThem = true;
@@ -1621,7 +1630,7 @@ async function showMessages(convoId) {
     $('view').dataset.convoStatus = requested ? 'request' : 'accepted';
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
-    const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button>${styleButtons()}</div>`;
+    const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
     const header = chatHeaderHtml(other) || `<div class="chat-head"><span class="chat-with"><span><strong>${requested ? 'Message request' : 'Chat'}</strong></span></span></div>`;
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
@@ -2172,7 +2181,7 @@ async function loadProfileShelf(profile, token) {
 }
 
 function profileAiButton() {
-  if (!aiReady(loadAi())) return '';
+  if (!aiReady(activeAi())) return '';
   return `<button type="button" class="outline ai-check" data-act="ai-profile">${icon('spark')}<span>AI Assist</span></button>`;
 }
 
@@ -2465,9 +2474,9 @@ let aiPendingNote = 'Page';
 
 function aiKeyHelp(provider) {
   const item = providerById(provider);
-  if (item.local) return 'Local uses a server on this computer that accepts chat completions. Find local looks for one and lists its models. The address can be changed. A key is optional.';
+  if (item.local) return 'Local uses a server on this computer. Find local looks for one and lists its models. The address stays in this browser. A key is optional.';
   if (item.id === 'custom') {
-    return 'Other accounts need an https address that accepts OpenAI chat completions. A server on this computer can use http://127.0.0.1 or http://localhost.';
+    return 'Other accounts need an https address that accepts OpenAI chat completions.';
   }
   if (!item.keyUrl) return '';
   const link = `<a href="${escapeHtml(item.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.keyLabel || item.keyUrl)}</a>`;
@@ -2475,66 +2484,98 @@ function aiKeyHelp(provider) {
   return `Get a ${escapeHtml(item.label)} key from ${link}.`;
 }
 
-function aiSettingsHtml() {
+function aiSourceButtons() {
+  const source = aiSource();
+  return `<div class="segmented wrap" role="group" aria-label="Which AI to ask">
+    <button type="button" data-ai-source="account" aria-pressed="${source === 'account' ? 'true' : 'false'}">Account AI</button>
+    <button type="button" data-ai-source="local" aria-pressed="${source === 'local' ? 'true' : 'false'}">Local AI</button>
+  </div>`;
+}
+
+function aiAccountFormHtml() {
   const saved = loadAi();
-  const provider = saved?.provider || 'grok';
+  const provider = saved?.provider && saved.provider !== 'local' ? saved.provider : 'grok';
   const known = providerById(provider);
-  const local = Boolean(known.local);
   const model = saved?.model || known.model || '';
-  const showBase = provider === 'custom' || local;
-  const baseValue = showBase ? (saved?.base || known.base || '') : '';
-  const options = AI_PROVIDERS.map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
-  const keyHint = local
-    ? 'Optional'
-    : saved?.apiKey
-      ? 'Saved on your Bluesky account. Type a new key to replace it.'
-      : 'Paste the key from that account';
-  const localOn = Boolean(saved && providerById(saved.provider).local);
-  const usingFallback = !saved?.apiKey && !localOn;
+  const showBase = provider === 'custom';
+  const options = cloudProviders().map((item) => `<option value="${item.id}"${item.id === provider ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
+  const keyHint = saved?.apiKey
+    ? 'Saved on your Bluesky account. Type a new key to replace it.'
+    : 'Paste the key from that account';
   const status = saved?.apiKey
     ? `${AI_NAME} is on for this account.`
-    : localOn
-      ? `${AI_NAME} uses the local server on this account.`
-      : `${AI_NAME} is on with a free public model until you save a key.`;
+    : `${AI_NAME} uses a free public model until you save a key.`;
   const remove = saved ? '<button type="button" class="danger" id="ai-clear" data-act="ai-clear">Remove</button>' : '';
-  const directory = AI_PROVIDERS.map((item) => {
-    if (item.local) return `<li>${escapeHtml(item.label)} · on this computer</li>`;
+  const directory = cloudProviders().map((item) => {
     if (!item.keyUrl) return '';
     const extra = item.keyOptional ? ' · works without a key' : '';
     return `<li><a href="${escapeHtml(item.keyUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>${extra}</li>`;
   }).join('');
-  const tail = localOn
-    ? 'Find local looks for a server on this computer. A key is optional.'
-    : usingFallback
-      ? 'A key is optional. Pick a provider and open its site to create one.'
-      : 'Replace the key by pasting a new one and saving.';
-  return `<p class="dim">${AI_NAME} answers on the AI page, on Home, and as a check on profiles and posts. Without a key it uses a free public model so you still have something. Local uses a server on this computer. <a class="text-link" href="#/ai">@ai and @si</a> ask it from this account. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile, because anyone can read that record. This page does not ask the browser to remember it. The key is sent only to the provider you pick.</p>
-    <form id="ai-form" class="ai-form" autocomplete="off">
+  return `<form id="ai-form" class="ai-form" autocomplete="off">
       <label>Provider
         <select id="ai-provider">${options}</select>
       </label>
       <label>Model
-        <input id="ai-model" list="ai-model-list" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off">
-        <datalist id="ai-model-list"></datalist>
+        <input id="ai-model" value="${escapeHtml(model)}" data-auto="${!saved || model === known.model ? '1' : '0'}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off">
       </label>
       <label id="ai-base-label"${showBase ? '' : ' hidden'}>API address
-        <input id="ai-base" value="${escapeHtml(baseValue)}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="http://127.0.0.1:11434/v1">
+        <input id="ai-base" value="${escapeHtml(showBase ? (saved?.base || '') : '')}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://">
       </label>
-      <label id="ai-key-label"><span id="ai-key-name">${local ? 'API key, optional' : 'API key'}</span>
+      <label id="ai-key-label"><span id="ai-key-name">API key</span>
         <input id="ai-key" type="text" name="provider-secret" maxlength="2000" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" placeholder="${escapeHtml(keyHint)}">
       </label>
       <p class="dim" id="ai-key-help">${aiKeyHelp(provider)}</p>
-      <p class="dim" id="ai-local"${local ? '' : ' hidden'}></p>
       <div class="toolbar">
         <button class="primary small" type="submit">Save</button>
         <button type="button" class="text-btn" id="ai-check" data-act="ai-check">Check</button>
-        <button type="button" class="text-btn" id="ai-find" data-act="ai-find"${local ? '' : ' hidden'}>Find local</button>
         ${remove}
       </div>
       <p class="dim" id="ai-status">${escapeHtml(status)}</p>
     </form>
-    <p class="dim">${tail}</p>
     <ul class="ai-key-list dim">${directory}</ul>`;
+}
+
+function aiLocalFormHtml() {
+  const saved = loadLocalAi();
+  const known = providerById('local');
+  const model = saved?.model || '';
+  const baseValue = saved?.base || known.base || 'http://127.0.0.1:11434/v1';
+  const status = saved
+    ? `Local AI is on this computer at ${saved.base}.`
+    : 'No local server is saved in this browser yet.';
+  const remove = saved ? '<button type="button" class="danger" id="ai-local-clear" data-act="ai-local-clear">Remove</button>' : '';
+  return `<form id="ai-local-form" class="ai-form" autocomplete="off">
+      <label>API address
+        <input id="ai-local-base" value="${escapeHtml(baseValue)}" maxlength="200" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="http://127.0.0.1:11434/v1">
+      </label>
+      <label>Model
+        <input id="ai-local-model" list="ai-model-list" value="${escapeHtml(model)}" maxlength="120" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Detected after Find local">
+        <datalist id="ai-model-list"></datalist>
+      </label>
+      <label>API key, optional
+        <input id="ai-local-key" type="text" name="local-secret" maxlength="2000" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" placeholder="Optional">
+      </label>
+      <p class="dim">Local AI stays in this browser. It is not written on your Bluesky account, because it only works on this machine.</p>
+      <p class="dim" id="ai-local"></p>
+      <div class="toolbar">
+        <button class="primary small" type="submit">Save</button>
+        <button type="button" class="text-btn" id="ai-find" data-act="ai-find">Find local</button>
+        <button type="button" class="text-btn" id="ai-local-check" data-act="ai-local-check">Check</button>
+        ${remove}
+      </div>
+      <p class="dim" id="ai-local-status">${escapeHtml(status)}</p>
+    </form>`;
+}
+
+function aiSettingsHtml() {
+  return `<p class="dim">${AI_NAME} answers on this page, on Home, and as a check on profiles and posts. Account AI follows this login. Local AI stays in this browser, on this computer. Without either, a free public model still answers. <a class="text-link" href="#/ai">@ai and @si</a> use whichever you pick below.</p>
+    <h3>Ask with</h3>
+    ${aiSourceButtons()}
+    <h3>Account AI</h3>
+    <p class="dim">A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile.</p>
+    ${aiAccountFormHtml()}
+    <h3>Local AI</h3>
+    ${aiLocalFormHtml()}`;
 }
 
 function readAiForm() {
@@ -2548,6 +2589,19 @@ function readAiForm() {
   });
 }
 
+function readLocalForm(found = null) {
+  const saved = loadLocalAi();
+  const typed = $('ai-local-key')?.value || '';
+  const model = $('ai-local-model')?.value.trim() || found?.models?.[0] || saved?.model || '';
+  return prepareAi({
+    provider: 'local',
+    model,
+    base: $('ai-local-base')?.value || found?.base || saved?.base || '',
+    apiKey: typed.trim() || saved?.apiKey || '',
+    api: found?.api || saved?.api || '',
+  });
+}
+
 let localFindSeq = 0;
 
 function syncAiFields() {
@@ -2556,84 +2610,90 @@ function syncAiFields() {
   if (!select || !model) return;
   const item = providerById(select.value);
   const baseLabel = $('ai-base-label');
-  const baseInput = $('ai-base');
-  const showBase = item.id === 'custom' || item.local;
+  const showBase = item.id === 'custom';
   if (baseLabel) baseLabel.hidden = !showBase;
-  if (baseInput && item.local && !baseInput.value.trim()) baseInput.value = item.base || '';
   const help = $('ai-key-help');
   if (help) help.innerHTML = aiKeyHelp(select.value);
-  const keyName = $('ai-key-name');
-  if (keyName) keyName.textContent = item.keyOptional && item.local ? 'API key, optional' : 'API key';
   const key = $('ai-key');
   if (key && !key.value) {
     const savedKey = loadAi()?.apiKey;
-    key.placeholder = item.local
-      ? 'Optional'
-      : (savedKey ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account');
-  }
-  const find = $('ai-find');
-  const localLine = $('ai-local');
-  if (find) find.hidden = !item.local;
-  if (!item.local) {
-    localFindSeq += 1;
-    if (localLine) {
-      localLine.hidden = true;
-      localLine.textContent = '';
-    }
+    key.placeholder = savedKey ? 'Saved on your Bluesky account. Type a new key to replace it.' : 'Paste the key from that account';
   }
   const current = model.value.trim();
-  const known = AI_PROVIDERS.some((provider) => provider.model && provider.model === current);
+  const known = cloudProviders().some((provider) => provider.model && provider.model === current);
   if (model.dataset.auto === '1' || !current || known) {
     model.value = item.model || '';
     model.dataset.auto = '1';
   }
-  if (item.local) findLocalAi();
 }
 
-async function findLocalAi({ replaceBase = false } = {}) {
+function paintLocalModels(found) {
+  const list = $('ai-model-list');
+  if (list) list.innerHTML = (found?.models || []).map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
+  const model = $('ai-local-model');
+  if (model && found?.models?.length && !model.value.trim()) model.value = found.models[0];
+  const base = $('ai-local-base');
+  if (base && found?.base) base.value = found.base;
+}
+
+async function findLocalAi({ replaceBase = false, silent = false, autosave = replaceBase } = {}) {
   const seq = ++localFindSeq;
   const button = $('ai-find');
   const line = $('ai-local');
-  if ($('ai-provider')?.value !== 'local') return;
+  if (!line && !$('ai-local-form')) return null;
   if (button) button.disabled = true;
   if (line) {
     line.hidden = false;
     line.textContent = 'Looking on this computer…';
   }
-  const typed = String($('ai-base')?.value || '').trim().replace(/\/+$/, '');
+  const typed = String($('ai-local-base')?.value || '').trim().replace(/\/+$/, '');
   try {
     const found = await detectLocalAi(typed);
-    if (seq !== localFindSeq || !$('ai-form')?.isConnected || $('ai-provider')?.value !== 'local') return;
+    if (seq !== localFindSeq || !$('ai-local-form')?.isConnected) return null;
     if (!found) {
-      if (line) line.textContent = 'No local server answered. Start it, or type its address. A site on https sometimes cannot reach this computer.';
-      return;
+      if (line) {
+        line.textContent = typeof location !== 'undefined' && location.protocol === 'https:'
+          ? 'No local server answered. An https page often cannot reach a local http server. Use the desktop app, or type the address if this copy is local.'
+          : 'No local server answered. Start Ollama, LM Studio, or similar, then press Find local.';
+      }
+      return null;
     }
     const foundBase = String(found.base || '').replace(/\/+$/, '');
     const matched = !typed || foundBase === typed;
     if (!matched && !replaceBase) {
       if (line) line.textContent = `No answer at ${typed}. Another server answered at ${found.base}. Press Find local to use it.`;
-      return;
+      return found;
     }
-    const base = $('ai-base');
-    if (base) base.value = found.base;
-    const list = $('ai-model-list');
-    if (list) list.innerHTML = found.models.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
-    const model = $('ai-model');
-    if (model && found.models.length && !model.value.trim()) {
-      model.value = found.models[0];
-      model.dataset.auto = '1';
-    }
+    paintLocalModels(found);
     if (line) {
       const count = found.models.length;
       line.textContent = count
         ? `Local server answered at ${found.base}. ${count} ${count === 1 ? 'model' : 'models'}.`
         : `Local server answered at ${found.base}. It did not list a model, so type the model name.`;
     }
+    if (autosave && found.models[0]) {
+      try {
+        saveLocalAi({ provider: 'local', model: $('ai-local-model')?.value.trim() || found.models[0], base: found.base, api: found.api || '' });
+        const status = $('ai-local-status');
+        if (status) status.textContent = `Local AI is on this computer at ${found.base}.`;
+        if (!silent) toast('Local AI found and saved in this browser');
+      } catch {
+        /* the form still has the detected values */
+      }
+    }
+    return found;
   } catch (error) {
     if (seq === localFindSeq && line?.isConnected) line.textContent = error.message || 'Could not look for a local server.';
+    return null;
   } finally {
     if (seq === localFindSeq && button?.isConnected) button.disabled = false;
   }
+}
+
+function refreshAiSettingsView() {
+  const page = parseHash()[0];
+  if (page === 'settings') showSettings();
+  else if (page === 'ai') showAi();
 }
 
 async function saveAiForm(event) {
@@ -2642,8 +2702,9 @@ async function saveAiForm(event) {
   if (button) button.disabled = true;
   try {
     await commitAiAccount(readAiForm());
+    setAiSource('account');
     toast(`${AI_NAME} saved on your Bluesky account`);
-    if (parseHash()[0] === 'settings') showSettings();
+    refreshAiSettingsView();
   } catch (error) {
     toast(error.message || 'Could not save the key on your Bluesky account.');
   } finally {
@@ -2651,7 +2712,27 @@ async function saveAiForm(event) {
   }
 }
 
-async function checkAiForm() {
+async function saveLocalForm(event) {
+  event.preventDefault();
+  const button = event.target?.querySelector?.('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    let found = null;
+    try { readLocalForm(); } catch {
+      found = await findLocalAi({ replaceBase: true, silent: true });
+    }
+    saveLocalAi(readLocalForm(found));
+    setAiSource('local');
+    toast('Local AI saved in this browser');
+    refreshAiSettingsView();
+  } catch (error) {
+    toast(error.message || 'Could not save local AI.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function checkAiAccount() {
   const button = $('ai-check');
   let account;
   try { account = readAiForm(); } catch { account = resolveAi(null); }
@@ -2668,6 +2749,34 @@ async function checkAiForm() {
   } catch (error) {
     const message = error?.message || 'The account did not answer.';
     const status = $('ai-status');
+    if (status?.isConnected) status.textContent = message;
+    toast(message);
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function checkAiLocal() {
+  const button = $('ai-local-check');
+  if (button) button.disabled = true;
+  try {
+    let account;
+    try { account = readLocalForm(); } catch {
+      const found = await findLocalAi({ replaceBase: true, silent: true });
+      if (!found) throw new Error('No local server answered.');
+      account = readLocalForm(found);
+    }
+    await askAi(account, [
+      { role: 'system', content: AI_SYSTEM },
+      { role: 'user', content: 'Reply with ok.' },
+    ], AbortSignal.timeout ? AbortSignal.timeout(AI_TIMEOUT_MS) : undefined, 'Local');
+    const line = 'Local AI replied.';
+    const status = $('ai-local-status');
+    if (status?.isConnected) status.textContent = line;
+    toast(line);
+  } catch (error) {
+    const message = error?.message || 'The local server did not answer.';
+    const status = $('ai-local-status');
     if (status?.isConnected) status.textContent = message;
     toast(message);
   } finally {
@@ -3012,13 +3121,13 @@ function showSettings() {
       ${soundRow('posts', 'New posts on Home', sounds)}
     </div>
     ${voiceSettingsHtml()}`)}
-    ${settingsPanel('ai', `<h2>AI</h2>${aiSettingsHtml()}`)}
+    ${settingsPanel('ai', `<h2>AI</h2><p class="dim"><a class="text-link" href="#/ai">Open AI Assist</a> to chat. Account AI and local AI are set here and on that page.</p>${aiSettingsHtml()}`)}
   </section>`;
   loadSettingsLists(token);
   loadChatAllow(token);
   fillVoiceSelect();
   if (settingsTab === 'follows') loadFollowCleanup(token);
-  if ($('ai-provider')?.value === 'local') findLocalAi();
+  if ($('ai-local-form')) findLocalAi({ silent: true });
 }
 
 function selectSettingsTab(id) {
@@ -3861,12 +3970,25 @@ async function loadBlockedAccounts(token = generation) {
   }
 }
 
+let aiSetupOpen = false;
+
+function aiStatusLine(active) {
+  const label = aiSetupOpen ? 'Hide settings' : 'Settings';
+  const setup = `<button type="button" class="text-btn" data-act="ai-setup">${label}</button>`;
+  if (active?.fallback) {
+    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with a free public model. ${setup}</p>`;
+  }
+  if (active?.provider === 'local') {
+    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with local AI. ${setup}</p>`;
+  }
+  return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. ${setup}</p>`;
+}
+
 function showAi() {
   generation += 1;
   setChrome({ title: AI_NAME, nav: 'ai', back: true });
-  const saved = loadAi();
+  const saved = activeAi();
   const ready = aiReady(saved);
-  const usingFallback = !saved?.apiKey;
   const waiting = aiThread.some((turn) => turn.role === 'pending');
   const turns = aiThread.map((turn) => {
     if (turn.role === 'assistant' || turn.role === 'pending') return assistantHtml(turn.content, { kicker: AI_NAME });
@@ -3878,20 +4000,21 @@ function showAi() {
       <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks"${waiting ? ' disabled' : ''}>Ask</button></span>
       <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
     </form>`;
+  const setup = `<div id="ai-setup" class="ai-setup"${aiSetupOpen ? '' : ' hidden'}>${aiSettingsHtml()}</div>`;
   if (ready) {
     const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. @ai and @si in a chat use this same account and are not sent to the other person.</p>`;
-    const line = usingFallback
-      ? `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with a free public model. <a class="text-link" href="#/settings">Add a key</a></p>`
-      : `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on. <a class="text-link" href="#/settings">Settings</a></p>`;
     $('view').innerHTML = `<section class="settings ai-doc ai-live">
-      ${line}
+      ${aiStatusLine(saved)}
+      ${setup}
       <div class="messages ai-thread">${empty}${turns}</div>
       ${askForm}
     </section>`;
   } else {
+    aiSetupOpen = true;
     $('view').innerHTML = `<section class="settings ai-doc">
       <h2>${AI_NAME}</h2>
-      <p>${AI_NAME} could not start. <a class="text-link" href="#/settings">Settings</a> can add a key.</p>
+      <p>${AI_NAME} could not start. Settings below can add a key or a local server.</p>
+      ${setup}
     </section>`;
   }
   const area = $('ai-text');
@@ -3900,6 +4023,7 @@ function showAi() {
     applyFieldLanguage(area);
     fitChatInput(area);
   }
+  if (aiSetupOpen && $('ai-local-form') && !aiThread.length) findLocalAi({ silent: true });
   const pending = aiPending;
   aiPending = '';
   if (pending && ready) askOnPage(pending);
@@ -3915,9 +4039,12 @@ function aiHistory() {
 async function askOnPage(text) {
   const note = aiPendingNote;
   aiPendingNote = 'Page';
-  const saved = loadAi();
+  const saved = activeAi();
   if (!aiReady(saved)) {
-    toast('AI Assist could not start. Add a key in Settings.');
+    aiSetupOpen = true;
+    toast('AI Assist could not start. Add a key or a local server.');
+    if (parseHash()[0] === 'ai') showAi();
+    else location.hash = '#/ai';
     return;
   }
   const seq = ++aiSeq;
@@ -5604,7 +5731,7 @@ function paintStyleButtons(area) {
 }
 
 function syncToolState() {
-  document.querySelectorAll('[data-act="emoji"], [data-act="gif"], [data-act="link"], [data-act="post-lang"]').forEach((button) => {
+  document.querySelectorAll('[data-act="emoji"], [data-act="flags"], [data-act="gif"], [data-act="link"], [data-act="post-lang"]').forEach((button) => {
     const open = Boolean(pickerMode) && pickerMode === button.dataset.act && pickerHost === buttonHost(button);
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
     button.classList.toggle('on', open);
@@ -5628,7 +5755,7 @@ function closePicker() {
 
 function preparePicker(act, button) {
   const host = buttonHost(button);
-  if (host === 'chat' && act !== 'emoji') return null;
+  if (host === 'chat' && act !== 'emoji' && act !== 'flags') return null;
   const box = host === 'chat' ? $('chat-picker') : $('compose-picker');
   if (!box) return null;
   pickerHost = host;
@@ -5969,6 +6096,27 @@ function openEmojiPicker(button, query = '') {
     body: '<div id="emoji-groups"></div>',
   });
   paintEmojiList(query);
+  pickerArea()?.focus({ preventScroll: true });
+}
+
+function paintFlagList(query) {
+  const box = $('flag-grid');
+  if (!box) return;
+  const list = flagEmoji(query);
+  box.innerHTML = list.length
+    ? emojiButtons(list)
+    : '<p class="picker-note">No flags matched.</p>';
+}
+
+function openFlagsPicker(button, query = '') {
+  const box = preparePicker('flags', button);
+  if (!box) return;
+  box.innerHTML = pickerShell('Flags', {
+    tall: true,
+    search: `<input id="flag-find" placeholder="Search flags" autocomplete="off" value="${escapeHtml(query)}">`,
+    body: '<div id="flag-grid"></div>',
+  });
+  paintFlagList(query);
   pickerArea()?.focus({ preventScroll: true });
 }
 
@@ -6405,6 +6553,20 @@ function openPageConfig() {
     openTune('thread');
     return;
   }
+  if (a === 'ai') {
+    aiSetupOpen = true;
+    const setup = $('ai-setup');
+    if (setup) {
+      setup.hidden = false;
+      const button = document.querySelector('[data-act="ai-setup"]');
+      if (button) button.textContent = 'Hide settings';
+      if ($('ai-local-form')) findLocalAi({ silent: true });
+      setup.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    showAi();
+    return;
+  }
   location.hash = '#/settings';
 }
 
@@ -6444,10 +6606,14 @@ async function deliverChat(convoId, text) {
     $('view')?.querySelector('.request-banner')?.remove();
   }
   const sent = await api.sendMessage(convoId, text);
-  const message = sent?.sent || sent?.message || { text, sender: { did: myDid() } };
-  if (!message.sender) message.sender = { did: myDid() };
-  if (!message.text) message.text = text;
+  const message = normalizeSentMessage(sent, text, myDid());
   const list = $('view').querySelector('.messages');
+  const escapeId = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
+  if (message.id && list?.querySelector(`[data-id="${escapeId(message.id)}"]`)) {
+    if (list) list.scrollTop = list.scrollHeight;
+    api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
+    return;
+  }
   list?.insertAdjacentHTML('beforeend', messageHtml(message, myDid()));
   if (list) list.scrollTop = list.scrollHeight;
   api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
@@ -6492,9 +6658,9 @@ async function rewriteDraft() {
     area?.focus();
     return;
   }
-  const saved = loadAi();
+  const saved = activeAi();
   if (!aiReady(saved)) {
-    toast('AI Assist could not start. Add a key in Settings.');
+    toast('AI Assist could not start. Add a key or a local server on the AI page.');
     return;
   }
   const button = dialog.querySelector('[data-act="compose-ai"]');
@@ -6535,9 +6701,9 @@ function useAiDraft() {
 }
 
 async function askInChat(input, text) {
-  const saved = loadAi();
+  const saved = activeAi();
   if (!aiReady(saved)) {
-    toast('AI Assist could not start. Add a key in Settings.');
+    toast('AI Assist could not start. Add a key or a local server on the AI page.');
     return;
   }
   const button = input.form?.querySelector('button[type="submit"]');
@@ -6954,12 +7120,13 @@ async function handleChromeAct(act, event) {
     area?.focus();
     return true;
   }
-  if (act === 'emoji' || act === 'gif' || act === 'link' || act === 'post-lang') {
+  if (act === 'emoji' || act === 'flags' || act === 'gif' || act === 'link' || act === 'post-lang') {
     event.preventDefault();
     const host = buttonHost(button);
-    if (host === 'chat' && act !== 'emoji') return true;
+    if (host === 'chat' && act !== 'emoji' && act !== 'flags') return true;
     if (pickerMode === act && pickerHost === host) closePicker();
     else if (act === 'emoji') openEmojiPicker(button);
+    else if (act === 'flags') openFlagsPicker(button);
     else if (act === 'gif') openGifPicker(button);
     else if (act === 'link') openLinkPicker(button);
     else openPostLangPicker(button);
@@ -7665,17 +7832,44 @@ async function onClick(event) {
     onAiDraft(act, event.target.closest('[data-ai]')?.dataset.ai || '');
     return;
   }
+  if (act === 'ai-setup') {
+    event.preventDefault();
+    aiSetupOpen = !aiSetupOpen;
+    const setup = $('ai-setup');
+    const button = event.target.closest('[data-act="ai-setup"]');
+    if (setup) {
+      setup.hidden = !aiSetupOpen;
+      if (button) button.textContent = aiSetupOpen ? 'Hide settings' : 'Settings';
+      if (aiSetupOpen && $('ai-local-form')) findLocalAi({ silent: true });
+    } else {
+      showAi();
+    }
+    return;
+  }
   if (act === 'ai-clear') {
     event.preventDefault();
     commitAiAccount(null).then(() => {
       toast('AI account removed from your Bluesky account');
-      if (parseHash()[0] === 'settings') showSettings();
+      refreshAiSettingsView();
     }).catch((error) => toast(error.message || 'Could not remove the key from your Bluesky account.'));
+    return;
+  }
+  if (act === 'ai-local-clear') {
+    event.preventDefault();
+    clearLocalAi();
+    if (aiSource() === 'local') setAiSource('account');
+    toast('Local AI removed from this browser');
+    refreshAiSettingsView();
     return;
   }
   if (act === 'ai-check') {
     event.preventDefault();
-    checkAiForm();
+    checkAiAccount();
+    return;
+  }
+  if (act === 'ai-local-check') {
+    event.preventDefault();
+    checkAiLocal();
     return;
   }
   if (act === 'ai-find') {
@@ -8927,6 +9121,7 @@ function bind() {
   $('compose-picker')?.addEventListener('input', (event) => {
     if (event.target.id === 'post-lang-find') filterLanguageButtons(event.target);
     if (event.target.id === 'emoji-find') paintEmojiList(event.target.value);
+    if (event.target.id === 'flag-find') paintFlagList(event.target.value);
   });
   $('compose-picker')?.addEventListener('keydown', onPickerKey);
   $('compose-picker')?.addEventListener('click', (event) => {
@@ -9005,7 +9200,8 @@ function bind() {
       event.preventDefault();
       const text = event.target.querySelector('input')?.value.trim() || '';
       if (!text) return;
-      if (!aiReady(loadAi())) {
+      if (!aiReady(activeAi())) {
+        aiSetupOpen = true;
         location.hash = '#/ai';
         return;
       }
@@ -9015,6 +9211,7 @@ function bind() {
       else location.hash = '#/ai';
     }
     if (event.target.id === 'ai-form') saveAiForm(event);
+    if (event.target.id === 'ai-local-form') saveLocalForm(event);
     if (event.target.id === 'pack-form') {
       event.preventDefault();
       const q = $('pack-q')?.value.trim();
@@ -9146,6 +9343,10 @@ function bind() {
       paintEmojiList(event.target.value);
       return;
     }
+    if (event.target.id === 'flag-find') {
+      paintFlagList(event.target.value);
+      return;
+    }
     const volumeKey = event.target.dataset?.volume;
     if (volumeKey === 'chat' || volumeKey === 'notifications' || volumeKey === 'posts') {
       const value = Number(event.target.value);
@@ -9216,6 +9417,24 @@ function bind() {
     const chatChoice = event.target.closest('[data-chat-allow]')?.dataset.chatAllow;
     if (chatChoice) {
       chooseChatAllow(chatChoice);
+      return;
+    }
+    const source = event.target.closest('[data-ai-source]')?.dataset.aiSource;
+    if (source === 'account' || source === 'local') {
+      event.preventDefault();
+      if (source === 'local' && !loadLocalAi()) {
+        findLocalAi({ replaceBase: true }).then((found) => {
+          if (!found && !loadLocalAi()) {
+            toast('Find a local server first, or save one below.');
+            return;
+          }
+          setAiSource('local');
+          refreshAiSettingsView();
+        });
+        return;
+      }
+      setAiSource(source);
+      refreshAiSettingsView();
       return;
     }
     const callChoice = event.target.closest('[data-call-allow]')?.dataset.callAllow;
@@ -9575,7 +9794,7 @@ function paintDesignReadout() {
   if (!box || box.hidden) return;
   const theme = document.documentElement.dataset.theme || 'system';
   const route = location.hash || '#/';
-  const ai = aiReady(loadAi()) ? `${AI_NAME} on` : `${AI_NAME} off`;
+  const ai = aiReady(activeAi()) ? `${AI_NAME} on` : `${AI_NAME} off`;
   const last = aiLog()[0];
   const lastLine = last
     ? `${last.ok ? 'Last reply' : 'Last error'} · ${last.note || 'call'} · ${last.ms} ms`
@@ -9607,7 +9826,7 @@ function paintDebugLog() {
   if (!body) return;
   const rows = aiLog();
   if (!rows.length) {
-    body.innerHTML = `<p class="dim">No ${AI_NAME} calls in this tab yet. Ask on Home, check a post or a profile, or use Check in Settings. The key is not written here.</p>`;
+    body.innerHTML = `<p class="dim">No ${AI_NAME} calls in this tab yet. Ask on Home, check a post or a profile, or use Check on the AI page. The key is not written here.</p>`;
     return;
   }
   body.innerHTML = rows.map((row) => {
@@ -9674,7 +9893,7 @@ async function checkPostAi(node) {
   const found = postFrom(node);
   const post = found?.post;
   const article = found?.article;
-  const saved = loadAi();
+  const saved = activeAi();
   if (!post || !article || !aiReady(saved)) return;
   const main = article.querySelector('.post-main');
   if (!main) return;
@@ -9696,7 +9915,7 @@ async function checkPostAi(node) {
 
 async function checkProfileAi() {
   const profile = shownProfile;
-  const saved = loadAi();
+  const saved = activeAi();
   const header = document.querySelector('#view .profile');
   if (!profile || !header || !aiReady(saved)) return;
   const { panel, token } = aiNote(header);

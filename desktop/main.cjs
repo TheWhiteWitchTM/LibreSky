@@ -100,13 +100,63 @@ function sendFile(res, file, status = 200) {
   });
 }
 
+const LOCAL_AI_PORTS = new Set([11434, 1234, 8080, 1337, 4891, 12434, 5000, 3000, 12345]);
+
+function proxyLocalAi(req, res, pathname, search) {
+  const match = pathname.match(/^\/local-ai\/(\d+)(\/.*)?$/);
+  if (!match) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
+    return;
+  }
+  const portNum = Number(match[1]);
+  if (!LOCAL_AI_PORTS.has(portNum)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+  const pathPart = match[2] || '/';
+  const chunks = [];
+  req.on('data', (chunk) => chunks.push(chunk));
+  req.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const headers = { Accept: req.headers.accept || 'application/json' };
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    const up = http.request({
+      hostname: '127.0.0.1',
+      port: portNum,
+      path: `${pathPart}${search || ''}`,
+      method: req.method,
+      headers,
+    }, (upRes) => {
+      const out = { 'Content-Type': upRes.headers['content-type'] || 'application/json' };
+      res.writeHead(upRes.statusCode || 502, out);
+      upRes.pipe(res);
+    });
+    up.on('error', () => {
+      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end('{"error":"local server unreachable"}');
+    });
+    if (body.length) up.write(body);
+    up.end();
+  });
+}
+
 function serve(req, res) {
   let pathname = '/';
+  let search = '';
   try {
-    pathname = decodeURIComponent(new URL(req.url, `http://127.0.0.1:${port}`).pathname);
+    const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    pathname = decodeURIComponent(url.pathname);
+    search = url.search || '';
   } catch {
     res.writeHead(400);
     res.end();
+    return;
+  }
+  if (pathname.startsWith('/local-ai/')) {
+    proxyLocalAi(req, res, pathname, search);
     return;
   }
   if (pathname === '/') pathname = '/index.html';
