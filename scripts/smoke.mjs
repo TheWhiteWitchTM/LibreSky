@@ -8,7 +8,7 @@ import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/a
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
-import { callIsRequest, callMayRing, homeAllows, normalizeSearchTabs, searchAllows, sortThreadReplies } from '../js/prefs.js';
+import { callIsRequest, callMayRing, goldFeedGate, homeAllows, normalizeSearchTabs, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
@@ -1200,6 +1200,17 @@ assert.match(index, /Browse without signing in/);
 assert.match(appSource, /id="ai-inline"/);
 assert.match(appSource, /const banner = homeLead\(homePrompt\(\)\)/);
 assert.doesNotMatch(appSource, /following \? homePrompt\(\)/);
+assert.match(appSource, /prompt-note/);
+const goldAuthor = (did, status) => ({ did, verification: status ? { verifiedStatus: status } : {} });
+const goldFeed = (statuses) => statuses.map((status, index) => ({ post: { author: goldAuthor(`did:${index}`, status) } }));
+assert.equal(goldFeedGate(goldFeed(['valid', 'valid', 'valid'])), null);
+assert.ok(goldFeedGate(goldFeed([...Array(24).fill('valid'), 'none', 'none', 'none'])));
+assert.equal(goldFeedGate(goldFeed([...Array(6).fill('valid'), ...Array(23).fill('none')])), null);
+assert.equal(goldFeedGate([
+  { post: { author: goldAuthor('did:poster', 'valid') }, reason: { by: goldAuthor('did:reposter', 'none') } },
+  { post: { author: goldAuthor('did:other', 'none') } },
+  ...Array.from({ length: 7 }, (_, index) => ({ post: { author: goldAuthor(`did:gold${index}`, 'valid') } })),
+]), null);
 assert.match(appSource, /classList.toggle\('warn'/);
 assert.match(appSource, /toggleMenu\(anchor, items\)/);
 assert.equal(postInLanguages({ record: { langs: ['en-US'] } }, ['en']), true);
@@ -1280,8 +1291,12 @@ assert.equal((quietCalls.match(/Ada/g) || []).length, 2);
 assert.match(quietCalls, />Ada</);
 assert.doesNotMatch(quietCalls, /chat-title-handle|class="handle"|@ada\.bsky\.social|<strong>/);
 const handleOnly = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social' });
-assert.match(handleOnly, />ada\.bsky\.social</);
+assert.match(handleOnly, />ada</);
+assert.doesNotMatch(handleOnly, />ada\.bsky\.social</);
 assert.doesNotMatch(handleOnly, /chat-title-handle|class="handle"|@ada/);
+const handleAsName = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: '@ada.bsky.social' });
+assert.match(handleAsName, />ada</);
+assert.doesNotMatch(handleAsName, />@?ada\.bsky\.social</);
 assert.doesNotMatch(quietCalls, /class="call-pair"/);
 assert.doesNotMatch(quietCalls, /data-act="call-audio"/);
 assert.doesNotMatch(quietCalls, /data-act="call-video"/);
@@ -1313,8 +1328,9 @@ assert.match(goneCalls, /Deleted account/);
 assert.doesNotMatch(goneCalls, /call-btn/);
 assert.doesNotMatch(goneCalls, /chat-title-handle|class="handle"/);
 assert.match(appSource, /function paintChatTitle/);
-assert.match(appSource, /paintChatTitle\(cachedOther\)/);
-assert.match(appSource, /paintChatTitle\(other\)/);
+assert.match(appSource, /fillChatTitle\(cachedOther, token\)/);
+assert.match(appSource, /fillChatTitle\(other, token\)/);
+assert.match(appSource, /chatTitleNeedsProfile/);
 assert.match(appCss, /\.page-icon \.avatar \{ width: 26px; height: 26px; \}/);
 assert.doesNotMatch(appCss, /person-title|chat-title-handle/);
 const packRow = packHtml({

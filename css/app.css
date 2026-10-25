@@ -1054,6 +1054,11 @@ button.avatar-btn:focus-visible {
   font-size: 20px;
 }
 .prompt:hover { background: var(--hover); }
+.prompt-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prompt-copy > span { color: var(--text); }
+.prompt-copy small { font-size: 13px; line-height: 1.3; font-weight: 400; color: var(--text-2); }
+.prompt-note { cursor: default; }
+.prompt-note:hover { background: transparent; }
 .home-lead { border-bottom: 1px solid var(--border); }
 .home-lead .prompt { border-bottom: 0; }
 .home-lead .ai-inline { border-bottom: 0; padding-bottom: 4px; }

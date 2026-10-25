@@ -9,6 +9,7 @@ import {
   callConvoHtml,
   callStartHtml,
   chatHeaderHtml,
+  chatTitleNeedsProfile,
   hoverCardHtml,
   convoHtml,
   joinRequestHtml,
@@ -72,6 +73,7 @@ import {
   dropFollowHold,
   followBackToday,
   followDeskPrefs,
+  goldFeedGate,
   followHoldSet,
   holdFollowTargets,
   noteFollowBack,
@@ -152,6 +154,7 @@ const hoverProfiles = new Map();
 let homeLanes = [];
 let homeLanesDid = '';
 let lanesAt = 0;
+let homeSample = [];
 let laneDraft = null;
 let laneSaveChain = Promise.resolve();
 let shownProfile = null;
@@ -1264,9 +1267,12 @@ async function showHome(active) {
   const token = ++generation;
   paintHomeChrome(active);
   const laneJob = ensureHomeLanes(token).then((changed) => {
-    if (!changed || token !== generation) return;
+    if (token !== generation) return;
     const now = homeActive();
-    if (now) paintHomeChrome(now);
+    if (!now) return;
+    if (changed) paintHomeChrome(now);
+    const slot = $('view')?.querySelector('.prompt');
+    if (slot && now.kind === 'lane' && now.type === 'feed') slot.outerHTML = homePrompt();
   });
   if (lane && !signedIn()) {
     $('view').innerHTML = homeLead('') + emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
@@ -1280,8 +1286,9 @@ async function showHome(active) {
     else if (lane.type === 'list') data = await api.getListFeed(lane.value);
     else data = await api.getFeed(lane.value);
     if (token !== generation) return;
-    const banner = homeLead(homePrompt());
     const raw = data.feed || [];
+    homeSample = raw;
+    const banner = homeLead(homePrompt());
     const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
     const posted = feedHtml(items);
@@ -1399,7 +1406,22 @@ function homePrompt() {
   const profile = account();
   const initial = escapeHtml((profile?.displayName || profile?.handle || 'You').charAt(0).toUpperCase());
   const src = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
-  return `<button type="button" class="prompt" data-act="compose"><span class="avatar" data-initial="${initial}">${src}</span><span>What's up?</span></button>`;
+  const face = `<span class="avatar" data-initial="${initial}">${src}</span>`;
+  const active = homeActive();
+  if (active?.kind !== 'lane' || active.type !== 'feed') {
+    return `<button type="button" class="prompt" data-act="compose">${face}<span>What's up?</span></button>`;
+  }
+  const name = homeLanes.find((item) => item.value === active.value)?.label || 'This feed';
+  const knownGold = /\/app\.bsky\.feed\.generator\/verified-news$/.test(active.value || '');
+  const gate = knownGold || goldFeedGate(homeSample);
+  const gold = profile?.verification?.verifiedStatus === 'valid';
+  if (gate && !gold) {
+    return `<div class="prompt prompt-note" role="note">${face}<span class="prompt-copy"><span>${escapeHtml(name)}</span><small>This feed shows gold-verified accounts. A post from here would not appear.</small></span></div>`;
+  }
+  const note = gate
+    ? `${name} shows gold-verified accounts, and it still chooses which posts appear.`
+    : `${name} adds posts on its own. This goes on your profile.`;
+  return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>What's up?</span><small>${escapeHtml(note)}</small></span></button>`;
 }
 
 function sortHtml() {
@@ -1587,6 +1609,24 @@ function paintChatTitle(actor) {
   measureHead();
 }
 
+function fillChatTitle(actor, token) {
+  if (!actor) return;
+  paintChatTitle(actor);
+  if (!chatTitleNeedsProfile(actor)) return;
+  const who = actor.did || actor.handle;
+  if (!who) return;
+  api.getProfile(who).then((profile) => {
+    if (token !== generation || !profile?.displayName) return;
+    paintChatTitle({
+      ...actor,
+      did: profile.did || actor.did,
+      handle: profile.handle || actor.handle,
+      displayName: profile.displayName,
+      avatar: actor.avatar || profile.avatar || '',
+    });
+  }).catch(() => {});
+}
+
 function otherMember(convo, messages) {
   const mine = myDid();
   const listed = (convo?.members || []).find((member) => member?.did && member.did !== mine);
@@ -1732,7 +1772,7 @@ async function showMessages(convoId) {
     }
     const cached = convoById.get(convoId) || null;
     const cachedOther = otherMember(cached, null);
-    if (cachedOther) paintChatTitle(cachedOther);
+    if (cachedOther) fillChatTitle(cachedOther, token);
     let loadError = null;
     const [data, convoWrap] = await Promise.all([
       api.getConvo(convoId).catch((error) => { loadError = error; return null; }),
@@ -1760,7 +1800,7 @@ async function showMessages(convoId) {
     styleHold.delete('chat-text');
     const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
-    if (other) paintChatTitle(other);
+    if (other) fillChatTitle(other, token);
     else {
       const label = requested ? 'Message request' : 'Chat';
       $('title').textContent = label;

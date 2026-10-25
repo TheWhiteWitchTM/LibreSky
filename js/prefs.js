@@ -418,6 +418,32 @@ function followed(actor, did) {
   return Boolean(actor.viewer?.following);
 }
 
+const GOLD_FEED_ACTORS = 8;
+const GOLD_FEED_RATIO = 0.85;
+
+function rememberFeedActor(actor, seen) {
+  const did = actor?.did;
+  if (!did || seen.has(did)) return;
+  seen.set(did, actor);
+}
+
+// Custom feeds have no "who may post" field. A page where almost every
+// account has a Bluesky verification (the gold check) is the signal News uses.
+export function goldFeedGate(items) {
+  const seen = new Map();
+  for (const item of items || []) {
+    rememberFeedActor(item?.post?.author, seen);
+    rememberFeedActor(item?.reason?.by, seen);
+  }
+  if (seen.size < GOLD_FEED_ACTORS) return null;
+  let gold = 0;
+  for (const actor of seen.values()) {
+    if (actor?.verification?.verifiedStatus === 'valid') gold += 1;
+  }
+  if (gold / seen.size < GOLD_FEED_RATIO) return null;
+  return { actors: seen.size, gold };
+}
+
 export function homeAllows(item, prefs, did = '') {
   const reason = String(item?.reason?.$type || '');
   const repost = reason.includes('reasonRepost');

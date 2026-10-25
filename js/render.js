@@ -796,12 +796,33 @@ export function callConvoHtml(convo, me) {
   return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
 }
 
+function bareHandle(actor) {
+  return String(actor?.handle || '').trim().replace(/^@/, '');
+}
+
+// The page title is the display name. A handle, with or without @, is long
+// enough to push that name out of the header.
+export function chatTitleName(actor) {
+  if (!actor) return 'Chat';
+  if (deletedAccount(actor)) return 'Deleted account';
+  const handle = bareHandle(actor);
+  const display = String(actor.displayName || '').trim().replace(/^@/, '');
+  if (display && display.toLowerCase() !== handle.toLowerCase()) return display;
+  const local = handle.split('.')[0];
+  return local || 'Chat';
+}
+
+export function chatTitleNeedsProfile(actor) {
+  if (!actor || deletedAccount(actor)) return false;
+  if (!actor.did && !actor.handle) return false;
+  const handle = bareHandle(actor);
+  const display = String(actor.displayName || '').trim().replace(/^@/, '');
+  return !display || display.toLowerCase() === handle.toLowerCase();
+}
+
 export function chatHeaderHtml(actor) {
   if (!actor) return '';
-  const gone = deletedAccount(actor);
-  const display = String(actor.displayName || '').trim();
-  const handle = String(actor.handle || '').trim();
-  const name = gone ? 'Deleted account' : (display || handle || 'Chat');
+  const name = chatTitleName(actor);
   return `${accountIcon(actor)}<a href="${profileHash(actor)}">${escapeHtml(name)}</a>`;
 }
 
