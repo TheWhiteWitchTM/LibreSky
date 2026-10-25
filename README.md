@@ -34,7 +34,7 @@ LibreSky is a Bluesky client you open and stay in. Home is waiting. Discover is 
     <td align="center" width="20%"><h3>AI</h3><code>@ai</code> and <code>@si</code> ask the account you save. The post box can rewrite a draft.</td>
     <td align="center" width="20%"><h3>Voice</h3>Call from an open chat, the Calls page, or someone else’s profile. Mute stays on your side.</td>
     <td align="center" width="20%"><h3>Video</h3>The picture travels between the two browsers. The camera can turn off, and a timer runs once you are connected.</td>
-    <td align="center" width="20%"><h3>Chat</h3>Messages stay on your Bluesky account. A new chat waits as a request until you accept it.</td>
+    <td align="center" width="20%"><h3>Chat</h3>Messages stay on your Bluesky account. A chat opens on the latest message. The mic dictates into the box. A new chat waits as a request until you accept it.</td>
   </tr>
 </table>
 
@@ -62,7 +62,7 @@ Help and Config follow the page. On Home they tune the feed. On a thread they se
 
 ## Write it
 
-The composer takes images, a video, a link, a GIF, emoji, and a feed, list, or starter pack. Bold, italic, strikethrough, and monospace sit on the bar. The mic types what you say, in Chrome and Edge. Tab finishes a word, an `@` name, or a `#` tag.
+The composer takes images, a video, a link, a GIF, emoji, and a feed, list, or starter pack. Bold, italic, strikethrough, and monospace sit on the bar. The mic types what you say, in a post or a chat, in Chrome and Edge. Tab finishes a word, an `@` name, or a `#` tag.
 
 A link that stands alone on the last line becomes the card. Edit posts the new version and removes the old one. Likes and replies stay on the original. An unsent draft follows the Bluesky account you are signed in to.
 

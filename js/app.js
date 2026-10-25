@@ -161,6 +161,7 @@ let profileFeatured = new Set();
 let profileTab = { actor: '', tab: 'posts' };
 const navStack = [];
 let dictateRec = null;
+let dictateTargetId = '';
 const LANE_CAP = 20;
 const CHEVRON_LEFT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M14.5 5.5 8 12l6.5 6.5"/></svg>';
 const CHEVRON_RIGHT = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M9.5 5.5 16 12l-6.5 6.5"/></svg>';
@@ -1672,9 +1673,29 @@ function watchOpenChat(convoId, peerDid, token) {
   }, 4000);
 }
 
+function pinChatEnd(list) {
+  if (!list) return;
+  const snap = () => {
+    list.scrollTop = list.scrollHeight;
+  };
+  snap();
+  requestAnimationFrame(() => {
+    snap();
+    requestAnimationFrame(snap);
+  });
+  list.querySelectorAll('img').forEach((img) => {
+    if (img.complete) return;
+    img.addEventListener('load', () => {
+      const near = list.scrollHeight - list.scrollTop - list.clientHeight < 160;
+      if (near) snap();
+    }, { once: true });
+  });
+}
+
 async function showMessages(convoId) {
   const token = ++generation;
   stopChatTimer();
+  if (dictateTargetId === 'chat-text') stopDictate();
   setChrome({ title: 'Messages', nav: 'messages', back: true });
   if (!signedIn()) {
     $('view').innerHTML = emptyHtml('Messages', 'Sign in to open your Bluesky chats.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
@@ -1739,19 +1760,20 @@ async function showMessages(convoId) {
     $('view').dataset.convoStatus = requested ? 'request' : 'accepted';
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
+    const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
     const header = chatHeaderHtml(other) || `<div class="chat-head"><span class="chat-with"><span><strong>${requested ? 'Message request' : 'Chat'}</strong></span></span></div>`;
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
-    $('view').innerHTML = `${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form>`;
+    $('view').innerHTML = `<section class="chat-thread">${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form></section>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
     applyFieldLanguage(area);
     fitChatInput(area);
-    area?.focus();
-    const scroller = $('view').querySelector('.messages');
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    window.scrollTo(0, 0);
+    pinChatEnd($('view')?.querySelector('.messages'));
+    area?.focus({ preventScroll: true });
     api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
     watchOpenChat(convoId, other?.did || '', token);
   } catch (error) {
@@ -5451,11 +5473,25 @@ function rememberDictateCaret(area) {
   };
 }
 
+function dictateMic(area) {
+  return area?.id === 'chat-text' ? $('chat-mic') : $('compose-mic');
+}
+
+function dictateLimit(area) {
+  return area?.id === 'chat-text' ? 1000 : 2000;
+}
+
+function dictateLang(area) {
+  if (area?.id === 'compose-text') return ($('compose')?._langs || languagePrefs().posts)[0] || area.lang || 'en';
+  return languagePrefs().posts[0] || area?.lang || 'en';
+}
+
 function stopDictate() {
   const rec = dictateRec;
   dictateRec = null;
-  const mic = $('compose-mic');
-  if (mic) mic.setAttribute('aria-pressed', 'false');
+  dictateTargetId = '';
+  $('compose-mic')?.setAttribute('aria-pressed', 'false');
+  $('chat-mic')?.setAttribute('aria-pressed', 'false');
   if (!rec) return;
   rec.onresult = null;
   rec.onerror = null;
@@ -5463,22 +5499,24 @@ function stopDictate() {
   try { rec.stop(); } catch { /* already stopped */ }
 }
 
-function toggleDictate() {
-  if (dictateRec) {
+function toggleDictate(area) {
+  const field = area?.id === 'chat-text' || area?.id === 'compose-text' ? area : null;
+  if (dictateRec && (!field || dictateTargetId === field.id)) {
     stopDictate();
     return;
   }
+  if (dictateRec) stopDictate();
+  if (!field) return;
+  const kind = field.id === 'chat-text' ? 'message' : 'post';
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Ctor) {
-    toast('Chrome or Edge can dictate a post.');
+    toast(`Chrome or Edge can dictate a ${kind}.`);
     return;
   }
-  const area = $('compose-text');
-  if (!area) return;
-  const start = dictateCaret?.start ?? area.selectionStart ?? area.value.length;
-  const end = dictateCaret?.end ?? area.selectionEnd ?? start;
-  const before = area.value.slice(0, Math.min(start, area.value.length));
-  const after = area.value.slice(Math.min(end, area.value.length));
+  const start = dictateCaret?.start ?? field.selectionStart ?? field.value.length;
+  const end = dictateCaret?.end ?? field.selectionEnd ?? start;
+  const before = field.value.slice(0, Math.min(start, field.value.length));
+  const after = field.value.slice(Math.min(end, field.value.length));
   const lead = before && !/\s$/.test(before) ? `${before} ` : before;
   const tail = after.replace(/^\s+/, '');
   const finals = [];
@@ -5486,12 +5524,12 @@ function toggleDictate() {
   try {
     rec = new Ctor();
   } catch {
-    toast('Chrome or Edge can dictate a post.');
+    toast(`Chrome or Edge can dictate a ${kind}.`);
     return;
   }
   rec.continuous = true;
   rec.interimResults = true;
-  rec.lang = ($('compose')?._langs || languagePrefs().posts)[0] || 'en';
+  rec.lang = dictateLang(field);
   rec.onresult = (event) => {
     let interim = '';
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
@@ -5500,12 +5538,12 @@ function toggleDictate() {
       else interim += piece;
     }
     const words = `${finals.join(' ')} ${interim}`.replace(/\s+/g, ' ').trim();
-    const next = `${lead}${words}${words && tail ? ' ' : ''}${tail}`.slice(0, 2000);
-    area.value = next;
-    const caret = Math.min(`${lead}${words}`.length, area.value.length);
-    area.setSelectionRange(caret, caret);
-    rememberDictateCaret(area);
-    area.dispatchEvent(new Event('input', { bubbles: true }));
+    const next = `${lead}${words}${words && tail ? ' ' : ''}${tail}`.slice(0, dictateLimit(field));
+    field.value = next;
+    const caret = Math.min(`${lead}${words}`.length, field.value.length);
+    field.setSelectionRange(caret, caret);
+    rememberDictateCaret(field);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   };
   rec.onerror = (event) => {
     const code = event?.error || '';
@@ -5517,10 +5555,12 @@ function toggleDictate() {
   rec.onend = () => {
     if (dictateRec !== rec) return;
     dictateRec = null;
-    $('compose-mic')?.setAttribute('aria-pressed', 'false');
+    dictateTargetId = '';
+    dictateMic(field)?.setAttribute('aria-pressed', 'false');
   };
   dictateRec = rec;
-  $('compose-mic')?.setAttribute('aria-pressed', 'true');
+  dictateTargetId = field.id;
+  dictateMic(field)?.setAttribute('aria-pressed', 'true');
   try {
     rec.start();
   } catch {
@@ -8450,7 +8490,8 @@ async function onClick(event) {
   }
   if (act === 'dictate') {
     event.preventDefault();
-    toggleDictate();
+    const button = event.target.closest('[data-act="dictate"]');
+    toggleDictate(button?.closest('#chat-form') ? $('chat-text') : $('compose-text'));
     return;
   }
   if (act && await handleChromeAct(act, event)) return;
@@ -9764,6 +9805,7 @@ function bind() {
       paintFieldHighlight(area, $('compose-highlight'));
       paintStyleButtons(area);
     } else if (area?.id === 'chat-text') {
+      rememberDictateCaret(area);
       paintFieldHighlight(area, $('chat-highlight'));
       paintStyleButtons(area);
     } else if (area?.id === 'ai-text') paintFieldHighlight(area, $('ai-highlight'));
@@ -9850,10 +9892,12 @@ function bind() {
   $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
   document.addEventListener('keydown', onKey);
   $('back').addEventListener('click', () => goBack());
-  $('compose-mic')?.addEventListener('pointerdown', (event) => {
+  document.addEventListener('pointerdown', (event) => {
+    const mic = event.target.closest?.('[data-act="dictate"]');
+    if (!mic) return;
     event.preventDefault();
-    rememberDictateCaret($('compose-text'));
-  });
+    rememberDictateCaret(mic.closest('#chat-form') ? $('chat-text') : $('compose-text'));
+  }, true);
   $('account-btn').addEventListener('click', () => {
     if (!signedIn()) requireSignIn();
     else toggleMenu($('account-btn'), accountMenuItems());

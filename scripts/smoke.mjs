@@ -898,6 +898,13 @@ for (const zipName of expectedZips) {
   }
 }
 assert.match(appSource, /<textarea id="chat-text"/);
+assert.match(appSource, /id="chat-mic"/);
+assert.match(appSource, /class="chat-thread"/);
+assert.match(appSource, /pinChatEnd/);
+assert.match(appSource, /dictateLimit\(field\)/);
+const appCss = await readFile(path.join(root, 'css/app.css'), 'utf8');
+assert.match(appCss, /\.chat-thread > \.messages/);
+assert.match(await readFile(path.join(root, 'js/icons.js'), 'utf8'), /mic:/);
 assert.match(appSource, /data-act="follow-back"/);
 assert.doesNotMatch(appSource.slice(appSource.indexOf('async function followAllBack'), appSource.indexOf('async function markEveryChatRead')), /confirm\(/);
 assert.match(appSource, /id="new-chat"/);

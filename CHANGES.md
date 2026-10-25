@@ -6,6 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 25 October 2026
 
+- A chat opens on the latest message. The list scrolls inside the screen, and the writing box stays underneath.
+- The mic beside Send dictates a chat message, the same way the mic beside Post dictates a post.
 - Calls sits under Chat in the sidebar.
 - The … on Search sits on the topic row, in the same place as Home and Profile. Edit tabs hides a topic, adds a search you name, and reorders the row. For you stays.
 - Settings, under Follows, can keep a new follow off the bell and the All list. The Follows tab still lists them.

@@ -27,6 +27,7 @@ const PATHS = {
   link: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M10.2 13.4a3.6 3.6 0 0 0 5.1.2l1.8-1.8a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M13.8 10.6a3.6 3.6 0 0 0-5.1-.2l-1.8 1.8a3.6 3.6 0 0 0 5.1 5.1l1-1"/>',
   gear: '<path fill="currentColor" d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.3 7.3 0 0 0-1.7-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.59-1.7.98l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .6.22l2.49-1c.53.4 1.09.73 1.7.98l.38 2.65c.05.24.25.42.49.42h4c.24 0 .44-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.7-.98l2.49 1a.5.5 0 0 0 .6-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z"/>',
   speaker: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 9.5h3.2L11 6.2v11.6L7.2 14.5H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M14.2 9.2a3.2 3.2 0 0 1 0 5.6M16.6 7a6 6 0 0 1 0 10"/>',
+  mic: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 11.5a5 5 0 0 0 10 0M12 16.5V20M9 20h6"/>',
 };
 
 export function icon(name) {
