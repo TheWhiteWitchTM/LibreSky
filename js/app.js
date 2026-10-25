@@ -1278,7 +1278,7 @@ async function showHome(active) {
     else if (lane.type === 'list') data = await api.getListFeed(lane.value);
     else data = await api.getFeed(lane.value);
     if (token !== generation) return;
-    const banner = homeLead(following ? homePrompt() : '');
+    const banner = homeLead(homePrompt());
     const raw = data.feed || [];
     const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
@@ -1304,7 +1304,8 @@ async function showHome(active) {
       const nextItems = following ? visibleHome(nextRaw) : discover ? filterDiscover(nextRaw) : lane.type === 'feed' ? visibleFeed(nextRaw, lane.value) : nextRaw;
       if (following) noteHome(nextRaw);
       if (!(nextItems || []).length && !page.cursor && !$('view')?.querySelector('.post')) {
-        $('view').innerHTML = empty;
+        const lead = $('view')?.querySelector('.home-lead')?.outerHTML || '';
+        $('view').innerHTML = lead + empty;
         pagerFor(null, more);
         return;
       }

@@ -1186,6 +1186,8 @@ assert.match(richText('Say teh now', null, { links: false, breaks: false, typos:
 assert.match(index, /class="login-name">LibreSky/);
 assert.match(index, /Browse without signing in/);
 assert.match(appSource, /id="ai-inline"/);
+assert.match(appSource, /const banner = homeLead\(homePrompt\(\)\)/);
+assert.doesNotMatch(appSource, /following \? homePrompt\(\)/);
 assert.match(appSource, /classList.toggle\('warn'/);
 assert.match(appSource, /toggleMenu\(anchor, items\)/);
 assert.equal(postInLanguages({ record: { langs: ['en-US'] } }, ['en']), true);
