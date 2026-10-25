@@ -571,6 +571,18 @@ export function withoutTrailingUrl(text) {
   return head;
 }
 
+// A last-line link becomes the card and is left out of the 300-character count.
+// Images, video, and GIFs already use that embed, so the link stays in the
+// post and counts as its short form. A quote can sit beside images or video,
+// and that line is still left out.
+export function omitTrailingPostLink(text, state = {}) {
+  const url = trailingUrl(text);
+  if (!url) return false;
+  if (state.dismissed || state.missed || state.gif || state.quote) return false;
+  if (state.images || state.video) return state.card === 'quote';
+  return true;
+}
+
 export function applyShortLinks(text) {
   const source = String(text ?? '');
   const re = httpUrlRe();

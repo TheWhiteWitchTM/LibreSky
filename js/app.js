@@ -55,7 +55,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -4927,7 +4927,7 @@ let linkEpoch = 0;
 let linkTimer = 0;
 
 function syncComposerLink(dialog, value) {
-  if (!dialog || dialog._gif || dialog._video) return;
+  if (!dialog || dialog._gif) return;
   const url = trailingUrl(value);
   if (dialog._linkWatch === url) return;
   const previous = dialog._linkWatch || '';
@@ -4943,22 +4943,25 @@ function syncComposerLink(dialog, value) {
   box.innerHTML = '';
 }
 
-function linkCanAttach(dialog, url) {
-  if (!dialog || !url) return false;
-  if (dialog._gif || dialog._video) return false;
-  if (dialog.dataset.quote || dialog._attach) return false;
-  if (dialog._dismissedUrl === url || dialog._linkMiss === url) return false;
-  return true;
-}
-
-// Last-line card URLs are left out. Every other link counts as its short form.
-function composerBody(dialog, value) {
+function linkState(dialog, value) {
   const url = trailingUrl(value);
   if (dialog?._linkMiss && dialog._linkMiss !== url) dialog._linkMiss = '';
-  if (!linkCanAttach(dialog, url)) return value;
-  const images = (dialog._files || []).length > 0;
-  const card = dialog._card;
-  if (card?.sourceUrl === url && card.kind === 'external' && images) return value;
+  const card = dialog?._card?.sourceUrl === url ? dialog._card.kind : '';
+  return {
+    url,
+    images: (dialog?._files || []).length > 0,
+    video: Boolean(dialog?._video),
+    gif: Boolean(dialog?._gif),
+    quote: Boolean(dialog?.dataset.quote || dialog?._attach?.uri),
+    dismissed: Boolean(url && dialog?._dismissedUrl === url),
+    missed: Boolean(url && dialog?._linkMiss === url),
+    card,
+  };
+}
+
+// Last-line card URLs are left out. A link that has to stay in the post counts as its short form.
+function composerBody(dialog, value) {
+  if (!omitTrailingPostLink(value, linkState(dialog, value))) return value;
   return withoutTrailingUrl(value);
 }
 
@@ -5385,7 +5388,7 @@ async function refreshLinkPreview() {
   const dialog = $('compose');
   const box = $('compose-link');
   if (!dialog?.open || !box) return;
-  if (dialog._gif || dialog._video) return;
+  if (dialog._gif) return;
   const url = trailingUrl($('compose-text').value);
   if (!url || dialog.dataset.quote || dialog._attach || dialog._dismissedUrl === url) {
     linkEpoch += 1;
@@ -5404,7 +5407,7 @@ async function refreshLinkPreview() {
   }
   const token = ++linkEpoch;
   const images = (dialog._files || []).length > 0;
-  if (!images) {
+  if (!images && !dialog._video) {
     box.hidden = false;
     box.innerHTML = `<div class="card"><span class="card-body"><span class="domain">${escapeHtml(hostOf(url))}</span><strong>Loading preview…</strong></span></div>`;
   }
@@ -5560,21 +5563,29 @@ async function publish(event) {
     }
     let link = null;
     const url = trailingUrl(text);
-    let card = dialog._card;
+    let card = dialog._card?.sourceUrl === url ? dialog._card : null;
     let linkPlan = null;
+    const media = files.length > 0 || Boolean(draftVideo);
     if (gif && !files.length && !quote) linkPlan = { kind: 'gif' };
-    else if (url && !draftVideo && dialog._dismissedUrl !== url && !quote && dialog._linkMiss !== url) {
-      if (!card || card.sourceUrl !== url) {
+    else if (url && !gif && dialog._dismissedUrl !== url && !quote && dialog._linkMiss !== url) {
+      if (!card) {
         try { card = await api.inspectLink(url); } catch { card = null; }
         if (card) card.sourceUrl = url;
       }
       if (card?.kind === 'quote' && card.post?.uri) {
         quote = { uri: card.post.uri, cid: card.post.cid };
         text = withoutTrailingUrl(text).trim();
-      } else if (card?.kind === 'external' && !files.length) {
+        dialog._card = card;
+        dialog._linkMiss = '';
+      } else if (card?.kind === 'external' && !media) {
         linkPlan = { kind: 'external', card };
         text = withoutTrailingUrl(text).trim();
-      } else if (!card) {
+        dialog._card = card;
+        dialog._linkMiss = '';
+      } else if (card) {
+        dialog._card = card;
+        dialog._linkMiss = '';
+      } else {
         dialog._card = null;
         dialog._keptExternal = null;
         dialog._linkMiss = url;
@@ -6444,17 +6455,17 @@ async function addVideo(file) {
   }
   if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
   dialog._video = { file, url, alt: '', aspectRatio: meta.aspectRatio };
-  dialog._card = null;
   closePicker();
   renderVideo();
   paintLinkPreview();
+  scheduleLinkPreview();
 }
 
 function openLinkPicker(button) {
   const box = preparePicker('link', button);
   if (!box) return;
   box.innerHTML = pickerShell('Link', {
-    body: '<div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. Delete the line to remove the preview.</p>',
+    body: '<div class="link-add"><input id="link-url" placeholder="https://" inputmode="url" autocomplete="off" spellcheck="false"><button type="button" class="primary small" data-act="add-link">Add</button></div><p class="picker-note">A link on the last line is the preview. That line does not count toward the 300 characters. With an image, a video, or a GIF, the line stays in the post and counts.</p>',
   });
   $('link-url')?.focus();
 }
