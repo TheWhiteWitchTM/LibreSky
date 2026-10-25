@@ -7,7 +7,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 ## 25 October 2026
 
 - Calls sits under Chat in the sidebar.
-- Search has the same … menu as Home and Profile. Save a search term, name it, hide a topic, and put the row in the order you want. For you stays.
+- The … on Search sits on the topic row, in the same place as Home and Profile. Edit tabs hides a topic, adds a search you name, and reorders the row. For you stays.
 - Settings, under Follows, can keep a new follow off the bell and the All list. The Follows tab still lists them.
 - The bar after a post matches the new-posts pill. A post includes View and stays up longer.
 - Home tabs and profile links can be removed. Remove on Home writes the row. Remove on a profile takes that attached link off.

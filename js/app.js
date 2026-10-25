@@ -919,13 +919,13 @@ function paintSearchTabs(query) {
     items = searchTabItems('', trends);
   }
   forgetStrips(host);
-  host.innerHTML = tabStrip(items);
+  host.innerHTML = tabStrip(items, { menuAct: 'search-menu', menuLabel: 'Search menu' });
   watchStrips(host);
 }
 
 function searchPageHtml(query) {
   const controls = query ? sortHtml() : '';
-  return `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><button type="button" class="tab-menu" data-act="search-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Search menu">${icon('more')}</button></div><div id="search-tabs"></div><div id="search-controls">${controls}</div></form><div id="search-results"></div>`;
+  return `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-tabs"></div><div id="search-controls">${controls}</div></form><div id="search-results"></div>`;
 }
 
 function preferLive(trends) {
@@ -2667,10 +2667,11 @@ function forgetCurrentSearch() {
 function openSearchMenu(anchor) {
   const query = currentSearchQuery();
   const saved = query && searchTabs().some((item) => item.kind === 'term' && item.q.toLowerCase() === query.toLowerCase());
-  const items = [];
+  const items = [
+    { id: 'edit-searches', label: 'Edit tabs' },
+    { id: 'search-add-open', label: 'Add a search' },
+  ];
   if (query) items.push({ id: saved ? 'search-forget' : 'search-save', label: saved ? 'Remove this search' : 'Save this search' });
-  else items.push({ id: 'search-add-open', label: 'Add a search' });
-  items.push({ id: 'edit-searches', label: 'Edit tabs' });
   toggleMenu(anchor, items);
 }
 
@@ -4898,7 +4899,7 @@ function tourStepList() {
     {
       kicker: 'Search',
       title: 'Find people and posts',
-      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. The … on the search bar stores topics and search terms on that row.',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. The … on the topic row edits that row and adds a search of your own.',
       targets: ['#rail-q', '[data-nav="search"]'],
     },
     {

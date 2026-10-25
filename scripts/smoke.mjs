@@ -1015,6 +1015,10 @@ assert.match(index, /data-nav="messages"[\s\S]*data-nav="calls"[\s\S]*data-nav="
 assert.match(index, /id="searches"/);
 assert.match(appSource, /Save this search/);
 assert.match(appSource, /edit-searches/);
+const paintSearch = appSource.slice(appSource.indexOf('function paintSearchTabs'), appSource.indexOf('function searchPageHtml'));
+assert.match(paintSearch, /menuAct: 'search-menu'/);
+const searchPageFn = appSource.slice(appSource.indexOf('function searchPageHtml'), appSource.indexOf('function preferLive'));
+assert.doesNotMatch(searchPageFn, /search-menu/);
 const savedTabs = normalizeSearchTabs([
   { kind: 'term', id: 'abcd12', label: '  Cats  ', q: '  cats ' },
   { kind: 'topic', id: 'news' },
