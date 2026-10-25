@@ -707,9 +707,17 @@ img { max-width: 100%; }
   font-size: 15px;
 }
 .search-page { padding: 12px 16px 0; }
+#search-form.search-page {
+  position: sticky;
+  top: calc(var(--top-h, 57px) + var(--head-h, 53px));
+  z-index: 3;
+  background: var(--bg);
+}
 .search-page .search { margin: 0; }
 .search-bar { display: flex; align-items: center; gap: 8px; }
 .search-bar .search { flex: 1; margin-top: 0; }
+.search-bar .tab-menu { margin: 0; }
+.search-page .tab-strip { margin: 8px -16px 0; border-bottom: 1px solid var(--border); }
 .search-note { padding: 8px 16px 0; }
 .trend {
   display: grid;
@@ -2833,14 +2841,14 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
 .oss span:last-child { color: var(--text-2); font-size: 14px; line-height: 1.4; }
 .oss-license { display: inline-flex; margin: 0 16px 16px; color: var(--blue); font-weight: 800; }
 #about h2, #legal h2, #legal h3 { margin: 8px 16px; }
-#help, #lanes {
+#help, #lanes, #searches {
   width: min(480px, calc(100vw - 24px));
   max-height: min(720px, calc(100dvh - 24px));
   overflow: auto;
 }
-#help form, #lanes form { padding: 8px 16px 18px; }
-#help h2, #lanes h2 { margin: 8px 0; }
-#help h3, #lanes h3 { margin: 16px 0 6px; font-size: 16px; }
+#help form, #lanes form, #searches form { padding: 8px 16px 18px; }
+#help h2, #lanes h2, #searches h2 { margin: 8px 0; }
+#help h3, #lanes h3, #searches h3 { margin: 16px 0 6px; font-size: 16px; }
 #help p, .lane-note { margin: 0 0 10px; }
 #help .oss, #help .about-links { margin-left: 0; margin-right: 0; }
 .lane-strip { margin: 0 -16px 8px; border-bottom: 1px solid var(--border); }
@@ -2902,6 +2910,19 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
 .lane-move:disabled { opacity: 0.35; }
 .lane-move .ico { width: 16px; height: 16px; }
 .lanes-save { width: 100%; margin-top: 16px; }
+.search-fields { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.search-fields input, .search-add input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--search);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+}
+.search-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.search-add input { flex: 1 1 140px; width: auto; }
+.search-add .primary { flex: none; }
 .lane-row .danger.mini { flex: none; }
 #call { width: min(420px, calc(100vw - 24px)); }
 .call-stage { position: relative; padding: 16px; display: flex; flex-direction: column; gap: 12px; }

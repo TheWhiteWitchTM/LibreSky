@@ -176,9 +176,9 @@
       <a class="nav-link" data-nav="search" href="#/search" aria-label="Search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg><span class="label">Search</span></a>
       <a class="nav-link" data-nav="notifications" href="#/notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg><span class="label">Notifications</span><span class="badge" id="notif-badge" data-badge="notif" hidden>0</span></a>
       <a class="nav-link" data-nav="messages" href="#/messages" aria-label="Chat"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg><span class="label">Chat</span><span class="badge" id="chat-badge" data-badge="chat" hidden>0</span></a>
+      <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
       <a class="nav-link" data-nav="bookmarks" href="#/bookmarks" aria-label="Bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
       <a class="nav-link" data-nav="profile" data-no-hover href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
-      <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
       <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI Assist">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8 13.6 8 19 9.2 13.6 10.8 12 16.2 10.4 10.8 5 9.2 10.4 8 12 2.8zm6.2 9.2.7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1z"/></svg>
         <span class="label">AI Assist</span>
@@ -520,6 +520,8 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <p>Following is people you follow. Discover is what is happening. Scroll the row for lists and feeds you add. Arrows show when there is more off to the side. The … on that row opens Edit tabs. Remove takes a list or a saved feed off the row.</p>
       <h3>Profile</h3>
       <p>Posts, Replies, Media, and Likes use that same row as Home. Feeds, lists, and starter packs you attach sit on that row, and Remove takes one off. The … there is the menu for that profile.</p>
+      <h3>Search</h3>
+      <p>The row under the search bar holds topics and searches you save. The … on the search bar opens Edit tabs. For you stays. Remove takes a topic or a saved search off the row. Add a search term, and give it a name if you want one. Move, then Save, to change the order.</p>
       <h3>Writing</h3>
       <p>The mic beside Post types what you say into the box. Tap it again to stop. Chrome and Edge can dictate.</p>
       <p>The spark on the writing bar asks AI Assist to rewrite the draft. Use this keeps the rewrite. Dismiss leaves your words. The draft is sent only to the provider you picked.</p>
@@ -563,6 +565,17 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
     </form>
   </dialog>
 
+  <dialog id="searches">
+    <form>
+      <div class="compose-bar">
+        <h2>Search</h2>
+        <button type="button" class="text-btn" id="searches-close">Close</button>
+      </div>
+      <p class="dim lane-note">For you stays. Remove takes a topic or a saved search off this row. Add a search term and name it if you want. Move, then Save, to change the order.</p>
+      <div id="searches-body"></div>
+    </form>
+  </dialog>
+
   <dialog id="legal">
     <form method="dialog">
       <div class="compose-bar">
@@ -572,7 +585,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <article id="legal-privacy">
         <h3>Privacy</h3>
         <p>LibreSky runs in this browser. Sign in with Bluesky uses OAuth. The password is entered on Bluesky’s page, and LibreSky does not receive it.</p>
-        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. The session cannot follow you: an app password is shown once and is not a vault, and an OAuth sign-in is tied to this browser. Home feed choices, thread order, and muted words are saved with Bluesky’s private preferences, so the official app can use the feed and thread choices and the muted words. Muted words also have a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
+        <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. The session cannot follow you: an app password is shown once and is not a vault, and an OAuth sign-in is tied to this browser. Home feed choices, thread order, and muted words are saved with Bluesky’s private preferences, so the official app can use the feed and thread choices and the muted words. Muted words also have a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, saved searches, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
         <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call sends the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the call ends. The audio and video go directly between the two browsers. They are not sent to LibreSky’s site.</p>
         <p>An unsent post draft (libresky.draft), words you finish with Tab (libresky.words), and account AI keys (libresky.ai) are saved on your account as private preferences, with a copy for the signed-in account in this browser. Private preferences travel with the login. They are not public posts. Local AI (libresky.localAi) stays in this browser, on this computer. A key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check, Rewrite in the post box, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@google.com">thewhitewitchtm@google.com</a>.</p>

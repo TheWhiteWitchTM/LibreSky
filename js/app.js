@@ -81,10 +81,13 @@ import {
   saveFeedView,
   saveFollowDeskPrefs,
   saveSearchPrefs,
+  saveSearchTabs,
   saveThreadPrefs,
   saveVoicePrefs,
+  SEARCH_TOPICS,
   searchAllows,
   searchPrefs,
+  searchTabs,
   setPrefsError,
   sortThreadReplies,
   syncClientPrefs,
@@ -102,16 +105,22 @@ let pager = null;
 let selected = -1;
 let searchSort = 'latest';
 let exploreTab = 'foryou';
+let searchDraft = null;
+let searchSaveChain = Promise.resolve();
 const trendCache = { at: 0, list: null, pending: null };
-const EXPLORE_TABS = [
-  { id: 'foryou', label: 'For you', match: () => true },
-  { id: 'news', label: 'News', match: (trend) => trend.category === 'news' },
-  { id: 'politics', label: 'Politics', match: (trend) => trend.category === 'politics' },
-  { id: 'sports', label: 'Sports', match: (trend) => trend.category === 'sports' },
-  { id: 'entertainment', label: 'Entertainment', match: (trend) => trend.category === 'entertainment' },
-  { id: 'culture', label: 'Culture', match: (trend) => trend.category === 'culture' },
-  { id: 'tech', label: 'Tech', match: (trend) => trend.category === 'science-tech' || trend.category === 'tech' },
-];
+const EXPLORE_MATCH = {
+  foryou: () => true,
+  news: (trend) => trend.category === 'news',
+  politics: (trend) => trend.category === 'politics',
+  sports: (trend) => trend.category === 'sports',
+  entertainment: (trend) => trend.category === 'entertainment',
+  culture: (trend) => trend.category === 'culture',
+  tech: (trend) => trend.category === 'science-tech' || trend.category === 'tech',
+};
+const EXPLORE_TABS = SEARCH_TOPICS.map((topic) => ({
+  ...topic,
+  match: EXPLORE_MATCH[topic.id] || (() => false),
+}));
 let reportTarget = null;
 let chatTimer = 0;
 let badgeMemory = { notifications: null, chat: null, ring: '' };
@@ -275,7 +284,10 @@ function watchStrips(root) {
 }
 
 function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {}) {
-  const links = tabs.map((tab) => `<a role="tab" href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}">${escapeHtml(tab.label)}</a>`).join('');
+  const links = tabs.map((tab) => {
+    const explore = tab.explore ? ` data-explore="${escapeHtml(tab.explore)}"` : '';
+    return `<a role="tab" href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}"${explore}>${escapeHtml(tab.label)}</a>`;
+  }).join('');
   const menu = menuAct
     ? `<button type="button" class="tab-menu" data-act="${escapeHtml(menuAct)}" aria-label="${escapeHtml(menuLabel)}">${icon('more')}</button>`
     : '';
@@ -871,10 +883,49 @@ function loadTrends() {
   return trendCache.pending;
 }
 
-function exploreTabsHtml(trends) {
-  const visible = EXPLORE_TABS.filter((tab) => tab.id === 'foryou' || (trends || []).some(tab.match));
-  if (!visible.some((tab) => tab.id === exploreTab)) exploreTab = 'foryou';
-  return `<div class="explore-tabs" role="tablist">${visible.map((tab) => `<button type="button" role="tab" data-explore="${tab.id}" aria-selected="${exploreTab === tab.id ? 'true' : 'false'}">${escapeHtml(tab.label)}</button>`).join('')}</div>`;
+function searchTabItems(query, trends) {
+  const needle = String(query || '').trim().toLowerCase();
+  const known = Array.isArray(trends);
+  return searchTabs().filter((tab) => {
+    if (tab.kind === 'term') return true;
+    if (tab.id === 'foryou' || !known) return true;
+    const topic = EXPLORE_TABS.find((item) => item.id === tab.id);
+    return Boolean(topic && trends.some(topic.match));
+  }).map((tab) => {
+    if (tab.kind === 'term') {
+      return {
+        href: `#/search/${encodeURIComponent(tab.q)}`,
+        label: tab.label || tab.q,
+        on: Boolean(needle) && needle === tab.q.toLowerCase(),
+      };
+    }
+    const topic = EXPLORE_TABS.find((item) => item.id === tab.id);
+    return {
+      href: '#/search',
+      label: topic?.label || 'Topic',
+      explore: tab.id,
+      on: !needle && exploreTab === tab.id,
+    };
+  });
+}
+
+function paintSearchTabs(query) {
+  const host = $('search-tabs');
+  if (!host) return;
+  const trends = Array.isArray(trendCache.list) ? trendCache.list : null;
+  let items = searchTabItems(query, trends);
+  if (!String(query || '').trim() && !items.some((tab) => tab.on)) {
+    exploreTab = 'foryou';
+    items = searchTabItems('', trends);
+  }
+  forgetStrips(host);
+  host.innerHTML = tabStrip(items);
+  watchStrips(host);
+}
+
+function searchPageHtml(query) {
+  const controls = query ? sortHtml() : '';
+  return `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><button type="button" class="tab-menu" data-act="search-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Search menu">${icon('more')}</button></div><div id="search-tabs"></div><div id="search-controls">${controls}</div></form><div id="search-results"></div>`;
 }
 
 function preferLive(trends) {
@@ -1369,11 +1420,13 @@ async function showSearch(query, options = {}) {
   searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
   setChrome({ title: 'Search', nav: 'search' });
   const known = Array.isArray(trendCache.list) ? trendCache.list : null;
-  const controls = query ? sortHtml() : (known ? exploreTabsHtml(known) : '');
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = `<form class="search-page" id="search-form"><div class="search-bar"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label></div><div id="search-controls">${controls}</div></form><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = searchPageHtml(query);
+  paintSearchTabs(query);
+  const results = $('search-results');
+  if (results) results.innerHTML = placeholder;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -1383,8 +1436,7 @@ async function paintExplore(token) {
   try {
     const trends = await loadTrends();
     if (token !== generation) return;
-    const controls = $('search-controls');
-    if (controls) controls.innerHTML = exploreTabsHtml(trends);
+    paintSearchTabs('');
     const rows = trendBlock(visibleTrends(trends));
     $('search-results').innerHTML = rows || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.');
   } catch (error) {
@@ -1401,6 +1453,7 @@ async function paintSearchResults(token, query) {
       loadTrends().catch(() => []),
     ]);
     if (token !== generation) return;
+    paintSearchTabs(query);
     const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
     const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
     const matched = matchingTrends(trendList, query).slice(0, 5);
@@ -2406,6 +2459,218 @@ function openHomeTabMenu(anchor) {
   if (!active || active.kind === 'following') items.push({ id: 'home-settings', label: 'Home settings' });
   else if (active.kind === 'lane' && active.type === 'feed') items.push({ id: 'feed-settings', label: 'Feed settings' });
   else if (active.kind === 'lane' && active.type === 'list') items.push({ id: 'open-list', label: 'Open list' });
+  toggleMenu(anchor, items);
+}
+
+const SEARCH_TERM_CAP = 16;
+
+function newSearchId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function topicLabel(id) {
+  return SEARCH_TOPICS.find((item) => item.id === id)?.label || 'Topic';
+}
+
+function pinSearchDraft() {
+  if (!searchDraft) return;
+  const rest = searchDraft.filter((item) => !(item.kind === 'topic' && item.id === 'foryou'));
+  searchDraft = [{ kind: 'topic', id: 'foryou' }, ...rest];
+}
+
+function syncSearchDraft() {
+  const body = $('searches-body');
+  if (!body || !searchDraft) return;
+  body.querySelectorAll('[data-search-index]').forEach((row) => {
+    const item = searchDraft[Number(row.dataset.searchIndex)];
+    if (!item || item.kind !== 'term') return;
+    const label = row.querySelector('[data-search-label]');
+    const query = row.querySelector('[data-search-q]');
+    if (label) item.label = label.value;
+    if (query) item.q = query.value;
+  });
+}
+
+function paintSearchEditor() {
+  const body = $('searches-body');
+  if (!body || !searchDraft) return;
+  pinSearchDraft();
+  const showing = searchDraft;
+  const preview = showing.map((item, index) => {
+    const label = item.kind === 'term' ? (item.label || item.q || 'Search') : topicLabel(item.id);
+    const on = index === 0 ? ' aria-selected="true"' : '';
+    return `<span role="tab"${on}>${escapeHtml(label)}</span>`;
+  }).join('');
+  const rows = showing.map((item, index) => {
+    if (item.kind === 'topic' && item.id === 'foryou') {
+      return `<div class="lane-row" data-search-index="${index}"><span><strong>For you</strong><span class="handle">Stays on this row</span></span><span class="lane-lock">Stays</span></div>`;
+    }
+    const up = index <= 1 ? ' disabled' : '';
+    const down = index === showing.length - 1 ? ' disabled' : '';
+    const name = item.kind === 'term' ? (item.label || item.q || 'Search') : topicLabel(item.id);
+    const moves = `<span class="lane-moves"><button type="button" class="lane-move" data-act="search-up" data-index="${index}"${up} aria-label="Move ${escapeHtml(name)} left">${CHEVRON_LEFT}</button><button type="button" class="lane-move" data-act="search-down" data-index="${index}"${down} aria-label="Move ${escapeHtml(name)} right">${CHEVRON_RIGHT}</button><button type="button" class="danger mini" data-act="search-remove" data-index="${index}">Remove</button></span>`;
+    if (item.kind === 'term') {
+      return `<div class="lane-row" data-search-index="${index}"><span class="search-fields"><input data-search-label maxlength="40" value="${escapeHtml(item.label || '')}" placeholder="Name" aria-label="Name"><input data-search-q maxlength="200" value="${escapeHtml(item.q || '')}" placeholder="Search term" aria-label="Search term"></span>${moves}</div>`;
+    }
+    return `<div class="lane-row" data-search-index="${index}"><span><strong>${escapeHtml(topicLabel(item.id))}</strong><span class="handle">Topic</span></span>${moves}</div>`;
+  }).join('');
+  const have = new Set(showing.filter((item) => item.kind === 'topic').map((item) => item.id));
+  const available = SEARCH_TOPICS.filter((item) => item.id !== 'foryou' && !have.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Topic</span></span><button type="button" class="text-btn" data-act="search-topic" data-topic="${escapeHtml(item.id)}">Add</button></div>`).join('');
+  forgetStrips(body);
+  body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist">${preview}</div></div>
+    <h3>On this row</h3>
+    ${rows}
+    <h3>Add a search</h3>
+    <div class="search-add"><input id="search-add-label" maxlength="40" placeholder="Name, optional" aria-label="Name for the search"><input id="search-add-q" maxlength="200" placeholder="Search term" aria-label="Search term"><button type="button" class="primary small" data-act="search-add">Add</button></div>
+    <h3>Topics</h3>
+    ${available || '<p class="dim">Every topic is on the row.</p>'}
+    <button type="button" class="primary lanes-save" data-act="search-save">Save</button>`;
+  watchStrips(body);
+}
+
+function openSearchEditor({ focusAdd = false } = {}) {
+  const dialog = $('searches');
+  if (!dialog) return;
+  searchDraft = searchTabs().map((item) => ({ ...item }));
+  paintSearchEditor();
+  if (!dialog.open) dialog.showModal();
+  if (focusAdd) requestAnimationFrame(() => $('search-add-q')?.focus());
+}
+
+function refreshSearchRow() {
+  if (parseHash()[0] !== 'search') return;
+  paintSearchTabs(parseHash()[1] || '');
+}
+
+function addSearchTerm() {
+  if (!searchDraft) return;
+  syncSearchDraft();
+  const q = ($('search-add-q')?.value || '').trim().replace(/\s+/g, ' ');
+  if (!q) {
+    toast('Enter a search term.');
+    $('search-add-q')?.focus();
+    return;
+  }
+  if (searchDraft.some((item) => item.kind === 'term' && item.q.trim().toLowerCase() === q.toLowerCase())) {
+    toast('That search is already on the row.');
+    return;
+  }
+  if (searchDraft.filter((item) => item.kind === 'term').length >= SEARCH_TERM_CAP) {
+    toast(`Search can keep ${SEARCH_TERM_CAP} saved terms. Remove one to add another.`);
+    return;
+  }
+  const label = ($('search-add-label')?.value || '').trim().replace(/\s+/g, ' ') || q;
+  searchDraft.push({ kind: 'term', id: newSearchId(), label: label.slice(0, 40), q: q.slice(0, 200) });
+  paintSearchEditor();
+  $('search-add-q')?.focus();
+  queueSearchSave({ close: false, note: 'Added to Search' });
+}
+
+function editSearchDraft(act, button) {
+  if (!searchDraft) return;
+  syncSearchDraft();
+  pinSearchDraft();
+  if (act === 'search-topic') {
+    const id = button?.dataset.topic || '';
+    if (!SEARCH_TOPICS.some((item) => item.id === id) || id === 'foryou') return;
+    if (searchDraft.some((item) => item.kind === 'topic' && item.id === id)) return;
+    searchDraft.push({ kind: 'topic', id });
+    paintSearchEditor();
+    queueSearchSave({ close: false, note: 'Added to Search' });
+    return;
+  }
+  const index = Number(button?.dataset.index);
+  if (!Number.isInteger(index) || !searchDraft[index]) return;
+  if (act === 'search-remove') {
+    const item = searchDraft[index];
+    if (item.kind === 'topic' && item.id === 'foryou') return;
+    searchDraft.splice(index, 1);
+    paintSearchEditor();
+    queueSearchSave({ close: false, note: 'Removed from Search' });
+    return;
+  }
+  const dir = act === 'search-up' ? -1 : 1;
+  const next = index + dir;
+  if (index <= 0 || next <= 0 || next >= searchDraft.length) return;
+  const [item] = searchDraft.splice(index, 1);
+  searchDraft.splice(next, 0, item);
+  paintSearchEditor();
+}
+
+function queueSearchSave(options) {
+  const job = searchSaveChain.then(() => saveSearchDraft(options));
+  searchSaveChain = job.catch(() => {});
+  return job;
+}
+
+async function saveSearchDraft({ close = true, note = '' } = {}) {
+  if (!searchDraft) return;
+  syncSearchDraft();
+  pinSearchDraft();
+  if (searchDraft.some((item) => item.kind === 'term' && !String(item.q || '').trim())) {
+    toast('A saved search needs a term.');
+    return;
+  }
+  const before = searchDraft.filter((item) => item.kind === 'term' && String(item.q || '').trim()).length;
+  const button = close ? $('searches-body')?.querySelector('[data-act="search-save"]') : null;
+  if (button) button.disabled = true;
+  try {
+    const saved = saveSearchTabs(searchDraft);
+    searchDraft = saved.map((item) => ({ ...item }));
+    const after = saved.filter((item) => item.kind === 'term').length;
+    if (close) $('searches')?.close();
+    const said = after < before ? 'Two searches used the same term. One was kept.' : note;
+    if (said) toast(said);
+    if ($('searches')?.open) paintSearchEditor();
+    refreshSearchRow();
+  } catch (error) {
+    toast(error.message || 'Could not save search tabs');
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+function currentSearchQuery() {
+  if (parseHash()[0] !== 'search') return '';
+  return String(parseHash()[1] || '').trim().replace(/\s+/g, ' ');
+}
+
+function saveCurrentSearch() {
+  const q = currentSearchQuery();
+  if (!q) {
+    openSearchEditor({ focusAdd: true });
+    return;
+  }
+  const tabs = searchTabs().map((item) => ({ ...item }));
+  if (tabs.some((item) => item.kind === 'term' && item.q.toLowerCase() === q.toLowerCase())) {
+    toast('Already on your search row');
+    return;
+  }
+  if (tabs.filter((item) => item.kind === 'term').length >= SEARCH_TERM_CAP) {
+    toast(`Search can keep ${SEARCH_TERM_CAP} saved terms. Remove one to add another.`);
+    openSearchEditor();
+    return;
+  }
+  tabs.push({ kind: 'term', id: newSearchId(), label: q.slice(0, 40), q: q.slice(0, 200) });
+  saveSearchTabs(tabs);
+  toast('Saved to Search');
+  refreshSearchRow();
+}
+
+function forgetCurrentSearch() {
+  const q = currentSearchQuery().toLowerCase();
+  if (!q) return;
+  saveSearchTabs(searchTabs().filter((item) => !(item.kind === 'term' && item.q.toLowerCase() === q)));
+  toast('Removed from Search');
+  refreshSearchRow();
+}
+
+function openSearchMenu(anchor) {
+  const query = currentSearchQuery();
+  const saved = query && searchTabs().some((item) => item.kind === 'term' && item.q.toLowerCase() === query.toLowerCase());
+  const items = [];
+  if (query) items.push({ id: saved ? 'search-forget' : 'search-save', label: saved ? 'Remove this search' : 'Save this search' });
+  else items.push({ id: 'search-add-open', label: 'Add a search' });
+  items.push({ id: 'edit-searches', label: 'Edit tabs' });
   toggleMenu(anchor, items);
 }
 
@@ -4615,7 +4880,7 @@ function tourStepList() {
     {
       kicker: 'Move around',
       title: 'The main sections',
-      copy: 'Home, Search, Notifications, Chat, Bookmarks, and Profile. Calls and AI Assist sit here too. More holds feeds, lists, starter packs, settings, About, Privacy, and Terms.',
+      copy: 'Home, Search, Notifications, then Chat. Calls sits under Chat. Bookmarks, Profile, and AI Assist follow. More holds feeds, lists, starter packs, settings, About, Privacy, and Terms.',
       targets: ['.left', '.tabbar'],
     },
     {
@@ -4633,7 +4898,7 @@ function tourStepList() {
     {
       kicker: 'Search',
       title: 'Find people and posts',
-      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs.',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. The … on the search bar stores topics and search terms on that row.',
       targets: ['#rail-q', '[data-nav="search"]'],
     },
     {
@@ -7634,7 +7899,7 @@ async function handleChromeAct(act, event) {
     }
     return true;
   }
-  if (act === 'tab-menu' || act === 'profile-menu' || act === 'nav-more' || act === 'more' || act === 'repost') return true;
+  if (act === 'tab-menu' || act === 'profile-menu' || act === 'nav-more' || act === 'more' || act === 'repost' || act === 'search-menu') return true;
   if (act === 'lane-up' || act === 'lane-down' || act === 'lane-remove' || act === 'lane-add') {
     event.preventDefault();
     editLaneDraft(act, button);
@@ -7643,6 +7908,21 @@ async function handleChromeAct(act, event) {
   if (act === 'lane-save') {
     event.preventDefault();
     await queueLaneSave({ close: true, note: 'Home tabs saved' });
+    return true;
+  }
+  if (act === 'search-up' || act === 'search-down' || act === 'search-remove' || act === 'search-topic') {
+    event.preventDefault();
+    editSearchDraft(act, button);
+    return true;
+  }
+  if (act === 'search-add') {
+    event.preventDefault();
+    addSearchTerm();
+    return true;
+  }
+  if (act === 'search-save') {
+    event.preventDefault();
+    await queueSearchSave({ close: true, note: 'Search tabs saved' });
     return true;
   }
   if (act === 'tour') {
@@ -8145,7 +8425,7 @@ async function onClick(event) {
     toggleAccountCard(event.target.closest('[data-act="account-card"]'));
     return;
   }
-  if (act === 'more' || act === 'repost' || act === 'profile-menu' || act === 'tab-menu' || act === 'nav-more') {
+  if (act === 'more' || act === 'repost' || act === 'profile-menu' || act === 'tab-menu' || act === 'nav-more' || act === 'search-menu') {
     event.preventDefault();
     const button = event.target.closest('[data-act]');
     if (act === 'more' || act === 'repost') {
@@ -8156,6 +8436,7 @@ async function onClick(event) {
       }
     } else if (act === 'profile-menu') openProfileMenu(button);
     else if (act === 'tab-menu') openHomeTabMenu(button);
+    else if (act === 'search-menu') openSearchMenu(button);
     else openMoreMenu(button);
     return;
   }
@@ -8620,6 +8901,9 @@ async function onMenu(event) {
   if (id === 'go-privacy') return openLegal('privacy');
   if (id === 'go-terms') return openLegal('terms');
   if (id === 'edit-tabs') return openLaneEditor();
+  if (id === 'edit-searches' || id === 'search-add-open') return openSearchEditor({ focusAdd: id === 'search-add-open' });
+  if (id === 'search-save') return saveCurrentSearch();
+  if (id === 'search-forget') return forgetCurrentSearch();
   if (id === 'home-settings') return openTune('home');
   if (id === 'feed-settings') return openTune('feed', homeActive()?.value || '');
   if (id === 'open-list') {
@@ -9551,7 +9835,7 @@ function bind() {
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
-    if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
+    if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
     if (!event.target.closest('#hovercard, [data-act="account-card"]')) closeHover();
   });
@@ -9575,6 +9859,14 @@ function bind() {
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('help-close')?.addEventListener('click', () => $('help')?.close());
   $('lanes-close')?.addEventListener('click', () => $('lanes')?.close());
+  $('searches-close')?.addEventListener('click', () => $('searches')?.close());
+  $('searches')?.querySelector('form')?.addEventListener('submit', (event) => event.preventDefault());
+  $('searches')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.target?.tagName !== 'INPUT') return;
+    if (event.target.id !== 'search-add-q' && event.target.id !== 'search-add-label') return;
+    event.preventDefault();
+    addSearchTerm();
+  });
   $('login-tour')?.addEventListener('click', () => {
     startBrowse();
     openTour(0);
@@ -10161,10 +10453,10 @@ function bind() {
     if (sort === 'latest' || sort === 'top') chooseSearchSort(sort);
     const explore = event.target.closest('[data-explore]')?.dataset.explore;
     if (explore && EXPLORE_TABS.some((tab) => tab.id === explore)) {
+      event.preventDefault();
       exploreTab = explore;
-      const draft = $('search-q')?.value || '';
-      showSearch('', { focus: false });
-      if (draft && $('search-q')) $('search-q').value = draft;
+      if ((location.hash || '#/') === '#/search') showSearch('', { focus: false });
+      else location.hash = '#/search';
     }
   });
   $('lightbox-close').addEventListener('click', () => $('lightbox').close());

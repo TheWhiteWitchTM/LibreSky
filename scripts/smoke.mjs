@@ -8,7 +8,7 @@ import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/a
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
-import { callIsRequest, callMayRing, homeAllows, searchAllows, sortThreadReplies } from '../js/prefs.js';
+import { callIsRequest, callMayRing, homeAllows, normalizeSearchTabs, searchAllows, sortThreadReplies } from '../js/prefs.js';
 import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
@@ -1011,7 +1011,24 @@ assert.doesNotMatch(index, /id="more-head"/);
 assert.doesNotMatch(index, /id="title-tools"/);
 assert.match(index, /data-nav="ai"/);
 assert.match(index, /href="#\/ai"/);
-assert.match(index, /data-nav="bookmarks"[\s\S]*data-nav="calls"[\s\S]*data-nav="ai"[\s\S]*id="more-btn"/);
+assert.match(index, /data-nav="messages"[\s\S]*data-nav="calls"[\s\S]*data-nav="bookmarks"[\s\S]*data-nav="profile"[\s\S]*data-nav="ai"[\s\S]*id="more-btn"/);
+assert.match(index, /id="searches"/);
+assert.match(appSource, /Save this search/);
+assert.match(appSource, /edit-searches/);
+const savedTabs = normalizeSearchTabs([
+  { kind: 'term', id: 'abcd12', label: '  Cats  ', q: '  cats ' },
+  { kind: 'topic', id: 'news' },
+  { kind: 'topic', id: 'nope' },
+  { kind: 'term', q: 'cats', label: 'Dup' },
+  { kind: 'term', q: '   ', label: 'Empty' },
+  { kind: 'topic', id: 'foryou' },
+]);
+assert.equal(savedTabs[0].id, 'foryou');
+assert.equal(savedTabs[1].kind, 'term');
+assert.equal(savedTabs[1].q, 'cats');
+assert.equal(savedTabs[1].label, 'Cats');
+assert.equal(savedTabs[2].id, 'news');
+assert.equal(savedTabs.length, 3);
 assert.match(index, /id="more-btn"[\s\S]*?<path fill="currentColor" d="M12 2\.75a9\.25/);
 assert.match(appSource, /nav: 'calls'/);
 assert.doesNotMatch(appSource, /paintCallTools/);

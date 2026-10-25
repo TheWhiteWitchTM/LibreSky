@@ -31,6 +31,18 @@ import { learnedWordList, replaceLearnedWords, watchWords } from './words.js';
 const FEEDS_KEY = 'libresky.feedViews';
 const THREAD_KEY = 'libresky.thread';
 const SEARCH_KEY = 'libresky.search';
+const SEARCHES_KEY = 'libresky.searches';
+const SEARCH_TERM_CAP = 16;
+export const SEARCH_TOPICS = [
+  { id: 'foryou', label: 'For you' },
+  { id: 'news', label: 'News' },
+  { id: 'politics', label: 'Politics' },
+  { id: 'sports', label: 'Sports' },
+  { id: 'entertainment', label: 'Entertainment' },
+  { id: 'culture', label: 'Culture' },
+  { id: 'tech', label: 'Tech' },
+];
+const SEARCH_TOPIC_IDS = new Set(SEARCH_TOPICS.map((item) => item.id));
 const VOICE_KEY = 'libresky.voice';
 const EMOJI_KEY = 'libresky.emoji';
 const THEME_KEY = 'libresky.theme';
@@ -166,6 +178,60 @@ export function saveSearchPrefs(partial) {
   writeJson(SEARCH_KEY, saved);
   queueClient();
   return searchPrefs();
+}
+
+function cleanSearchText(value, max) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, max);
+}
+
+export function defaultSearchTabs() {
+  return SEARCH_TOPICS.map((item) => ({ kind: 'topic', id: item.id }));
+}
+
+export function normalizeSearchTabs(tabs) {
+  const list = [];
+  const seenTopics = new Set();
+  const seenTerms = new Set();
+  (Array.isArray(tabs) ? tabs : []).forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const topicId = SEARCH_TOPIC_IDS.has(item.id) ? item.id : '';
+    if (item.kind === 'topic' || (topicId && !item.q && !item.query)) {
+      if (!topicId || topicId === 'foryou' || seenTopics.has(topicId)) return;
+      seenTopics.add(topicId);
+      list.push({ kind: 'topic', id: topicId });
+      return;
+    }
+    const q = cleanSearchText(item.q || item.query, 200);
+    if (!q) return;
+    const key = q.toLowerCase();
+    if (seenTerms.has(key)) return;
+    if (list.filter((row) => row.kind === 'term').length >= SEARCH_TERM_CAP) return;
+    seenTerms.add(key);
+    const rawId = typeof item.id === 'string' ? item.id : '';
+    const id = /^[a-z0-9]{4,16}$/i.test(rawId)
+      ? rawId.slice(0, 16)
+      : (key.replace(/[^a-z0-9]+/gi, '').slice(0, 12) || 'term');
+    list.push({
+      kind: 'term',
+      id,
+      label: cleanSearchText(item.label, 40) || q.slice(0, 40),
+      q,
+    });
+  });
+  return [{ kind: 'topic', id: 'foryou' }, ...list];
+}
+
+export function searchTabs() {
+  const saved = readJson(SEARCHES_KEY);
+  if (!saved || !Array.isArray(saved.tabs)) return defaultSearchTabs();
+  return normalizeSearchTabs(saved.tabs);
+}
+
+export function saveSearchTabs(tabs) {
+  const next = normalizeSearchTabs(tabs);
+  writeJson(SEARCHES_KEY, { tabs: next });
+  queueClient();
+  return next;
 }
 
 export function voicePrefs() {
@@ -495,6 +561,9 @@ function applyClient(record) {
       hideSensitive: Boolean(record.search.hideSensitive),
     });
   }
+  if (record.searches && Array.isArray(record.searches.tabs)) {
+    writeJson(SEARCHES_KEY, { tabs: normalizeSearchTabs(record.searches.tabs) });
+  }
   if (record.languages && typeof record.languages === 'object') saveLanguagePrefs(record.languages);
   if (Array.isArray(record.emoji)) writeJson(EMOJI_KEY, record.emoji.filter((item) => typeof item === 'string').slice(0, 24));
   if (record.calls && CALL_ALLOWS.has(record.calls.allow)) writeJson(CALL_KEY, { allow: record.calls.allow });
@@ -557,6 +626,7 @@ function clientRecord() {
     sounds: soundPrefs(),
     voice: voicePrefs(),
     search: searchPrefs(),
+    searches: { tabs: searchTabs() },
     languages: languagePrefs(),
     theme: themeName(),
     a11y: a11yPrefs(),
