@@ -302,6 +302,7 @@ function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {
 function paintPageIcon(nav) {
   const slot = $('page-icon');
   if (!slot) return;
+  slot.setAttribute('aria-hidden', 'true');
   const key = MORE_NAV.has(nav) ? 'more' : nav;
   const source = document.querySelector(`[data-nav="${CSS.escape(key)}"] .ico`);
   if (source) slot.replaceChildren(source.cloneNode(true));
@@ -317,7 +318,6 @@ function measureHead() {
 
 function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
   const titleEl = $('title');
-  titleEl.classList.remove('person-title');
   titleEl.textContent = title;
   const icon = $('page-icon');
   if (icon) icon.hidden = false;
@@ -1570,15 +1570,20 @@ function stopChatTimer() {
 function paintChatTitle(actor) {
   const html = chatHeaderHtml(actor);
   const title = $('title');
-  if (!html || !title) return;
-  const card = $('hovercard');
-  if (card?._anchor && title.contains(card._anchor)) closeHover();
-  title.classList.add('person-title');
-  title.innerHTML = html;
   const icon = $('page-icon');
-  if (icon) icon.hidden = true;
-  const name = title.querySelector('strong')?.textContent || 'Chat';
-  document.title = `${name} — LibreSky`;
+  if (!html || !title || !icon) return;
+  const card = $('hovercard');
+  if (card?._anchor && (title.contains(card._anchor) || icon.contains(card._anchor))) closeHover();
+  const holder = document.createElement('template');
+  holder.innerHTML = html;
+  const face = holder.content.firstElementChild;
+  const link = holder.content.querySelector('a');
+  if (!face || !link) return;
+  icon.hidden = false;
+  icon.removeAttribute('aria-hidden');
+  icon.replaceChildren(face);
+  title.replaceChildren(link);
+  document.title = `${link.textContent || 'Chat'} — LibreSky`;
   measureHead();
 }
 
@@ -1758,9 +1763,8 @@ async function showMessages(convoId) {
     if (other) paintChatTitle(other);
     else {
       const label = requested ? 'Message request' : 'Chat';
-      $('title').classList.remove('person-title');
       $('title').textContent = label;
-      if ($('page-icon')) $('page-icon').hidden = false;
+      paintPageIcon('messages');
       document.title = `${label} — LibreSky`;
     }
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');

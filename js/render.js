@@ -801,9 +801,8 @@ export function chatHeaderHtml(actor) {
   const gone = deletedAccount(actor);
   const display = String(actor.displayName || '').trim();
   const handle = String(actor.handle || '').trim();
-  const name = gone ? 'Deleted account' : (display || (handle ? `@${handle}` : 'Chat'));
-  const meta = !gone && display && handle ? `<span class="chat-title-handle">@${escapeHtml(handle)}</span>` : '';
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor, 'title', 'chat-title-face')}<a class="chat-title-name" href="${profileHash(actor)}"><strong>${escapeHtml(name)}</strong></a>${meta}</div>`;
+  const name = gone ? 'Deleted account' : (display || handle || 'Chat');
+  return `${accountIcon(actor)}<a href="${profileHash(actor)}">${escapeHtml(name)}</a>`;
 }
 
 export function hoverCardHtml(profile, self = '') {

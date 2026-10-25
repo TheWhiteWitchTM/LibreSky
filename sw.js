@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-25-chat-title';
+const CACHE = 'libresky-2026-10-25-chat-name';
 
 const SHELL = [
   './',

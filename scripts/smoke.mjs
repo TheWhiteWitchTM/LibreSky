@@ -1276,14 +1276,12 @@ assert.doesNotMatch(liveCalls, /call-btn video/);
 assert.doesNotMatch(liveCalls, /calls-page/);
 assert.doesNotMatch(liveCalls, /aria-disabled/);
 const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' });
-assert.match(quietCalls, /chat-head/);
-assert.equal((quietCalls.match(/<strong>Ada<\/strong>/g) || []).length, 1);
 assert.equal((quietCalls.match(/Ada/g) || []).length, 2);
-assert.match(quietCalls, /class="chat-title-handle">@ada\.bsky\.social/);
-assert.doesNotMatch(quietCalls, /class="handle"/);
+assert.match(quietCalls, />Ada</);
+assert.doesNotMatch(quietCalls, /chat-title-handle|class="handle"|@ada\.bsky\.social|<strong>/);
 const handleOnly = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social' });
-assert.match(handleOnly, /<strong>@ada\.bsky\.social<\/strong>/);
-assert.doesNotMatch(handleOnly, /chat-title-handle/);
+assert.match(handleOnly, />ada\.bsky\.social</);
+assert.doesNotMatch(handleOnly, /chat-title-handle|class="handle"|@ada/);
 assert.doesNotMatch(quietCalls, /class="call-pair"/);
 assert.doesNotMatch(quietCalls, /data-act="call-audio"/);
 assert.doesNotMatch(quietCalls, /data-act="call-video"/);
@@ -1313,11 +1311,12 @@ assert.doesNotMatch(hoverCardHtml({ did: 'did:me', handle: 'me.bsky.social' }, '
 const goneCalls = chatHeaderHtml({ did: 'did:gone', handle: 'handle.invalid' });
 assert.match(goneCalls, /Deleted account/);
 assert.doesNotMatch(goneCalls, /call-btn/);
-assert.doesNotMatch(goneCalls, /chat-title-handle/);
+assert.doesNotMatch(goneCalls, /chat-title-handle|class="handle"/);
 assert.match(appSource, /function paintChatTitle/);
 assert.match(appSource, /paintChatTitle\(cachedOther\)/);
 assert.match(appSource, /paintChatTitle\(other\)/);
-assert.match(appCss, /\.headline h1\.person-title/);
+assert.match(appCss, /\.page-icon \.avatar \{ width: 26px; height: 26px; \}/);
+assert.doesNotMatch(appCss, /person-title|chat-title-handle/);
 const packRow = packHtml({
   uri: 'at://did:example/app.bsky.graph.starterpack/abc',
   record: { name: 'Cats', description: 'meow' },
