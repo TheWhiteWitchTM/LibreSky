@@ -823,8 +823,7 @@ export function chatHeaderHtml(actor) {
   const gone = deletedAccount(actor);
   const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
   const handle = gone ? 'This account was deleted' : (actor.handle ? `@${actor.handle}` : '');
-  const tools = !gone && actor.did ? `<span class="chat-tools">${callToolsHtml(actor.did)}</span>` : '';
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor)}<a class="chat-with" href="${profileHash(actor)}"><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a>${tools}</div>`;
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor)}<a class="chat-with" href="${profileHash(actor)}"><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a></div>`;
 }
 
 export function hoverCardHtml(profile, self = '') {

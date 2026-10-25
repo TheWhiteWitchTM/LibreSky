@@ -1122,6 +1122,7 @@ button.avatar-btn:focus-visible {
 .ai-composer .chat-field .field-highlight,
 .ai-composer .chat-field textarea {
   min-height: 44px;
+  max-height: 160px;
   padding-top: 8px;
   padding-bottom: 8px;
 }
@@ -1684,13 +1685,14 @@ a.person.request-entry { width: 100%; }
   flex-direction: column;
   height: calc(100dvh - var(--top-h, 52px) - var(--head-h, 0px));
   min-height: 0;
+  overflow: hidden;
 }
 .chat-thread > .chat-head,
 .chat-thread > .request-banner,
 .chat-thread > .call-banner,
 .chat-thread > .reply-bar { flex: none; }
 .chat-thread > .messages {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
@@ -1736,7 +1738,7 @@ a.person.request-entry { width: 100%; }
   column-gap: 8px;
   row-gap: 4px;
   align-items: end;
-  padding: 10px 12px;
+  padding: 6px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg);
 }
@@ -1744,8 +1746,7 @@ a.person.request-entry { width: 100%; }
 #chat-form > .chat-field { grid-column: 1; grid-row: 1; }
 #chat-form > .chat-send { grid-column: 2; grid-row: 1; align-self: end; }
 .chat-send { display: flex; align-items: center; gap: 6px; }
-#chat-form > .chat-tools { grid-column: 1 / -1; grid-row: 2; }
-#chat-form > .chat-hint { grid-column: 1 / -1; grid-row: 3; }
+#chat-form > .chat-tools { grid-column: 1 / -1; grid-row: 2; flex-wrap: nowrap; justify-content: flex-start; padding-right: 0; }
 #chat-picker:not([hidden]) {
   position: absolute;
   left: 8px;
@@ -1799,8 +1800,8 @@ a.person.request-entry { width: 100%; }
   width: 100%;
   margin: 0;
   border: 0;
-  min-height: 96px;
-  padding: 12px 14px;
+  min-height: 40px;
+  padding: 8px 14px;
   font: inherit;
   font-family: var(--font), var(--emoji-font);
   /* emoji presentation makes ASCII digits about twice as wide */
@@ -1825,7 +1826,7 @@ a.person.request-entry { width: 100%; }
 .chat-field textarea {
   position: relative;
   display: block;
-  max-height: 280px;
+  max-height: 76px;
   resize: none;
   overflow: hidden;
   outline: 0;

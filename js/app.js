@@ -1751,8 +1751,6 @@ async function showMessages(convoId) {
       else await rememberFollows([other.did]);
     }
     if (token !== generation) return;
-    if (other) $('title').textContent = other.displayName || (other.handle ? `@${other.handle}` : 'Chat');
-    else $('title').textContent = requested ? 'Message request' : 'Chat';
     const options = chatOptions(messages, peerDid, convoId, false);
     const requestBar = requested
       ? `<div class="request-banner"><p>This is a message request. Accept it to keep the chat, or delete it.</p><span class="row-actions"><button type="button" class="primary small" data-act="accept-convo" data-convo="${escapeHtml(convoId)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${escapeHtml(convoId)}">Delete</button></span></div>`
@@ -1765,7 +1763,7 @@ async function showMessages(convoId) {
     const header = chatHeaderHtml(other) || `<div class="chat-head"><span class="chat-with"><span><strong>${requested ? 'Message request' : 'Chat'}</strong></span></span></div>`;
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
-    $('view').innerHTML = `<section class="chat-thread">${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="3" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}<p class="chat-hint"><span class="chat-hint-keys">Shift+Enter sends. Enter adds a line. Click a suggestion or press Tab.</span><span class="chat-hint-touch">Enter adds a line. Tap Send.</span></p></form></section>`;
+    $('view').innerHTML = `<section class="chat-thread">${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
     paintCallBanner(messages, peerDid, convoId);
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
@@ -4934,14 +4932,14 @@ function tourStepList() {
     {
       kicker: 'Chat',
       title: 'Messages on your account',
-      copy: 'Chat uses your Bluesky account. Requests wait until you accept them. A voice or video call starts from the same conversation.',
+      copy: 'Chat uses your Bluesky account. Requests wait until you accept them. The mic beside Send types what you say.',
       targets: ['[data-nav="messages"]'],
     },
     {
       kicker: 'Calls',
       title: 'Voice and video',
       copy: 'A call connects two LibreSky windows. Mute and the camera stay on your side. The time shows once you are connected.',
-      targets: ['[data-nav="calls"]', '[data-nav="messages"]'],
+      targets: ['[data-nav="calls"]'],
     },
     {
       kicker: 'AI Assist',
@@ -7429,8 +7427,8 @@ function openLegal(which) {
 function fitChatInput(box) {
   if (!box) return;
   const pre = box.id === 'chat-text' ? $('chat-highlight') : (box.id === 'ai-text' ? $('ai-highlight') : null);
-  const floor = box.id === 'ai-text' ? 44 : 96;
-  const cap = box.id === 'ai-text' ? 160 : 280;
+  const floor = box.id === 'ai-text' ? 44 : 40;
+  const cap = box.id === 'ai-text' ? 160 : 76;
   box.style.height = 'auto';
   const full = Math.max(box.scrollHeight, pre?.scrollHeight || 0);
   const next = Math.min(Math.max(full, floor), cap);

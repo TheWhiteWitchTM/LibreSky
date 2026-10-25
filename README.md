@@ -32,7 +32,7 @@ LibreSky is a Bluesky client you open and stay in. Home is waiting. Discover is 
   <tr>
     <td align="center" width="20%"><h3>Edit</h3>Rewrite a post you already sent. Images, video, the link card, and a GIF come back with it.</td>
     <td align="center" width="20%"><h3>AI</h3><code>@ai</code> and <code>@si</code> ask the account you save. The post box can rewrite a draft.</td>
-    <td align="center" width="20%"><h3>Voice</h3>Call from an open chat, the Calls page, or someone else’s profile. Mute stays on your side.</td>
+    <td align="center" width="20%"><h3>Voice</h3>Call from the Calls page or someone else’s profile. Mute stays on your side.</td>
     <td align="center" width="20%"><h3>Video</h3>The picture travels between the two browsers. The camera can turn off, and a timer runs once you are connected.</td>
     <td align="center" width="20%"><h3>Chat</h3>Messages stay on your Bluesky account. A chat opens on the latest message. The mic dictates into the box. A new chat waits as a request until you accept it.</td>
   </tr>
@@ -70,7 +70,7 @@ Who can reply is yours to set: everyone, people you follow, people you mention, 
 
 ## Say it out loud
 
-Voice and Video sit on an open chat, on the Calls page, and on someone else’s profile. A call reaches another LibreSky window directly. Both people need the app open. The sound and the picture travel between the two browsers. Mute and the camera stay on your side. The time shows once the call connects. Hang up ends it.
+Voice and Video sit on the Calls page and on someone else’s profile. A call reaches another LibreSky window directly. Both people need the app open. The sound and the picture travel between the two browsers. Mute and the camera stay on your side. The time shows once the call connects. Hang up ends it.
 
 An incoming call shows a banner. Accept or decline it there. Settings choose who can message you and who can call you: everyone, people you follow, or no one. The chat choice is your Bluesky setting. The call choice stays with LibreSky.
 
