@@ -1,10 +1,11 @@
-const CACHE = 'libresky-2026-10-24-local';
+const CACHE = 'libresky-2026-10-25-ai';
 
 const SHELL = [
   './',
   './index.html',
   './css/app.css',
   './js/app.js',
+  './js/emoji.js',
   './js/ai.js',
   './js/call.js',
   './js/api.js',

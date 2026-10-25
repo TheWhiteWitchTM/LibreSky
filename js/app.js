@@ -130,6 +130,7 @@ let tipTimer = 0;
 let pickerMode = '';
 let pickerHost = 'compose';
 const collapsedEmoji = new Set();
+const openedEmoji = new Set();
 const styleHold = new Map();
 let gifSeq = 0;
 let gifTimer = 0;
@@ -2484,6 +2485,7 @@ let aiThread = [];
 let aiSeq = 0;
 let aiPending = '';
 let aiPendingNote = 'Page';
+let aiComposerText = '';
 
 function aiKeyHelp(provider) {
   const item = providerById(provider);
@@ -2606,15 +2608,15 @@ function aiLocalFormHtml() {
     </form>`;
 }
 
-function aiSettingsHtml({ page = 'settings' } = {}) {
-  const localHere = page !== 'ai';
-  return `<p class="dim">${AI_NAME} answers on this page, on Home, and as a check on profiles and posts. Each remote AI follows this login. Local AI stays in this browser, on this computer. Free is a public model. <a class="text-link" href="#/ai">@ai and @si</a> use whichever you pick.</p>
-    ${page === 'settings' ? `<h3>Use</h3>${aiPickButtons()}` : ''}
+function aiSettingsHtml() {
+  return `<p class="dim">${AI_NAME} answers in <a class="text-link" href="#/ai">AI Assist</a>, on Home, and as a check on profiles and posts. Each remote AI follows this login. Local AI stays in this browser, on this computer. Free is a public model. @ai and @si use whichever you pick.</p>
+    <h3>Use</h3>${aiPickButtons()}
     <h3>Remote AI</h3>
-    <p class="dim">Add more than one. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile. Pick one above, or on AI Assist.</p>
+    <p class="dim">Add more than one. A saved key is stored on your Bluesky account, in the private preferences that follow this login. It is not written on the public profile. Pick one here, or from the button under the box in AI Assist.</p>
     ${remoteListHtml()}
     ${aiAccountFormHtml()}
-    ${localHere ? `<h3>Local AI</h3>${aiLocalFormHtml()}` : ''}`;
+    <h3>Local AI</h3>
+    ${aiLocalFormHtml()}`;
 }
 
 function readAiForm() {
@@ -2645,6 +2647,8 @@ function readLocalForm(found = null) {
 }
 
 let localFindSeq = 0;
+let localScanSeq = 0;
+let localScanState = 'idle';
 let localHits = [];
 
 function syncAiFields() {
@@ -2749,16 +2753,11 @@ async function findLocalAi({ replaceBase = false, silent = false } = {}) {
         paintLocalModels(shown);
         const status = $('ai-local-status');
         if (status) status.textContent = `${hit.runtime || 'Local AI'} is on this computer · ${modelName}.`;
-        const readyLine = document.querySelector('.ai-ready-line');
-        const setupButton = readyLine?.querySelector('[data-act="ai-setup"]');
-        if (readyLine) {
-          readyLine.innerHTML = `<strong>${AI_NAME}</strong> is on with ${escapeHtml(hit.runtime || 'Local AI')} · ${escapeHtml(modelName)}. ${setupButton ? setupButton.outerHTML : ''}`;
-        }
+        document.querySelectorAll('[data-ai-pick]').forEach((button) => {
+          button.setAttribute('aria-pressed', button.dataset.aiPick === 'local' ? 'true' : 'false');
+        });
         const choice = document.querySelector('[data-ai-pick="local"]');
-        if (choice) {
-          choice.setAttribute('aria-pressed', 'true');
-          choice.textContent = `Local · ${hit.runtime || 'Local'}`;
-        }
+        if (choice) choice.textContent = `Local · ${hit.runtime || 'Local'}`;
         if (!silent) toast(`${hit.runtime || 'Local AI'} · ${modelName}`);
       } catch {
         /* the model buttons still choose one */
@@ -3204,7 +3203,7 @@ function showSettings() {
       ${soundRow('posts', 'New posts on Home', sounds)}
     </div>
     ${voiceSettingsHtml()}`)}
-    ${settingsPanel('ai', `<h2>AI</h2><p class="dim"><a class="text-link" href="#/ai">Open AI Assist</a> to chat and pick which AI answers. Remote AIs and local AI are set here and on that page.</p>${aiSettingsHtml()}`)}
+    ${settingsPanel('ai', `<h2>AI</h2>${aiSettingsHtml()}`)}
   </section>`;
   loadSettingsLists(token);
   loadChatAllow(token);
@@ -4053,23 +4052,118 @@ async function loadBlockedAccounts(token = generation) {
   }
 }
 
-let aiSetupOpen = false;
+function aiChoiceLabel() {
+  const source = aiSource();
+  const active = activeAi();
+  if (source === 'free' || active?.fallback) return 'Free';
+  if (source === 'local' || active?.provider === 'local') return active?.model || 'Local';
+  const saved = loadAi();
+  if (saved) return remoteLabel(saved, listRemoteAi());
+  if (active?.provider) return providerById(active.provider).label;
+  return 'Free';
+}
 
-function aiStatusLine(active) {
-  const label = aiSetupOpen ? 'Hide settings' : 'Add a remote AI';
-  const setup = `<button type="button" class="text-btn" data-act="ai-setup">${label}</button>`;
-  if (active?.provider === 'local' && !active.model) {
-    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is set to local. Pick a model below. ${setup}</p>`;
+function localModelChoices() {
+  const saved = loadLocalAi();
+  const rows = [];
+  const seen = new Set();
+  const add = (name, base, api, runtime) => {
+    const model = String(name || '').trim();
+    if (!model) return;
+    const key = `${String(base || '').replace(/\/+$/, '')}|${model}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const sameBase = String(saved?.base || '').replace(/\/+$/, '') === String(base || '').replace(/\/+$/, '');
+    rows.push({
+      name: model,
+      base: base || '',
+      api: api || '',
+      runtime: runtime || '',
+      on: aiSource() === 'local' && saved?.model === model && sameBase,
+    });
+  };
+  localHits.forEach((hit) => {
+    const runtime = hit.runtime || localRuntimeName(hit.base, hit.api);
+    (hit.models || []).forEach((name) => add(name, hit.base, hit.api, runtime));
+  });
+  if (saved?.model) add(saved.model, saved.base, saved.api, saved.runtime || localRuntimeName(saved.base, saved.api));
+  return rows;
+}
+
+function aiModelChoice(attrs, title, detail, on) {
+  const note = detail ? `<span class="ai-model-detail">${escapeHtml(detail)}</span>` : '';
+  return `<button type="button" class="ai-model-choice" ${attrs} role="menuitemradio" aria-pressed="${on ? 'true' : 'false'}"><strong>${escapeHtml(title)}</strong>${note}</button>`;
+}
+
+function aiModelChoicesHtml() {
+  const source = aiSource();
+  const remotes = listRemoteAi();
+  const activeId = loadAi()?.id || '';
+  const parts = [aiModelChoice('data-ai-pick="free"', 'Free', 'Public model', source === 'free')];
+  remotes.forEach((item) => {
+    const on = source === 'account' && item.id === activeId;
+    parts.push(aiModelChoice(`data-ai-pick="remote" data-ai-id="${escapeHtml(item.id)}"`, remoteLabel(item, remotes), item.model, on));
+  });
+  const locals = localModelChoices();
+  if (locals.length) {
+    parts.push('<p class="ai-model-note">Local</p>');
+    locals.forEach((row) => {
+      parts.push(aiModelChoice(
+        `data-ai-model="${escapeHtml(row.name)}" data-ai-base="${escapeHtml(row.base)}" data-ai-api="${escapeHtml(row.api)}" data-ai-runtime="${escapeHtml(row.runtime)}"`,
+        row.name,
+        row.runtime || 'On this computer',
+        row.on,
+      ));
+    });
+  } else {
+    if (localScanState === 'busy') parts.push('<p class="ai-model-note">Looking for local models…</p>');
+    parts.push(aiModelChoice('data-ai-pick="local"', 'Local', 'On this computer', source === 'local'));
   }
-  if (!active || active.fallback || aiSource() === 'free') {
-    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with a free public model. ${setup}</p>`;
+  return `<div class="ai-model-list">${parts.join('')}</div><button type="button" class="ai-model-settings" data-act="ai-settings">${icon('gear')}<span>Settings</span></button>`;
+}
+
+function closeAiModels() {
+  const pop = $('ai-model-pop');
+  const button = document.querySelector('[data-act="ai-models"]');
+  if (pop) pop.hidden = true;
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+
+function toggleAiModels() {
+  const pop = $('ai-model-pop');
+  const button = document.querySelector('[data-act="ai-models"]');
+  if (!pop || !button) return;
+  const willOpen = pop.hidden;
+  if (willOpen) pop.innerHTML = aiModelChoicesHtml();
+  pop.hidden = !willOpen;
+  button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  if (willOpen) scanLocalModels();
+}
+
+function openAiSettings() {
+  closeAiModels();
+  settingsTab = 'ai';
+  if (parseHash()[0] === 'settings') {
+    if ($('settings-tab-ai')) selectSettingsTab('ai');
+    else showSettings();
+    return;
   }
-  if (active.provider === 'local') {
-    const runtime = active.runtime || localRuntimeName(active.base, active.api);
-    return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with ${escapeHtml(runtime)}${active.model ? ` · ${escapeHtml(active.model)}` : ''}. ${setup}</p>`;
+  location.hash = '#/settings';
+}
+
+async function scanLocalModels() {
+  const seq = ++localScanSeq;
+  localScanState = 'busy';
+  try {
+    const servers = await detectLocalServers('');
+    if (seq !== localScanSeq) return;
+    localHits = (servers || []).filter((hit) => hit?.models?.length);
+  } catch {
+    if (seq !== localScanSeq) return;
   }
-  const name = providerById(active.provider).label;
-  return `<p class="ai-ready-line"><strong>${AI_NAME}</strong> is on with ${escapeHtml(name)}${active.model ? ` · ${escapeHtml(active.model)}` : ''}. ${setup}</p>`;
+  localScanState = 'done';
+  const pop = $('ai-model-pop');
+  if (pop?.isConnected && !pop.hidden) pop.innerHTML = aiModelChoicesHtml();
 }
 
 function showAi() {
@@ -4083,21 +4177,22 @@ function showAi() {
     if (turn.role === 'error') return assistantHtml(turn.content, { kicker: 'Could not answer' });
     return `<div class="bubble mine"><p>${richText(turn.content)}</p></div>`;
   }).join('');
-  const askForm = `<form class="reply-bar ai-ask" id="ai-ask">
-      <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="3" maxlength="4000" placeholder="Ask ${AI_NAME}"${waiting ? ' disabled' : ''}></textarea></div>
-      <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks"${waiting ? ' disabled' : ''}>Ask</button></span>
-      <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
-    </form>`;
-  const setup = `<div id="ai-setup" class="ai-setup"${aiSetupOpen ? '' : ' hidden'}>${aiSettingsHtml({ page: 'ai' })}</div>`;
-  const empty = turns ? '' : `<p class="dim ai-empty">Ask ${AI_NAME} anything. Pick Free, a remote AI, or Local above. @ai and @si in a chat use that same choice and are not sent to the other person.</p>`;
-  $('view').innerHTML = `<section class="settings ai-doc ai-live">
-      ${aiStatusLine(saved)}
-      ${aiPickButtons()}
-      <h3>Local AI</h3>
-      ${aiLocalFormHtml()}
-      ${setup}
+  const empty = turns
+    ? ''
+    : `<p class="dim ai-empty">Ask ${AI_NAME} anything. Free, a remote AI, and Local sit under the box. @ai and @si in a chat use that same choice and stay on your screen.</p>`;
+  $('view').innerHTML = `<section class="ai-chat">
       <div class="messages ai-thread">${empty}${turns}</div>
-      ${askForm}
+      <form class="ai-composer" id="ai-ask">
+        <div class="composer-field chat-field"><pre class="field-highlight" id="ai-highlight" aria-hidden="true"></pre><textarea id="ai-text" rows="1" maxlength="4000" placeholder="Ask ${AI_NAME}"${waiting ? ' disabled' : ''}>${escapeHtml(aiComposerText)}</textarea></div>
+        <div class="ai-composer-bar">
+          <div class="ai-model">
+            <button type="button" class="ai-model-btn" data-act="ai-models" aria-haspopup="menu" aria-expanded="false" aria-controls="ai-model-pop"><span>${escapeHtml(aiChoiceLabel())}</span><span class="ai-chev" aria-hidden="true"></span></button>
+            <div id="ai-model-pop" class="ai-model-pop" role="menu" hidden>${aiModelChoicesHtml()}</div>
+          </div>
+          <span class="tip-wrap" data-tip="Shift+Enter asks"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter asks"${waiting ? ' disabled' : ''}>Ask</button></span>
+        </div>
+        <p class="chat-hint"><span class="chat-hint-keys">Shift+Enter asks. Enter adds a line. Tab completes.</span><span class="chat-hint-touch">Enter adds a line. Tap Ask.</span></p>
+      </form>
     </section>`;
   const area = $('ai-text');
   if (area) {
@@ -4105,8 +4200,9 @@ function showAi() {
     applyFieldLanguage(area);
     fitChatInput(area);
   }
-  if (localHits.length) paintLocalModels(localHits);
-  if ($('ai-local-form')) findLocalAi({ silent: true });
+  const thread = document.querySelector('.ai-thread');
+  if (thread) thread.scrollTop = thread.scrollHeight;
+  if (localScanState === 'idle') scanLocalModels();
   const pending = aiPending;
   aiPending = '';
   if (pending && ready) askOnPage(pending);
@@ -4124,10 +4220,8 @@ async function askOnPage(text) {
   aiPendingNote = 'Page';
   const saved = activeAi();
   if (!aiReady(saved)) {
-    aiSetupOpen = true;
-    toast('AI Assist could not start. Add a key or a local server.');
-    if (parseHash()[0] === 'ai') showAi();
-    else location.hash = '#/ai';
+    toast('AI Assist could not start. Add a key or a local model in Settings.');
+    openAiSettings();
     return;
   }
   const seq = ++aiSeq;
@@ -6148,6 +6242,14 @@ function emojiButtons(list) {
   return `<div class="emoji-grid">${list.map(([char, name]) => `<button type="button" data-emoji="${escapeHtml(char)}" aria-label="${escapeHtml(name || char)}">${char}</button>`).join('')}</div>`;
 }
 
+function emojiGroupOpen(name, searching, index, hasRecent) {
+  if (searching) return true;
+  if (collapsedEmoji.has(name)) return false;
+  if (openedEmoji.has(name)) return true;
+  if (name === 'Recent') return true;
+  return index === (hasRecent ? 1 : 0);
+}
+
 function paintEmojiList(query) {
   const box = $('emoji-groups');
   if (!box) return;
@@ -6157,10 +6259,12 @@ function paintEmojiList(query) {
   if (recent.length && !needle) groups.push(['Recent', recent.map((char) => [char, char])]);
   emojiGroups(query).forEach(([name, list]) => groups.push([name, list]));
   const searching = Boolean(needle);
+  const hasRecent = groups[0]?.[0] === 'Recent';
   box.innerHTML = groups.length
-    ? groups.map(([name, list]) => {
-      const open = searching || !collapsedEmoji.has(name);
-      return `<details class="emoji-group" data-emoji-group="${escapeHtml(name)}"${open ? ' open' : ''}><summary>${escapeHtml(name)}</summary>${emojiButtons(list)}</details>`;
+    ? groups.map(([name, list], index) => {
+      const open = emojiGroupOpen(name, searching, index, hasRecent);
+      const body = open ? emojiButtons(list) : '';
+      return `<details class="emoji-group" data-emoji-group="${escapeHtml(name)}"${open ? ' open' : ''}><summary>${escapeHtml(name)}</summary>${body}</details>`;
     }).join('')
     : '<p class="picker-note">No emoji matched.</p>';
 }
@@ -6637,17 +6741,7 @@ function openPageConfig() {
     return;
   }
   if (a === 'ai') {
-    aiSetupOpen = true;
-    const setup = $('ai-setup');
-    if (setup) {
-      setup.hidden = false;
-      const button = document.querySelector('[data-act="ai-setup"]');
-      if (button) button.textContent = 'Hide settings';
-      if ($('ai-local-form')) findLocalAi({ silent: true });
-      setup.scrollIntoView({ block: 'nearest' });
-      return;
-    }
-    showAi();
+    openAiSettings();
     return;
   }
   location.hash = '#/settings';
@@ -6665,11 +6759,13 @@ function openLegal(which) {
 function fitChatInput(box) {
   if (!box) return;
   const pre = box.id === 'chat-text' ? $('chat-highlight') : (box.id === 'ai-text' ? $('ai-highlight') : null);
+  const floor = box.id === 'ai-text' ? 44 : 96;
+  const cap = box.id === 'ai-text' ? 160 : 280;
   box.style.height = 'auto';
   const full = Math.max(box.scrollHeight, pre?.scrollHeight || 0);
-  const next = Math.min(Math.max(full, 96), 280);
+  const next = Math.min(Math.max(full, floor), cap);
   box.style.height = `${next}px`;
-  box.style.overflowY = full > 280 ? 'auto' : 'hidden';
+  box.style.overflowY = full > cap ? 'auto' : 'hidden';
   if (pre) pre.scrollTop = box.scrollTop;
 }
 
@@ -7653,6 +7749,7 @@ function selectedText() {
 }
 
 async function onClick(event) {
+  if (!event.target.closest?.('.ai-model')) closeAiModels();
   const note = event.target.closest?.('.note[data-href]');
   if (note && !event.target.closest('a, button')) {
     if (selectedText().trim()) return;
@@ -7915,18 +8012,14 @@ async function onClick(event) {
     onAiDraft(act, event.target.closest('[data-ai]')?.dataset.ai || '');
     return;
   }
-  if (act === 'ai-setup') {
+  if (act === 'ai-models') {
     event.preventDefault();
-    aiSetupOpen = !aiSetupOpen;
-    const setup = $('ai-setup');
-    const button = event.target.closest('[data-act="ai-setup"]');
-    if (setup) {
-      setup.hidden = !aiSetupOpen;
-      if (button) button.textContent = aiSetupOpen ? 'Hide settings' : 'Settings';
-      if (aiSetupOpen && $('ai-local-form')) findLocalAi({ silent: true });
-    } else {
-      showAi();
-    }
+    toggleAiModels();
+    return;
+  }
+  if (act === 'ai-settings') {
+    event.preventDefault();
+    openAiSettings();
     return;
   }
   if (act === 'ai-clear') {
@@ -8890,6 +8983,13 @@ function onKey(event) {
       closeHover();
       return;
     }
+    const aiPop = $('ai-model-pop');
+    if (aiPop && !aiPop.hidden) {
+      event.preventDefault();
+      closeAiModels();
+      document.querySelector('[data-act="ai-models"]')?.focus();
+      return;
+    }
     const open = [...document.querySelectorAll('dialog[open]')];
     const dialog = open[open.length - 1];
     if (!dialog || dialog.id === 'call') return;
@@ -8990,8 +9090,20 @@ function bind() {
     const group = event.target?.dataset?.emojiGroup ? event.target : null;
     if (!group || $('emoji-find')?.value.trim()) return;
     const name = group.dataset.emojiGroup;
-    if (group.open) collapsedEmoji.delete(name);
-    else collapsedEmoji.add(name);
+    if (group.open) {
+      collapsedEmoji.delete(name);
+      openedEmoji.add(name);
+      if (!group.querySelector('[data-emoji]')) {
+        const query = $('emoji-find')?.value || '';
+        const list = name === 'Recent'
+          ? recentEmoji().map((char) => [char, char])
+          : (emojiGroups(query).find(([groupName]) => groupName === name)?.[1] || []);
+        group.insertAdjacentHTML('beforeend', emojiButtons(list));
+      }
+    } else {
+      openedEmoji.delete(name);
+      collapsedEmoji.add(name);
+    }
   }, true);
   document.addEventListener('pointerdown', (event) => {
     const button = event.target.closest?.('#suggest [data-insert]');
@@ -9277,6 +9389,13 @@ function bind() {
       const input = $('ai-text');
       const text = input?.value.trim();
       if (!text || input.disabled) return;
+      if (!aiReady(activeAi())) {
+        aiComposerText = input.value;
+        toast('AI Assist could not start. Add a key or a local model in Settings.');
+        openAiSettings();
+        return;
+      }
+      aiComposerText = '';
       askOnPage(text);
     }
     if (event.target.id === 'ai-inline') {
@@ -9284,8 +9403,8 @@ function bind() {
       const text = event.target.querySelector('input')?.value.trim() || '';
       if (!text) return;
       if (!aiReady(activeAi())) {
-        aiSetupOpen = true;
-        location.hash = '#/ai';
+        toast('AI Assist could not start. Add a key or a local model in Settings.');
+        openAiSettings();
         return;
       }
       aiPending = text;
@@ -9385,6 +9504,12 @@ function bind() {
       closePicker();
       return;
     }
+    if (event.key === 'Escape' && $('ai-model-pop') && !$('ai-model-pop').hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAiModels();
+      return;
+    }
     if (event.target.id === 'new-chat-handle') {
       onSuggestKey(event);
       return;
@@ -9456,6 +9581,7 @@ function bind() {
       return;
     }
     if (event.target.id !== 'chat-text' && event.target.id !== 'ai-text') return;
+    if (event.target.id === 'ai-text') aiComposerText = event.target.value;
     if (event.target.id === 'chat-text' && !event.isComposing) {
       if (event.isTrusted) applyHeldStyles(event.target);
       else event.target._before = event.target.value;
@@ -9543,6 +9669,14 @@ function bind() {
       if (pick === 'remote') {
         const id = event.target.closest('[data-ai-pick]')?.dataset.aiId || '';
         if (id && setActiveRemote(id)) setAiSource('account');
+      } else if (pick === 'local') {
+        setAiSource('local');
+        const hasModel = Boolean(loadLocalAi()?.model) || localHits.some((hit) => hit?.models?.length);
+        if (!hasModel && localScanState === 'done') {
+          toast('No local model yet. Set one in Settings.');
+          openAiSettings();
+          return;
+        }
       } else {
         setAiSource(pick);
       }

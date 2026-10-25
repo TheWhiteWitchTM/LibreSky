@@ -80,7 +80,7 @@ Type `@ai` or `@si`. Both tags ask the account you saved. Bluesky has no account
 
 Settings can hold a Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, Pollinations, or other account. Each row links to the site that issues a key. The key is saved on your Bluesky account, in the private preferences that follow this login. Anyone can read the public profile, so the key stays in those private preferences. The key is sent only to the provider you pick, and only when you ask, including a rewrite from the post box.
 
-AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The spark on the post box rewrites the draft that is already there. Use this keeps the rewrite. Dismiss leaves your words. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) explains how. Without a key it uses a free public model so the page still answers.
+AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The spark on the post box rewrites the draft that is already there. Use this keeps the rewrite. Dismiss leaves your words. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) is the chat. Free, a remote AI, or Local is the button under the box. A key, an address, and a local model are set under Settings, on the AI tab. Without a key it uses a free public model so the page still answers.
 
 ## A desk you can tune
 
@@ -93,7 +93,7 @@ AI Assist also has its own page, an ask field on Home, and a check on profiles a
 | Feeds | Home, threads, and search |
 | Languages | Content languages and the languages you post in |
 | Sound | A volume for chat, notifications, and new posts, plus read-aloud |
-| AI | The provider, the model, and the key |
+| AI | Remote keys, a local model, and which one answers. The chat picks Free, a remote AI, or Local under the box |
 
 Follow back can skip accounts that look like spam, and it pauses at a daily pace of 20, 40, or 100. Cleanup shows why an account looks off. Unfollow there holds the account, so follow back leaves it alone until you release it.
 

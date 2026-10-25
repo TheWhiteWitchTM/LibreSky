@@ -4,13 +4,18 @@ The paint is still wet. This is the record of the alpha you can [open today](htt
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 25 October 2026
+
+- AI Assist is a chat. Free, each remote AI, and Local sit in a menu under the box. Settings for a key, an address, or a local model stay on the AI tab. Config on the AI page opens that tab.
+- The emoji picker lists the Unicode 18 set, including flags. Skin tones for a single emoji are their own group. A profession or a family keeps its default form.
+
 ## 24 October 2026
 
 - Sending a chat with Send or Shift+Enter no longer draws the same message twice.
 - Emoji and GIF pickers open over the writing box, next to the buttons, so you do not scroll to find them.
 - A Flags button sits next to Emoji in the post box and in chat.
-- AI Assist settings live on the AI page. Config on that page opens them. Account AI and local AI are separate. Local stays in this browser. Find local lists models on this computer, and the desktop app can reach that server.
-- AI Assist can keep several remote AIs. The AI page picks Free, any remote, or Local. Local lists the models on this computer, and each model is a button.
+- Account AI and local AI are separate. Local stays in this browser. Find local lists models on this computer, and the desktop app can reach that server.
+- AI Assist can keep several remote AIs. The chat picks Free, any remote, or Local. Local lists the models on this computer.
 
 ## 22 October 2026
 
