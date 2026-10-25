@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-25-chat-end';
+const CACHE = 'libresky-2026-10-25-chat-title';
 
 const SHELL = [
   './',
@@ -54,7 +54,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     try {
-      const fresh = await fetch(req);
+      const fresh = await fetch(req, { cache: 'no-cache' });
       if (fresh && fresh.ok && fresh.type === 'basic') {
         const cache = await caches.open(CACHE);
         cache.put(req, fresh.clone());

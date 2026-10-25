@@ -16,7 +16,7 @@
 
 <p align="center"><strong>The sky, in a browser tab.</strong></p>
 
-LibreSky is a Bluesky client you open and stay in. Home is waiting. Discover is one click over. Search starts on what people are talking about right now. Chat, notifications, bookmarks, and your profile sit in the sidebar, and a voice or video call can leave straight from a conversation.
+LibreSky is a Bluesky client you open and stay in. Home is waiting. Discover is one click over. Search starts on what people are talking about right now. Chat, notifications, bookmarks, and your profile sit in the sidebar. A voice or video call starts from Calls or from someone else’s profile.
 
 <p align="center">
   <a href="https://thewhitewitchtm.github.io/LibreSky/"><strong>Open LibreSky</strong></a>

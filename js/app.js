@@ -4,7 +4,6 @@ import {
   accountIcon,
   actorHtml,
   avatar,
-  callBannerHtml,
   callRequestHtml,
   collectionCardHtml,
   callConvoHtml,
@@ -317,7 +316,11 @@ function measureHead() {
 }
 
 function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
-  $('title').textContent = title;
+  const titleEl = $('title');
+  titleEl.classList.remove('person-title');
+  titleEl.textContent = title;
+  const icon = $('page-icon');
+  if (icon) icon.hidden = false;
   $('back').hidden = !back;
   const bar = $('tabs');
   forgetStrips(bar);
@@ -775,9 +778,7 @@ async function loadConvoPages() {
 function paintIncomingBar(offer) {
   const bar = $('incoming-call');
   if (!bar) return;
-  const [page, id] = parseHash();
-  const onThisChat = Boolean(offer && page === 'messages' && id === offer.convoId);
-  const show = Boolean(offer) && !isInCall() && !onThisChat;
+  const show = Boolean(offer) && !isInCall();
   document.body.classList.toggle('ringing', show);
   if (!show) {
     bar.hidden = true;
@@ -1566,6 +1567,21 @@ function stopChatTimer() {
   chatTimer = 0;
 }
 
+function paintChatTitle(actor) {
+  const html = chatHeaderHtml(actor);
+  const title = $('title');
+  if (!html || !title) return;
+  const card = $('hovercard');
+  if (card?._anchor && title.contains(card._anchor)) closeHover();
+  title.classList.add('person-title');
+  title.innerHTML = html;
+  const icon = $('page-icon');
+  if (icon) icon.hidden = true;
+  const name = title.querySelector('strong')?.textContent || 'Chat';
+  document.title = `${name} — LibreSky`;
+  measureHead();
+}
+
 function otherMember(convo, messages) {
   const mine = myDid();
   const listed = (convo?.members || []).find((member) => member?.did && member.did !== mine);
@@ -1591,31 +1607,8 @@ function chatOptions(messages, peerDid, convoId, fresh) {
   };
 }
 
-function paintCallBanner(messages, peerDid, convoId) {
-  let offer = incomingCall(messages, myDid(), peerDid);
-  if (offer && ignoredRings.has(`${convoId}:${offer.rkey}`)) offer = null;
-  if (offer) {
-    const facts = {
-      allow: callAllow(),
-      followed: Boolean(followCache.get(peerDid)),
-      accepted: $('view')?.dataset.convoStatus !== 'request',
-    };
-    if (!callMayRing(facts) && !callIsRequest(facts)) offer = null;
-  }
-  const current = $('view')?.querySelector('.call-banner');
-  const busy = isInCall();
-  document.querySelectorAll('#view .call-actions').forEach((node) => {
-    const rkey = node.querySelector('[data-act="call-accept"]')?.dataset.rkey;
-    if (!offer || busy || rkey !== offer.rkey) node.remove();
-  });
-  if (!offer || busy) {
-    current?.remove();
-    return;
-  }
-  if (current?.querySelector('[data-act="call-accept"]')?.dataset.rkey === offer.rkey) return;
-  const html = callBannerHtml(offer, { convoId, peerDid });
-  if (current) current.outerHTML = html;
-  else $('view')?.querySelector('.chat-head')?.insertAdjacentHTML('afterend', html);
+function clearChatCallChrome() {
+  $('view')?.querySelectorAll('.call-banner, .call-actions').forEach((node) => node.remove());
 }
 
 function watchOpenChat(convoId, peerDid, token) {
@@ -1666,7 +1659,7 @@ function watchOpenChat(convoId, peerDid, token) {
         } else if (fromThem) playSound('chat');
         if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
       }
-      paintCallBanner(messages, peerDid, convoId);
+      clearChatCallChrome();
     } catch {
       /* the open chat stays as it is */
     }
@@ -1733,6 +1726,8 @@ async function showMessages(convoId) {
       return;
     }
     const cached = convoById.get(convoId) || null;
+    const cachedOther = otherMember(cached, null);
+    if (cachedOther) paintChatTitle(cachedOther);
     let loadError = null;
     const [data, convoWrap] = await Promise.all([
       api.getConvo(convoId).catch((error) => { loadError = error; return null; }),
@@ -1760,11 +1755,18 @@ async function showMessages(convoId) {
     styleHold.delete('chat-text');
     const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
-    const header = chatHeaderHtml(other) || `<div class="chat-head"><span class="chat-with"><span><strong>${requested ? 'Message request' : 'Chat'}</strong></span></span></div>`;
+    if (other) paintChatTitle(other);
+    else {
+      const label = requested ? 'Message request' : 'Chat';
+      $('title').classList.remove('person-title');
+      $('title').textContent = label;
+      if ($('page-icon')) $('page-icon').hidden = false;
+      document.title = `${label} — LibreSky`;
+    }
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
-    $('view').innerHTML = `<section class="chat-thread">${header}${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
-    paintCallBanner(messages, peerDid, convoId);
+    $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
+    clearChatCallChrome();
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
     applyFieldLanguage(area);
@@ -8102,7 +8104,7 @@ async function handleChromeAct(act, event) {
       toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
       return true;
     }
-    const peer = button?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
+    const peer = button?.dataset.peer || document.querySelector('.chat-head')?.dataset.peer;
     const media = act === 'call-video' ? 'video' : 'audio';
     try {
       const [page, id] = parseHash();
@@ -8128,7 +8130,7 @@ async function handleChromeAct(act, event) {
   if (act === 'call-accept') {
     event.preventDefault();
     if (!signedIn()) return requireSignIn(), true;
-    const peer = button?.dataset.peer || $('view')?.querySelector('.chat-head')?.dataset.peer;
+    const peer = button?.dataset.peer || document.querySelector('.chat-head')?.dataset.peer;
     const [page, id] = parseHash();
     const convoId = button?.dataset.convo || (page === 'messages' ? id : '');
     const rkey = button?.dataset.rkey || '';

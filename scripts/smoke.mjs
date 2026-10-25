@@ -1053,7 +1053,11 @@ assert.match(appSource, /ai-key-list/);
 assert.match(appSource, /free public model/);
 assert.match(appSource, /messagesForConvo/);
 assert.match(appSource, /id="chat-text" rows="1"/);
-assert.doesNotMatch(appSource.slice(appSource.indexOf('id="chat-form"'), appSource.indexOf('paintCallBanner(messages')), /chat-hint/);
+const chatAt = appSource.indexOf('id="chat-form"');
+const chatForm = appSource.slice(chatAt, appSource.indexOf('clearChatCallChrome()', chatAt));
+assert.ok(chatForm.length > 40);
+assert.doesNotMatch(chatForm, /chat-hint|Enter adds a line|Shift\+Enter sends\./);
+assert.doesNotMatch(chatForm, /call-audio|call-video|Voice call|Video call/);
 assert.match(index, /libresky\.ai/);
 assert.match(await readFile(path.join(root, 'js/ai.js'), 'utf8'), /libresky\.ai/);
 assert.doesNotMatch(index, /nav-pill/);
@@ -1220,12 +1224,9 @@ assert.equal(assembleCallSdp([
   { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:other'), '');
 const started = messageHtml({ id: 'm1', text: 'Started a voice call https://example.com/#/c/2222222222222', sender: { did: 'did:them' } }, 'did:me');
-assert.match(started, /msg-header/);
-assert.match(started, /Started a voice call/);
-assert.match(started, /msg-header audio/);
-assert.doesNotMatch(started, /class="bubble/);
-assert.doesNotMatch(started, /data-act="call-accept"/);
-assert.doesNotMatch(started, /example\.com/);
+assert.match(started, /hidden/);
+assert.match(started, /data-id="m1"/);
+assert.doesNotMatch(started, /msg-header|Started a voice call|Voice|Video|class="bubble|data-act="call-accept"|example\.com/);
 const incoming = messageHtml({ id: 'm9', text: 'new from them', sender: { did: 'did:them' } }, 'did:me', { fresh: true });
 assert.match(incoming, /class="bubble fresh"/);
 assert.doesNotMatch(incoming, /bubble mine/);
@@ -1234,13 +1235,8 @@ const liveVideo = messageHtml({
   text: 'Started a video call https://example.com/#/c/2222222222222',
   sender: { did: 'did:them' },
 }, 'did:me', { liveRkey: '2222222222222', convoId: 'room', peerDid: 'did:them' });
-assert.match(liveVideo, /msg-header video/);
-assert.match(liveVideo, /Started a video call/);
-assert.match(liveVideo, /data-act="call-accept"/);
-assert.match(liveVideo, /data-act="call-decline"/);
-assert.match(liveVideo, /data-media="video"/);
-assert.match(liveVideo, /data-convo="room"/);
-assert.doesNotMatch(liveVideo, /example\.com/);
+assert.match(liveVideo, /hidden/);
+assert.doesNotMatch(liveVideo, /msg-header|Started a video call|Voice|Video|data-act="call-accept"|data-act="call-decline"|example\.com/);
 const callRow = callConvoHtml({
   id: 'room',
   unreadCount: 2,
@@ -1282,11 +1278,17 @@ assert.doesNotMatch(liveCalls, /aria-disabled/);
 const quietCalls = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social', displayName: 'Ada' });
 assert.match(quietCalls, /chat-head/);
 assert.equal((quietCalls.match(/<strong>Ada<\/strong>/g) || []).length, 1);
+assert.equal((quietCalls.match(/Ada/g) || []).length, 2);
+assert.match(quietCalls, /class="chat-title-handle">@ada\.bsky\.social/);
+assert.doesNotMatch(quietCalls, /class="handle"/);
+const handleOnly = chatHeaderHtml({ did: 'did:x', handle: 'ada.bsky.social' });
+assert.match(handleOnly, /<strong>@ada\.bsky\.social<\/strong>/);
+assert.doesNotMatch(handleOnly, /chat-title-handle/);
 assert.doesNotMatch(quietCalls, /class="call-pair"/);
 assert.doesNotMatch(quietCalls, /data-act="call-audio"/);
 assert.doesNotMatch(quietCalls, /data-act="call-video"/);
-assert.doesNotMatch(quietCalls, /Voice call/);
-assert.doesNotMatch(quietCalls, /Video call/);
+assert.doesNotMatch(quietCalls, /Voice/);
+assert.doesNotMatch(quietCalls, /Video/);
 assert.match(quietCalls, /data-act="account-card"/);
 assert.match(quietCalls, /href="#\/profile\/ada\.bsky\.social"/);
 const personRow = actorHtml({
@@ -1311,6 +1313,11 @@ assert.doesNotMatch(hoverCardHtml({ did: 'did:me', handle: 'me.bsky.social' }, '
 const goneCalls = chatHeaderHtml({ did: 'did:gone', handle: 'handle.invalid' });
 assert.match(goneCalls, /Deleted account/);
 assert.doesNotMatch(goneCalls, /call-btn/);
+assert.doesNotMatch(goneCalls, /chat-title-handle/);
+assert.match(appSource, /function paintChatTitle/);
+assert.match(appSource, /paintChatTitle\(cachedOther\)/);
+assert.match(appSource, /paintChatTitle\(other\)/);
+assert.match(appCss, /\.headline h1\.person-title/);
 const packRow = packHtml({
   uri: 'at://did:example/app.bsky.graph.starterpack/abc',
   record: { name: 'Cats', description: 'meow' },

@@ -418,6 +418,45 @@ img { max-width: 100%; }
   font-size: 20px;
   letter-spacing: -0.02em;
 }
+.headline h1.person-title {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+  font-weight: 800;
+}
+.headline h1.person-title .chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.headline h1.person-title .chat-title-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.headline h1.person-title .chat-title-name strong { font-weight: 800; }
+.headline h1.person-title .chat-title-handle {
+  flex: none;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.headline h1.person-title .avatar.title {
+  width: 32px;
+  height: 32px;
+}
+.headline h1.person-title .avatar.title::before { font-size: 13px; }
 
 .shell {
   display: grid;
@@ -3392,6 +3431,7 @@ html[data-reader="on"] .post .sr-name {
   .head-support { width: 32px; padding: 0; }
 }
 @media (max-width: 640px) {
+  .headline h1.person-title .chat-title-handle { display: none; }
   .head-post span,
   .to-top span { display: none; }
   .head-post,

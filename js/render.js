@@ -673,12 +673,7 @@ function messagePreview(message) {
   if (!message) return 'No messages yet';
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
-  const call = parseCallMessage(message.text);
-  if (call?.kind === 'offer') return call.media === 'video' ? 'Started a video call' : 'Started a voice call';
-  if (call?.kind === 'answer') return call.media === 'video' ? 'Joined the video call' : 'Joined the voice call';
-  if (call?.kind === 'decline') return 'Declined the call';
-  if (call?.kind === 'end') return 'Call ended';
-  if (call?.kind === 'data') return 'Call';
+  if (parseCallMessage(message.text)) return 'Call';
   if (message.text) return message.text;
   if (message.embed) return 'Sent a post';
   return 'Message';
@@ -738,13 +733,6 @@ export function joinRequestHtml(item) {
   return `<div class="person convo">${avatar(owner.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">Waiting to join · ${escapeHtml(who)}</span></span><span class="row-actions"><button type="button" class="danger mini" data-act="withdraw-join" data-convo="${attr(item?.convoId || '')}">Withdraw</button></span></div>`;
 }
 
-function callLine(parsed) {
-  if (parsed.kind === 'offer') return parsed.media === 'video' ? 'Started a video call' : 'Started a voice call';
-  if (parsed.kind === 'answer') return parsed.media === 'video' ? 'Joined the video call' : 'Joined the voice call';
-  if (parsed.kind === 'decline') return 'Declined the call';
-  return 'Call ended';
-}
-
 export function messageHtml(message, me, options = {}) {
   const type = message?.$type || '';
   if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
@@ -758,18 +746,8 @@ export function messageHtml(message, me, options = {}) {
   const sender = messageSender(message) || messageSender(nested);
   const mine = Boolean(sender && sender === me);
   const text = message?.text || nested?.text || '';
-  const call = parseCallMessage(text);
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-  if (call?.kind === 'data') return `<div class="msg-signal"${id} hidden></div>`;
-  if (call) {
-    const video = call.media === 'video';
-    const live = Boolean(!mine && options.liveRkey && call.kind === 'offer' && call.rkey && call.rkey === options.liveRkey);
-    const tone = video ? ' video' : (call.media === 'audio' ? ' audio' : '');
-    const actions = live
-      ? `<span class="call-actions"><button type="button" class="primary small" data-act="call-accept" data-rkey="${attr(call.rkey)}" data-media="${attr(call.media || 'audio')}" data-convo="${attr(options.convoId || '')}" data-peer="${attr(options.peerDid || sender || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(call.rkey)}" data-convo="${attr(options.convoId || '')}">Decline</button></span>`
-      : '';
-    return `<div class="msg-header${tone}"${id}>${icon(video ? 'video' : 'phone')}<span>${escapeHtml(callLine(call))}</span>${actions}</div>`;
-  }
+  if (parseCallMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
   const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';
@@ -821,9 +799,11 @@ export function callConvoHtml(convo, me) {
 export function chatHeaderHtml(actor) {
   if (!actor) return '';
   const gone = deletedAccount(actor);
-  const name = gone ? 'Deleted account' : (actor.displayName || actor.handle || 'Chat');
-  const handle = gone ? 'This account was deleted' : (actor.handle ? `@${actor.handle}` : '');
-  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor)}<a class="chat-with" href="${profileHash(actor)}"><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span></a></div>`;
+  const display = String(actor.displayName || '').trim();
+  const handle = String(actor.handle || '').trim();
+  const name = gone ? 'Deleted account' : (display || (handle ? `@${handle}` : 'Chat'));
+  const meta = !gone && display && handle ? `<span class="chat-title-handle">@${escapeHtml(handle)}</span>` : '';
+  return `<div class="chat-head" data-peer="${attr(actor.did || '')}">${accountIcon(actor, 'title', 'chat-title-face')}<a class="chat-title-name" href="${profileHash(actor)}"><strong>${escapeHtml(name)}</strong></a>${meta}</div>`;
 }
 
 export function hoverCardHtml(profile, self = '') {
