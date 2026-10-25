@@ -55,7 +55,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseHash, partitionConvos, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseHash, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -145,6 +145,7 @@ let homeLanes = [];
 let homeLanesDid = '';
 let lanesAt = 0;
 let laneDraft = null;
+let laneSaveChain = Promise.resolve();
 let shownProfile = null;
 let profileLinkViews = [];
 let profileFeatured = new Set();
@@ -169,19 +170,31 @@ function toast(message) {
 
 let postedTimer = 0;
 
-function showPosted(message) {
+function hidePosted() {
   const bar = $('posted-bar');
   if (!bar) return;
-  bar.textContent = message;
+  bar.hidden = true;
+  bar.classList.remove('is-on');
+}
+
+function armPosted(life) {
+  clearTimeout(postedTimer);
+  postedTimer = setTimeout(hidePosted, life);
+}
+
+function showPosted(message, href = '') {
+  const bar = $('posted-bar');
+  if (!bar) return;
+  const link = href ? `<a class="posted-view" href="${escapeHtml(href)}">View</a>` : '';
+  bar.innerHTML = `<span>${escapeHtml(message)}</span>${link}`;
+  bar.classList.toggle('has-view', Boolean(href));
+  const life = href ? 12000 : 6000;
+  bar.style.animationDuration = `${life}ms`;
   bar.hidden = false;
   bar.classList.remove('is-on');
   void bar.offsetWidth;
   bar.classList.add('is-on');
-  clearTimeout(postedTimer);
-  postedTimer = setTimeout(() => {
-    bar.hidden = true;
-    bar.classList.remove('is-on');
-  }, 6000);
+  armPosted(life);
 }
 
 function remember() {
@@ -314,6 +327,7 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
   measureHead();
   requestAnimationFrame(measureHead);
+  if (!$('tour')?.hidden) requestAnimationFrame(placeTour);
 }
 
 function showSkeletons() {
@@ -783,7 +797,10 @@ async function refreshBadge() {
   }
   try {
     const data = await api.getUnreadCount();
-    const count = data.count || 0;
+    let count = data.count || 0;
+    if (followDeskPrefs().notify === false && count > 0) {
+      try { count = await unreadWithoutFollows(count); } catch { /* the server count still shows */ }
+    }
     paintBadge('notif-badge', count);
     if (badgeMemory.notifications !== null && count > badgeMemory.notifications) playSound('notifications');
     badgeMemory.notifications = count;
@@ -810,6 +827,25 @@ async function refreshBadge() {
   } catch {
     paintBadge('chat-badge', 0);
   }
+}
+
+async function unreadWithoutFollows(count) {
+  let hidden = 0;
+  let cursor = '';
+  for (let page = 0; page < 4; page += 1) {
+    const data = await api.getNotifications(cursor || null, null, ['follow']);
+    const notes = data.notifications || [];
+    const unread = notes.filter((note) => note && !note.isRead).length;
+    hidden += unread;
+    if (!data.cursor || unread === 0 || data.cursor === cursor) break;
+    cursor = data.cursor;
+  }
+  return Math.max(0, count - hidden);
+}
+
+function quietFollows(notes, filter) {
+  if (followDeskPrefs().notify !== false || filter === 'follows') return notes || [];
+  return (notes || []).filter((note) => note?.reason !== 'follow');
 }
 
 function loadTrends() {
@@ -1443,9 +1479,14 @@ async function showNotifications(filter) {
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
-      const rows = notificationsHtml(all, subjects);
+      const shown = quietFollows(all, current);
+      const rows = notificationsHtml(shown, subjects);
       const tools = `<div class="toolbar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>`;
-      $('view').innerHTML = tools + (rows || emptyHtml('No notifications', 'You are all caught up.'));
+      const quiet = shown.length === 0 && all.some((note) => note?.reason === 'follow') && followDeskPrefs().notify === false && current !== 'follows';
+      const blank = quiet
+        ? emptyHtml('Follows are quiet', 'New followers stay off the bell. Open the Follows tab to see them.')
+        : emptyHtml('No notifications', 'You are all caught up.');
+      $('view').innerHTML = tools + (rows || blank);
     };
     paint();
     const more = async (cursor) => {
@@ -2123,15 +2164,13 @@ function paintAttachCurrent() {
     return;
   }
   host.hidden = false;
-  const tabs = profileLinkViews.map((view) => {
+  const rows = profileLinkViews.map((view) => {
     const tab = featuredTab(view);
-    if (!tab) return '';
-    const remove = profileFeatured.has(view.uri)
-      ? `<button type="button" class="lane-x" data-act="shelf-unpin" data-uri="${escapeHtml(view.uri)}" aria-label="Remove ${escapeHtml(tab.label)}">×</button>`
-      : '';
-    return `<span class="lane-tab" role="tab"><span>${escapeHtml(tab.label)}</span>${remove}</span>`;
+    const label = tab?.label || view.displayName || view.name || 'Link';
+    if (!view?.uri) return '';
+    return `<div class="lane-row"><span><strong>${escapeHtml(label)}</strong></span><button type="button" class="danger mini" data-act="shelf-unpin" data-uri="${escapeHtml(view.uri)}">Remove</button></div>`;
   }).join('');
-  host.innerHTML = `<p class="dim">Same row as Home. Posts stays. Added links sit beside it.</p><div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist"><span role="tab" aria-selected="true">Posts</span><span role="tab">Replies</span><span role="tab">Media</span><span role="tab">Likes</span>${tabs}</div></div>`;
+  host.innerHTML = `<p class="dim">Posts, Replies, Media, and Likes stay. Remove takes an attached link off this row.</p>${rows || '<p class="dim">Nothing attached yet.</p>'}`;
 }
 
 async function resolveFeatured(ref) {
@@ -2146,46 +2185,33 @@ async function resolveFeatured(ref) {
   return null;
 }
 
+function featuredStub(item) {
+  const uri = item?.uri || '';
+  const name = uri.includes('/app.bsky.feed.generator/')
+    ? 'Feed'
+    : uri.includes('/app.bsky.graph.starterpack/')
+      ? 'Starter pack'
+      : 'List';
+  return { uri, cid: item?.cid || '', displayName: name, name };
+}
+
 async function loadProfileShelf(profile, token) {
   const did = profile?.did;
   if (!did || !$('profile-tabs')) return;
   try {
-    const [feeds, lists, packs, featured] = await Promise.all([
-      api.getActorFeeds(did).catch(() => ({ feeds: [] })),
-      api.getLists(did).catch(() => ({ lists: [] })),
-      api.getActorStarterPacks(did).catch(() => ({ starterPacks: [] })),
-      api.readFeatured(did).catch(() => []),
-    ]);
+    const featured = await api.readFeatured(did).catch(() => []);
     if (token !== generation || !$('profile-tabs')) return;
-    const byUri = new Map();
-    const add = (item) => { if (item?.uri && item?.cid) byUri.set(item.uri, item); };
-    const packLists = new Set((packs.starterPacks || []).flatMap((pack) => [pack?.record?.list, pack?.list?.uri]).filter(Boolean));
-    (feeds.feeds || []).forEach(add);
-    (lists.lists || []).forEach((list) => {
-      if (packLists.has(list.uri) && String(list.purpose || '').includes('referencelist')) return;
-      add(list);
-    });
-    (packs.starterPacks || []).forEach(add);
-    const missing = featured.filter((item) => item?.uri && !byUri.has(item.uri));
-    if (missing.length) {
-      const resolved = await Promise.all(missing.map((item) => resolveFeatured(item)));
-      if (token !== generation || !$('profile-tabs')) return;
-      resolved.forEach(add);
-    }
-    const ordered = [];
+    const refs = [];
     const seen = new Set();
-    featured.forEach((item) => {
-      const view = byUri.get(item.uri);
-      if (!view || seen.has(view.uri)) return;
-      seen.add(view.uri);
-      ordered.push(view);
+    (featured || []).forEach((item) => {
+      if (!item?.uri || seen.has(item.uri)) return;
+      seen.add(item.uri);
+      refs.push(item);
     });
-    byUri.forEach((view) => {
-      if (seen.has(view.uri)) return;
-      seen.add(view.uri);
-      ordered.push(view);
-    });
-    profileFeatured = new Set((featured || []).map((item) => item?.uri).filter(Boolean));
+    const resolved = await Promise.all(refs.map((item) => resolveFeatured(item)));
+    if (token !== generation || !$('profile-tabs')) return;
+    const ordered = refs.map((item, index) => (resolved[index]?.uri ? resolved[index] : featuredStub(item)));
+    profileFeatured = new Set(ordered.map((view) => view.uri).filter(Boolean));
     profileLinkViews = ordered;
     paintProfileTabs();
     if ($('attach')?.open) paintAttachCurrent();
@@ -2265,17 +2291,22 @@ function paintLaneEditor() {
   const body = $('lanes-body');
   if (!body || !laneDraft) return;
   const showing = laneDraft.showing;
+  const preview = showing.map((item) => `<span role="tab">${escapeHtml(item.label)}</span>`).join('');
   const rows = showing.map((item, index) => {
     const up = index === 0 ? ' disabled' : '';
     const down = index === showing.length - 1 ? ' disabled' : '';
-    return `<span class="lane-tab" role="tab"><button type="button" class="lane-nudge" data-act="lane-up" data-index="${index}"${up} aria-label="Move left">${CHEVRON_LEFT}</button><span>${escapeHtml(item.label)}</span><button type="button" class="lane-nudge" data-act="lane-down" data-index="${index}"${down} aria-label="Move right">${CHEVRON_RIGHT}</button><button type="button" class="lane-x" data-act="lane-remove" data-index="${index}" aria-label="Remove ${escapeHtml(item.label)}">×</button></span>`;
+    const kind = item.type === 'list' ? 'List' : 'Saved feed';
+    return `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${kind}</span></span><span class="lane-moves"><button type="button" class="lane-move" data-act="lane-up" data-index="${index}"${up} aria-label="Move ${escapeHtml(item.label)} left">${CHEVRON_LEFT}</button><button type="button" class="lane-move" data-act="lane-down" data-index="${index}"${down} aria-label="Move ${escapeHtml(item.label)} right">${CHEVRON_RIGHT}</button><button type="button" class="danger mini" data-act="lane-remove" data-index="${index}">Remove</button></span></div>`;
   }).join('');
   const available = laneDraft.available.map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">${escapeHtml(item.kind)}</span></span><button type="button" class="text-btn" data-act="lane-add" data-type="${escapeHtml(item.type)}" data-value="${escapeHtml(item.value)}" data-label="${escapeHtml(item.label)}">Add</button></div>`).join('');
-  body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist"><span role="tab" aria-selected="true">Following</span><span role="tab">Discover</span>${rows}</div></div>
-    ${rows ? '' : '<p class="dim">Nothing extra yet. Add a list or a saved feed below. It shows on this row.</p>'}
+  forgetStrips(body);
+  body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist"><span role="tab" aria-selected="true">Following</span><span role="tab">Discover</span>${preview}</div></div>
+    <h3>On this row</h3>
+    ${rows || '<p class="dim">Nothing extra yet. Add a list or a saved feed below.</p>'}
     <h3>Add</h3>
     ${available || '<p class="dim">No other lists or saved feeds. Create a list or save a feed, then add it here.</p>'}
     <button type="button" class="primary lanes-save" data-act="lane-save">Save</button>`;
+  watchStrips(body);
 }
 
 async function openLaneEditor() {
@@ -2308,6 +2339,7 @@ function editLaneDraft(act, button) {
     laneDraft.showing.push({ type, value, label: button.dataset.label || (type === 'list' ? 'List' : 'Feed') });
     laneDraft.available = laneDraft.available.filter((item) => item.value !== value);
     paintLaneEditor();
+    queueLaneSave({ close: false, note: 'Added to Home' });
     return;
   }
   const index = Number(button?.dataset.index);
@@ -2315,20 +2347,28 @@ function editLaneDraft(act, button) {
   if (act === 'lane-remove') {
     const [item] = laneDraft.showing.splice(index, 1);
     if (item) laneDraft.available.push({ ...item, kind: item.type === 'list' ? 'List' : 'Saved feed' });
-  } else {
-    const dir = act === 'lane-up' ? -1 : 1;
-    const next = index + dir;
-    if (next < 0 || next >= laneDraft.showing.length) return;
-    const [item] = laneDraft.showing.splice(index, 1);
-    laneDraft.showing.splice(next, 0, item);
+    paintLaneEditor();
+    queueLaneSave({ close: false, note: 'Removed from Home' });
+    return;
   }
+  const dir = act === 'lane-up' ? -1 : 1;
+  const next = index + dir;
+  if (next < 0 || next >= laneDraft.showing.length) return;
+  const [item] = laneDraft.showing.splice(index, 1);
+  laneDraft.showing.splice(next, 0, item);
   paintLaneEditor();
 }
 
-async function saveLaneDraft() {
+function queueLaneSave(options) {
+  const job = laneSaveChain.then(() => saveLaneDraft(options));
+  laneSaveChain = job.catch(() => {});
+  return job;
+}
+
+async function saveLaneDraft({ close = true, note = '' } = {}) {
   if (!laneDraft || !signedIn()) return;
   const showing = laneDraft.showing.map((item) => ({ ...item }));
-  const button = $('lanes-body')?.querySelector('[data-act="lane-save"]');
+  const button = close ? $('lanes-body')?.querySelector('[data-act="lane-save"]') : null;
   if (button) button.disabled = true;
   try {
     await changeFeeds((items) => {
@@ -2348,8 +2388,9 @@ async function saveLaneDraft() {
     homeLanes = showing;
     homeLanesDid = myDid();
     lanesAt = Date.now();
-    $('lanes')?.close();
-    toast('Home tabs saved');
+    if (close) $('lanes')?.close();
+    const said = note || (close ? 'Home tabs saved' : '');
+    if (said) toast(said);
     const active = homeActive();
     if (active?.kind === 'lane' && !homeLanes.some((item) => item.value === active.value)) location.hash = '#/';
     else if (active) paintHomeChrome(active);
@@ -3016,6 +3057,11 @@ function onPrefToggle(name, checked) {
   } else if (name === 'a11y.reader') {
     applyA11y(saveA11yPrefs({ reader: checked }));
     return;
+  } else if (name === 'follow.notify') {
+    saveFollowDeskPrefs({ notify: checked });
+    refreshBadge();
+    if (parseHash()[0] === 'notifications') showNotifications(parseHash()[1] || '');
+    return;
   } else if (name === 'follow.auto' || name === 'follow.skipSpam') {
     const key = name === 'follow.auto' ? 'auto' : 'skipSpam';
     saveFollowDeskPrefs({ [key]: checked });
@@ -3348,11 +3394,18 @@ function followBackPanel() {
     </div>`;
 }
 
+function followNotifyPanel() {
+  const on = followDeskPrefs().notify !== false;
+  return `<h2>When someone follows you</h2>
+    ${switchRow('follow.notify', 'Notify me when someone follows me', on, 'Off keeps a new follow out of the bell and the All list. The Follows tab still lists them.')}`;
+}
+
 function followCleanupPanel() {
   const filters = followCleanup.filters;
   const choice = (key, options) => options.map(([id, label]) => `<button type="button" data-cleanup="${key}" data-value="${id}" aria-pressed="${filters[key] === id ? 'true' : 'false'}">${label}</button>`).join('');
   const note = signedIn() ? 'Loading people you follow…' : 'Sign in to load people you follow.';
-  return `${followBackPanel()}
+  return `${followNotifyPanel()}
+    ${followBackPanel()}
     <h2>Clean up follows</h2>
     <p class="dim">Find accounts you followed without looking, especially empty ones and ones that do not follow you back. Each row says why it looks off. Unfollow keeps them off auto follow back until you release them, and Follow them again puts the last batch back.</p>
     <h3>Looks like</h3>
@@ -4536,9 +4589,294 @@ function noteNav() {
   if (navStack.length > 40) navStack.shift();
 }
 
+let tourIndex = 0;
+
+function tourStepList() {
+  const signed = signedIn();
+  return [
+    {
+      kicker: 'LibreSky',
+      title: 'A Bluesky client, in this window',
+      copy: 'Home, a post, chat, a call, and AI Assist. This short tour shows where each one lives.',
+      chips: ['Edit', 'AI', 'Voice', 'Video', 'Chat'],
+    },
+    {
+      kicker: 'Home',
+      title: 'The mark brings you home',
+      copy: 'The LibreSky mark returns to Home. Back stays inside the app and returns to the page you came from.',
+      targets: ['.top-mark'],
+    },
+    {
+      kicker: 'Menu',
+      title: 'Help, config, and this tour',
+      copy: 'The menu holds Help, Config, Downloads, this tour, and Support development.',
+      targets: ['#app-menu-btn'],
+    },
+    {
+      kicker: 'Move around',
+      title: 'The main sections',
+      copy: 'Home, Search, Notifications, Chat, Bookmarks, and Profile. Calls and AI Assist sit here too. More holds feeds, lists, starter packs, settings, About, Privacy, and Terms.',
+      targets: ['.left', '.tabbar'],
+    },
+    {
+      kicker: 'Home',
+      title: 'The row of tabs',
+      copy: 'Following and Discover stay. Lists and saved feeds you pin sit on the same row. Remove takes one off.',
+      targets: ['#tabs', '.sticky-head'],
+    },
+    {
+      kicker: 'Write',
+      title: 'A post, then View',
+      copy: 'Images, video, a link, a GIF, emoji, and a feed or list. The spark asks AI Assist to rewrite. The mic types what you say in Chrome and Edge. After you post, the bar stays up with View.',
+      targets: ['.head-post', '.post-btn', '.fab'],
+    },
+    {
+      kicker: 'Search',
+      title: 'Find people and posts',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs.',
+      targets: ['#rail-q', '[data-nav="search"]'],
+    },
+    {
+      kicker: 'Notifications',
+      title: 'Likes, replies, and follows',
+      copy: 'Likes, replies, mentions, reposts, and follows land here. Settings, under Follows, chooses whether a new follow rings the bell.',
+      targets: ['[data-nav="notifications"]'],
+    },
+    {
+      kicker: 'Chat',
+      title: 'Messages on your account',
+      copy: 'Chat uses your Bluesky account. Requests wait until you accept them. A voice or video call starts from the same conversation.',
+      targets: ['[data-nav="messages"]'],
+    },
+    {
+      kicker: 'Calls',
+      title: 'Voice and video',
+      copy: 'A call connects two LibreSky windows. Mute and the camera stay on your side. The time shows once you are connected.',
+      targets: ['[data-nav="calls"]', '[data-nav="messages"]'],
+    },
+    {
+      kicker: 'AI Assist',
+      title: 'Ask in the same window',
+      copy: '@ai and @si ask from a post or a chat. The AI Assist page keeps the thread. A free model answers before you add a key. Local stays on this computer.',
+      targets: ['[data-nav="ai"]'],
+    },
+    {
+      kicker: 'Profile',
+      title: 'Your posts, and what you attach',
+      copy: 'Posts, Replies, Media, and Likes stay on the row. Feeds, lists, and starter packs you attach sit beside them. Remove takes one off.',
+      targets: ['[data-nav="profile"]'],
+    },
+    {
+      kicker: 'You are set',
+      title: signed ? 'Open it again any time' : 'Sign in when you want your own Home',
+      copy: signed
+        ? 'Open this tour again from the menu at the top.'
+        : 'Sign in with Bluesky when you want Following, chat, and your profile. You can open this tour again from the menu.',
+      chips: signed ? ['Menu'] : ['Sign in', 'Menu'],
+    },
+  ];
+}
+
+function tourTarget(step) {
+  const list = step?.targets || [];
+  for (const selector of list) {
+    for (const node of document.querySelectorAll(selector)) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width >= 2 && rect.height >= 2) return node;
+    }
+  }
+  return null;
+}
+
+const TOUR_LOCK = ['.app-top', '.shell', '.fab'];
+
+function setTourLock(on) {
+  TOUR_LOCK.forEach((selector) => document.querySelector(selector)?.toggleAttribute('inert', on));
+  document.documentElement.classList.toggle('tour-open', on);
+}
+
+function openTour(index = 0) {
+  const overlay = $('tour');
+  if (!overlay) return;
+  closeAppMenu();
+  closeMenu();
+  closeAlphaMenu();
+  const steps = tourStepList();
+  tourIndex = Math.max(0, Math.min(index, steps.length - 1));
+  overlay.hidden = false;
+  setTourLock(true);
+  paintTour();
+  $('tour-next')?.focus();
+}
+
+function closeTour() {
+  const overlay = $('tour');
+  if (!overlay || overlay.hidden) return;
+  overlay.hidden = true;
+  setTourLock(false);
+  const cut = $('tour-cut');
+  if (cut) {
+    cut.setAttribute('width', '0');
+    cut.setAttribute('height', '0');
+  }
+  const ring = $('tour-ring');
+  if (ring) ring.hidden = true;
+}
+
+function stepTour(dir) {
+  const steps = tourStepList();
+  const next = tourIndex + dir;
+  if (next < 0) return;
+  if (next >= steps.length) {
+    closeTour();
+    return;
+  }
+  tourIndex = next;
+  paintTour();
+}
+
+function paintTour() {
+  const steps = tourStepList();
+  const step = steps[tourIndex];
+  if (!step) {
+    closeTour();
+    return;
+  }
+  const kicker = $('tour-kicker');
+  const count = $('tour-count');
+  const title = $('tour-title');
+  const copy = $('tour-copy');
+  if (kicker) kicker.textContent = step.kicker;
+  if (count) count.textContent = `${tourIndex + 1} of ${steps.length}`;
+  if (title) title.textContent = step.title;
+  if (copy) copy.textContent = step.copy;
+  const chips = $('tour-chips');
+  if (chips) {
+    if (step.chips?.length) {
+      chips.hidden = false;
+      chips.innerHTML = step.chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join('');
+    } else {
+      chips.hidden = true;
+      chips.innerHTML = '';
+    }
+  }
+  const meter = $('tour-meter');
+  if (meter) meter.innerHTML = steps.map((_, index) => `<span class="${index === tourIndex ? 'on' : ''}"></span>`).join('');
+  const back = $('tour-back');
+  const skip = $('tour-skip');
+  const next = $('tour-next');
+  if (back) back.hidden = tourIndex === 0;
+  if (skip) skip.hidden = tourIndex === steps.length - 1;
+  if (next) next.textContent = tourIndex === steps.length - 1 ? 'Done' : 'Next';
+  placeTour();
+  requestAnimationFrame(() => {
+    placeTour();
+    requestAnimationFrame(placeTour);
+  });
+}
+
+function placeTour() {
+  const overlay = $('tour');
+  if (!overlay || overlay.hidden) return;
+  const step = tourStepList()[tourIndex];
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const svg = $('tour-svg');
+  if (svg) {
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+  }
+  [$('tour-mask'), $('tour-mask-bg'), $('tour-dim')].forEach((node) => {
+    if (!node) return;
+    node.setAttribute('x', '0');
+    node.setAttribute('y', '0');
+    node.setAttribute('width', String(width));
+    node.setAttribute('height', String(height));
+  });
+  const target = step ? tourTarget(step) : null;
+  const cut = $('tour-cut');
+  const ring = $('tour-ring');
+  const card = $('tour-card');
+  const pad = 8;
+  let rect = null;
+  if (target) {
+    const box = target.getBoundingClientRect();
+    const x = Math.max(8, box.left - pad);
+    const y = Math.max(8, box.top - pad);
+    const right = Math.min(width - 8, box.right + pad);
+    const bottom = Math.min(height - 8, box.bottom + pad);
+    rect = { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+  }
+  if (cut) {
+    cut.setAttribute('x', rect ? String(rect.x) : '0');
+    cut.setAttribute('y', rect ? String(rect.y) : '0');
+    cut.setAttribute('width', rect ? String(rect.width) : '0');
+    cut.setAttribute('height', rect ? String(rect.height) : '0');
+    cut.setAttribute('rx', '14');
+  }
+  if (ring) {
+    if (rect) {
+      ring.hidden = false;
+      ring.style.left = `${rect.x}px`;
+      ring.style.top = `${rect.y}px`;
+      ring.style.width = `${rect.width}px`;
+      ring.style.height = `${rect.height}px`;
+    } else ring.hidden = true;
+  }
+  if (!card) return;
+  card.classList.toggle('is-center', !rect);
+  if (!rect) {
+    card.style.left = '50%';
+    card.style.top = '50%';
+    card.style.transform = 'translate(-50%, -50%)';
+    return;
+  }
+  card.style.transform = 'none';
+  const cardBox = card.getBoundingClientRect();
+  const cardWidth = cardBox.width || Math.min(380, width - 24);
+  const cardHeight = cardBox.height || 220;
+  const gap = 16;
+  const roomRight = width - (rect.x + rect.width) - 16;
+  const roomLeft = rect.x - 16;
+  const tall = rect.height > height * 0.55;
+  const beside = rect.x < 280 || tall || rect.x + rect.width < width * 0.45;
+  let left = rect.x;
+  let top = rect.y + rect.height + gap;
+  if (beside && roomRight > cardWidth + gap) {
+    left = rect.x + rect.width + gap;
+    top = tall ? (height - cardHeight) / 2 : rect.y + (rect.height / 2) - (cardHeight / 2);
+  } else if (tall && roomLeft > cardWidth + gap) {
+    left = rect.x - gap - cardWidth;
+    top = (height - cardHeight) / 2;
+  } else if (top + cardHeight > height - 12) {
+    top = rect.y - gap - cardHeight;
+  }
+  left = Math.max(12, Math.min(left, width - cardWidth - 12));
+  top = Math.max(12, Math.min(top, height - cardHeight - 12));
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
+}
+
+function openTourFromHash() {
+  if ($('login')?.open) $('login').close();
+  if (!signedIn()) {
+    rememberBrowse();
+    document.documentElement.removeAttribute('data-signed-out');
+  }
+  if (navStack[navStack.length - 1] === '#/tour') navStack.pop();
+  const next = `${location.pathname}${location.search}#/`;
+  if (`${location.pathname}${location.search}${location.hash}` !== next) history.replaceState(null, '', next);
+  if (!navStack.length || navStack[navStack.length - 1] !== '#/') navStack.push('#/');
+  showHome({ kind: 'following' });
+  openTour(0);
+}
+
 function fallbackBack() {
   const [a, b, c] = parseHash();
-  if (!a || a === 'discover' || a === 'lane') return '#/';
+  if (!a || a === 'discover' || a === 'lane' || a === 'tour') return '#/';
   if (a === 'messages' && b) return '#/messages';
   if (a === 'notifications' && b) return '#/notifications';
   if (a === 'profile' && b && c) return `#/profile/${encodeURIComponent(b)}`;
@@ -4576,6 +4914,7 @@ function route() {
   pager?.disconnect();
   selected = -1;
   const [a, b, c, d] = parseHash();
+  if (a === 'tour') return openTourFromHash();
   if (!a) return showHome({ kind: 'following' });
   if (a === 'discover') return showHome({ kind: 'discover' });
   if (a === 'lane' && (b === 'list' || b === 'feed') && c) return showHome({ kind: 'lane', type: b, value: c });
@@ -5677,7 +6016,10 @@ async function publish(event) {
     }
     if (!reply && !quote && !editing) saveDraft('');
     dialog.close();
-    showPosted(editing ? 'Updated' : 'Posted');
+    const href = created?.uri
+      ? postHash({ uri: created.uri, author: { handle: account()?.handle || myDid(), did: myDid() } })
+      : '';
+    showPosted(editing ? 'Updated' : 'Posted', href);
     if (gateWarning.trim()) toast(gateWarning.trim());
     route();
   } catch (error) {
@@ -6127,7 +6469,7 @@ function paintAttachKinds() {
   if (title) title.textContent = attachMode === 'profile' ? 'Attach to your profile' : 'Attach to this post';
   if (note) {
     note.textContent = attachMode === 'profile'
-      ? 'Added links sit on your profile row, the same way lists sit on Home.'
+      ? 'Added links sit on your profile row. Remove takes one off. Posts, Replies, Media, and Likes stay.'
       : 'This is embedded in the post, so other Bluesky apps show it too.';
   }
   paintAttachCurrent();
@@ -6213,13 +6555,23 @@ async function pinFeatured(view) {
 async function unpinFeatured(uri) {
   if (!uri || attachBusy) return;
   attachBusy = true;
+  const previousViews = profileLinkViews;
+  const previousFeatured = profileFeatured;
+  profileLinkViews = profileLinkViews.filter((view) => view.uri !== uri);
+  profileFeatured = new Set([...profileFeatured].filter((item) => item !== uri));
+  paintProfileTabs();
+  if ($('attach')?.open) paintAttachCurrent();
   try {
     const current = await api.readFeatured(myDid());
     await api.writeFeatured(current.filter((item) => item.uri !== uri));
-    toast('Unpinned.');
+    toast('Removed.');
     loadProfileShelf({ did: myDid() }, generation);
   } catch (error) {
-    toast(error.message || 'Could not unpin that.');
+    profileLinkViews = previousViews;
+    profileFeatured = previousFeatured;
+    paintProfileTabs();
+    if ($('attach')?.open) paintAttachCurrent();
+    toast(error.message || 'Could not remove that.');
   } finally {
     attachBusy = false;
   }
@@ -7290,7 +7642,12 @@ async function handleChromeAct(act, event) {
   }
   if (act === 'lane-save') {
     event.preventDefault();
-    await saveLaneDraft();
+    await queueLaneSave({ close: true, note: 'Home tabs saved' });
+    return true;
+  }
+  if (act === 'tour') {
+    event.preventDefault();
+    openTour(0);
     return true;
   }
   if (act === 'soon') {
@@ -8970,6 +9327,41 @@ function scrollToTop() {
 }
 
 function onKey(event) {
+  if (!$('tour')?.hidden) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTour();
+      return;
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepTour(1);
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepTour(-1);
+      return;
+    }
+    if (event.key === 'Tab') {
+      const nodes = [...($('tour-card')?.querySelectorAll('button:not([hidden])') || [])];
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const inside = nodes.includes(document.activeElement);
+      if (event.shiftKey && (document.activeElement === first || !inside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !inside)) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') return;
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape') {
     const appMenu = $('app-menu');
     if (layerOpen(appMenu)) {
@@ -9133,6 +9525,7 @@ function bind() {
       closeAlphaMenu();
     }
     placeFresh();
+    placeTour();
   }, true);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && homeWatch.timer) pollHome(homeWatch.token);
@@ -9145,6 +9538,7 @@ function bind() {
       placeOpenLayers();
     }
     placeFresh();
+    placeTour();
     if (designOn()) paintDesignReadout();
     measureHead();
     document.querySelectorAll('.tab-scroller').forEach((scroller) => syncStrip(scroller));
@@ -9181,6 +9575,25 @@ function bind() {
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('help-close')?.addEventListener('click', () => $('help')?.close());
   $('lanes-close')?.addEventListener('click', () => $('lanes')?.close());
+  $('login-tour')?.addEventListener('click', () => {
+    startBrowse();
+    openTour(0);
+  });
+  $('tour-next')?.addEventListener('click', () => stepTour(1));
+  $('tour-back')?.addEventListener('click', () => stepTour(-1));
+  $('tour-skip')?.addEventListener('click', () => closeTour());
+  const posted = $('posted-bar');
+  posted?.addEventListener('mouseenter', () => clearTimeout(postedTimer));
+  posted?.addEventListener('mouseleave', () => {
+    if (!posted.hidden) armPosted(2500);
+  });
+  posted?.addEventListener('focusin', () => clearTimeout(postedTimer));
+  posted?.addEventListener('focusout', () => {
+    if (!posted.hidden) armPosted(2500);
+  });
+  posted?.addEventListener('click', (event) => {
+    if (event.target.closest('a')) hidePosted();
+  });
   $('help')?.addEventListener('click', (event) => {
     if (event.target.closest('a[href^="#"]')) $('help')?.close();
   });

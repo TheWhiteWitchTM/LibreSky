@@ -6,6 +6,10 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 25 October 2026
 
+- Settings, under Follows, can keep a new follow off the bell and the All list. The Follows tab still lists them.
+- The bar after a post matches the new-posts pill. A post includes View and stays up longer.
+- Home tabs and profile links can be removed. Remove on Home writes the row. Remove on a profile takes that attached link off.
+- Take the tour sits in the menu and on the sign-in page.
 - AI Assist is a chat. Free, each remote AI, and Local sit in a menu under the box. Settings for a key, an address, or a local model stay on the AI tab. Config on the AI page opens that tab.
 - The emoji picker lists the Unicode 18 set, including flags. Skin tones for a single emoji are their own group. A profession or a family keeps its default form.
 

@@ -208,6 +208,7 @@ export function followDeskPrefs() {
     auto: flag(saved.auto, false),
     skipSpam: flag(saved.skipSpam, true),
     cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+    notify: flag(saved.notify, true),
   };
 }
 
@@ -218,6 +219,7 @@ export function saveFollowDeskPrefs(partial) {
     auto: Boolean(next.auto),
     skipSpam: Boolean(next.skipSpam),
     cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+    notify: next.notify !== false,
   };
   writeJson(FOLLOW_KEY, saved);
   queueClient();
@@ -502,6 +504,7 @@ function applyClient(record) {
       auto: Boolean(record.follows.auto),
       skipSpam: typeof record.follows.skipSpam === 'boolean' ? record.follows.skipSpam : true,
       cap: FOLLOW_CAPS.has(cap) ? cap : 40,
+      notify: typeof record.follows.notify === 'boolean' ? record.follows.notify : true,
     });
   }
   if (record.a11y && typeof record.a11y === 'object') {
