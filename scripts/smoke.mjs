@@ -1201,6 +1201,8 @@ assert.match(appSource, /id="ai-inline"/);
 assert.match(appSource, /const banner = homeLead\(homePrompt\(\)\)/);
 assert.doesNotMatch(appSource, /following \? homePrompt\(\)/);
 assert.match(appSource, /prompt-note/);
+assert.match(appSource, /<span>What's up\?<\/span>/);
+assert.match(appSource, /postingTarget\(\)\?\.name \|\| "What's up\?"/);
 const goldAuthor = (did, status) => ({ did, verification: status ? { verifiedStatus: status } : {} });
 const goldFeed = (statuses) => statuses.map((status, index) => ({ post: { author: goldAuthor(`did:${index}`, status) } }));
 assert.equal(goldFeedGate(goldFeed(['valid', 'valid', 'valid'])), null);

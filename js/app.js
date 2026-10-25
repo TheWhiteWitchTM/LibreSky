@@ -1272,7 +1272,7 @@ async function showHome(active) {
     if (!now) return;
     if (changed) paintHomeChrome(now);
     const slot = $('view')?.querySelector('.prompt');
-    if (slot && now.kind === 'lane' && now.type === 'feed') slot.outerHTML = homePrompt();
+    if (slot && now.kind === 'lane') slot.outerHTML = homePrompt();
   });
   if (lane && !signedIn()) {
     $('view').innerHTML = homeLead('') + emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
@@ -1401,27 +1401,38 @@ function homeLead(banner) {
   return `<div class="home-lead">${banner || ''}${ask}</div>`;
 }
 
+function postingTarget() {
+  const active = homeActive();
+  if (active?.kind !== 'lane') return null;
+  const name = homeLanes.find((item) => item.value === active.value)?.label
+    || (active.type === 'list' ? 'This list' : 'This feed');
+  return { type: active.type, value: active.value, name };
+}
+
 function homePrompt() {
   if (!signedIn()) return '';
   const profile = account();
   const initial = escapeHtml((profile?.displayName || profile?.handle || 'You').charAt(0).toUpperCase());
   const src = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
   const face = `<span class="avatar" data-initial="${initial}">${src}</span>`;
-  const active = homeActive();
-  if (active?.kind !== 'lane' || active.type !== 'feed') {
+  const target = postingTarget();
+  if (!target) {
     return `<button type="button" class="prompt" data-act="compose">${face}<span>What's up?</span></button>`;
   }
-  const name = homeLanes.find((item) => item.value === active.value)?.label || 'This feed';
-  const knownGold = /\/app\.bsky\.feed\.generator\/verified-news$/.test(active.value || '');
-  const gate = knownGold || goldFeedGate(homeSample);
-  const gold = profile?.verification?.verifiedStatus === 'valid';
-  if (gate && !gold) {
-    return `<div class="prompt prompt-note" role="note">${face}<span class="prompt-copy"><span>${escapeHtml(name)}</span><small>This feed shows gold-verified accounts. A post from here would not appear.</small></span></div>`;
+  const name = escapeHtml(target.name);
+  if (target.type === 'feed') {
+    const knownGold = /\/app\.bsky\.feed\.generator\/verified-news$/.test(target.value || '');
+    const gate = knownGold || goldFeedGate(homeSample);
+    const gold = profile?.verification?.verifiedStatus === 'valid';
+    if (gate && !gold) {
+      return `<div class="prompt prompt-note" role="note">${face}<span class="prompt-copy"><span>${name}</span><small>This feed shows gold-verified accounts. A post from here would not appear.</small></span></div>`;
+    }
+    const note = gate
+      ? 'This feed shows gold-verified accounts, and it still chooses which posts appear.'
+      : 'This goes on your profile. The feed adds posts on its own.';
+    return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>${name}</span><small>${escapeHtml(note)}</small></span></button>`;
   }
-  const note = gate
-    ? `${name} shows gold-verified accounts, and it still chooses which posts appear.`
-    : `${name} adds posts on its own. This goes on your profile.`;
-  return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>What's up?</span><small>${escapeHtml(note)}</small></span></button>`;
+  return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>${name}</span><small>This goes on your profile.</small></span></button>`;
 }
 
 function sortHtml() {
@@ -5403,6 +5414,8 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   else if (quoteSource) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quoteSource.author?.handle || '')}</strong></p><p>${escapeHtml((quoteSource.record?.text || '').slice(0, 160))}</p>`;
   else context.innerHTML = '';
   const area = $('compose-text');
+  const freshPost = !source && !replySource && !quoteSource;
+  area.placeholder = freshPost ? (postingTarget()?.name || "What's up?") : "What's up?";
   const keepExternal = source?.external?.url && !quoteSource && !gifEmbed(source.external) ? source.external : null;
   area.value = source
     ? ensureTrailingLink(source.text, keepExternal?.url || '')

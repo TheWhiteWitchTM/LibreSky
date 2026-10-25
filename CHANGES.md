@@ -6,6 +6,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 25 October 2026
 
+- On a list or a saved feed, the writing line shows that name in the same quiet placeholder style as “What’s up?” on Following and Discover. A feed you cannot post to still says so.
 - A chat opens on the latest message. The list scrolls inside the screen, and the writing box stays underneath.
 - The mic beside Send dictates a chat message, the same way the mic beside Post dictates a post.
 - An open chat puts that person’s display name in the title, the same size as the other pages. The @handle stays off that line, so a long handle does not cut the name off. The chat list still says Messages. No Voice or Video buttons, and no hint under the box. A call stays on the Calls page or on someone else’s profile.
