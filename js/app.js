@@ -5038,6 +5038,7 @@ function openTour(index = 0) {
   closeAppMenu();
   closeMenu();
   closeAlphaMenu();
+  closeUkraineMenu();
   const steps = tourStepList();
   tourIndex = Math.max(0, Math.min(index, steps.length - 1));
   overlay.hidden = false;
@@ -5239,6 +5240,7 @@ function route() {
   closeMenu();
   closeAppMenu();
   closeAlphaMenu();
+  closeUkraineMenu();
   if (designOn()) paintDesignReadout();
   hideSuggest();
   closeHover();
@@ -6442,6 +6444,7 @@ function toggleAppMenu() {
   }
   closeMenu();
   closeAlphaMenu();
+  closeUkraineMenu();
   hideTip();
   showLayer(menu);
   button.setAttribute('aria-expanded', 'true');
@@ -9748,6 +9751,11 @@ function onKey(event) {
       closeAlphaMenu(true);
       return;
     }
+    if (document.querySelector('.ua-wrap.is-open')) {
+      event.preventDefault();
+      closeUkraineMenu(true);
+      return;
+    }
     const menu = $('menu');
     if (layerOpen(menu)) {
       event.preventDefault();
@@ -9898,6 +9906,7 @@ function bind() {
       closeMenu();
       closeAppMenu();
       closeAlphaMenu();
+      closeUkraineMenu();
     }
     placeFresh();
     placeTour();
@@ -9925,6 +9934,7 @@ function bind() {
   });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
+    if (!event.target.closest('.ua-wrap')) closeUkraineMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
@@ -11051,6 +11061,7 @@ function bindAlphaDoor() {
     menu?.setAttribute('aria-hidden', 'false');
     closeAppMenu();
     closeMenu();
+    closeUkraineMenu();
     play();
   });
   document.addEventListener('pointerdown', () => {
@@ -11061,8 +11072,106 @@ function bindAlphaDoor() {
   }, { capture: true });
 }
 
+function playUkraineDoor() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  if (!alphaAudio) alphaAudio = new AudioCtx();
+  const ctx = alphaAudio;
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const now = ctx.currentTime;
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.7);
+  master.connect(ctx.destination);
+
+  [523, 659, 784].forEach((freq, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    const start = now + index * 0.07;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(index === 2 ? 0.08 : 0.14, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.42);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(start);
+    osc.stop(start + 0.44);
+  });
+}
+
+function releaseUkraineShut() {
+  const wrap = document.querySelector('.ua-wrap');
+  const menu = document.getElementById('ua-menu');
+  if (!wrap?.classList.contains('is-shut')) return;
+  if (wrap.matches(':hover')) return;
+  if (wrap.contains(document.activeElement)) return;
+  wrap.classList.remove('is-shut');
+  menu?.removeAttribute('inert');
+}
+
+function closeUkraineMenu(focus) {
+  const wrap = document.querySelector('.ua-wrap');
+  const mark = document.getElementById('ua-mark');
+  const menu = document.getElementById('ua-menu');
+  if (!wrap?.classList.contains('is-open')) return;
+  wrap.classList.remove('is-open');
+  mark?.setAttribute('aria-expanded', 'false');
+  menu?.setAttribute('aria-hidden', 'true');
+  const hold = Boolean(focus) || wrap.matches(':hover') || wrap.contains(document.activeElement);
+  if (hold) {
+    wrap.classList.add('is-shut');
+    menu?.setAttribute('inert', '');
+  } else {
+    wrap.classList.remove('is-shut');
+    menu?.removeAttribute('inert');
+  }
+  if (focus) mark?.focus();
+}
+
+function bindUkraineDoor() {
+  const mark = document.getElementById('ua-mark');
+  const wrap = mark?.closest('.ua-wrap');
+  const menu = document.getElementById('ua-menu');
+  if (!mark || !wrap) return;
+  const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let last = 0;
+  const play = () => {
+    if (quiet) return;
+    const now = performance.now();
+    if (now - last < 900) return;
+    last = now;
+    try { playUkraineDoor(); } catch { /* this browser kept the chime */ }
+  };
+  mark.addEventListener('pointerenter', play);
+  mark.addEventListener('focus', play);
+  wrap.addEventListener('pointerleave', releaseUkraineShut);
+  wrap.addEventListener('focusout', () => setTimeout(releaseUkraineShut, 0));
+  menu?.addEventListener('click', (event) => {
+    if (event.target.closest('a')) closeUkraineMenu();
+  });
+  mark.addEventListener('click', () => {
+    if (wrap.classList.contains('is-open')) {
+      closeUkraineMenu();
+      play();
+      return;
+    }
+    wrap.classList.remove('is-shut');
+    menu?.removeAttribute('inert');
+    wrap.classList.add('is-open');
+    mark.setAttribute('aria-expanded', 'true');
+    menu?.setAttribute('aria-hidden', 'false');
+    closeAppMenu();
+    closeMenu();
+    closeAlphaMenu();
+    play();
+  });
+}
+
 async function boot() {
   bindAlphaDoor();
+  bindUkraineDoor();
   applyDesign(designOn());
   applyA11y(a11yPrefs());
   setupCall({ toast });

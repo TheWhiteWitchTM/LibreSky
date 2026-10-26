@@ -4,6 +4,10 @@ The paint is still wet. This is the record of the alpha you can [open today](htt
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 26 October 2026
+
+- A Ukraine mark sits beside the alpha. It opens a hanging card with a Ukraine flag and a thumbs up, a Russian flag and a thumbs down, and links to UNITED24, Come Back Alive, and the Prytula Foundation.
+
 ## 25 October 2026
 
 - On a list or a saved feed, the writing line shows that name in the same quiet placeholder style as “What’s up?” on Following and Discover. A feed you cannot post to still says so.
