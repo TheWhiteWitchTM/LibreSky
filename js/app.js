@@ -84,6 +84,8 @@ import {
   saveSearchTabs,
   saveThreadPrefs,
   saveVoicePrefs,
+  SEARCH_LINKS,
+  SEARCH_POSTS,
   SEARCH_TOPICS,
   searchAllows,
   searchPrefs,
@@ -284,10 +286,19 @@ function watchStrips(root) {
   });
 }
 
+function uaFlag() {
+  return '<svg class="tab-flag" viewBox="0 0 32 22" aria-hidden="true"><rect width="32" height="11" fill="#005BBB"/><rect y="11" width="32" height="11" fill="#FFD500"/></svg>';
+}
+
 function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {}) {
   const links = tabs.map((tab) => {
     const explore = tab.explore ? ` data-explore="${escapeHtml(tab.explore)}"` : '';
-    return `<a role="tab" href="${escapeHtml(tab.href)}" aria-selected="${tab.on ? 'true' : 'false'}"${explore}>${escapeHtml(tab.label)}</a>`;
+    const external = tab.external ? ' target="_blank" rel="noopener noreferrer"' : '';
+    const role = tab.external ? 'link' : 'tab';
+    const selected = tab.external ? '' : ` aria-selected="${tab.on ? 'true' : 'false'}"`;
+    const named = tab.aria ? ` aria-label="${escapeHtml(tab.aria)}"` : '';
+    const mark = tab.flag === 'ua' ? uaFlag() : '';
+    return `<a role="${role}" href="${escapeHtml(tab.href)}"${selected}${named}${explore}${external}>${mark}<span>${escapeHtml(tab.label)}</span></a>`;
   }).join('');
   const menu = menuAct
     ? `<button type="button" class="tab-menu" data-act="${escapeHtml(menuAct)}" aria-label="${escapeHtml(menuLabel)}">${icon('more')}</button>`
@@ -888,11 +899,26 @@ function loadTrends() {
   return trendCache.pending;
 }
 
+function postsSpec(id) {
+  return SEARCH_POSTS.find((item) => item.id === id) || null;
+}
+
+function linkSpec(id) {
+  return SEARCH_LINKS.find((item) => item.id === id) || null;
+}
+
+function postsSpecForQuery(query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return null;
+  const specs = searchTabs().filter((tab) => tab.kind === 'posts').map((tab) => postsSpec(tab.id)).filter(Boolean);
+  return specs.find((item) => item.label.toLowerCase() === needle || item.q.toLowerCase() === needle) || null;
+}
+
 function searchTabItems(query, trends) {
   const needle = String(query || '').trim().toLowerCase();
   const known = Array.isArray(trends);
   return searchTabs().filter((tab) => {
-    if (tab.kind === 'term') return true;
+    if (tab.kind !== 'topic') return true;
     if (tab.id === 'foryou' || !known) return true;
     const topic = EXPLORE_TABS.find((item) => item.id === tab.id);
     return Boolean(topic && trends.some(topic.match));
@@ -902,6 +928,29 @@ function searchTabItems(query, trends) {
         href: `#/search/${encodeURIComponent(tab.q)}`,
         label: tab.label || tab.q,
         on: Boolean(needle) && needle === tab.q.toLowerCase(),
+      };
+    }
+    if (tab.kind === 'posts') {
+      const spec = postsSpec(tab.id);
+      const label = spec?.label || 'Posts';
+      const q = spec?.q || label;
+      return {
+        href: `#/search/${encodeURIComponent(label)}`,
+        label,
+        flag: tab.id === 'ukraine' ? 'ua' : '',
+        aria: tab.id === 'ukraine' ? 'Ukraine posts' : '',
+        on: Boolean(needle) && (needle === label.toLowerCase() || needle === q.toLowerCase()),
+      };
+    }
+    if (tab.kind === 'link') {
+      const spec = linkSpec(tab.id);
+      const label = spec?.label || 'Link';
+      return {
+        href: spec?.href || '#',
+        label,
+        external: true,
+        aria: `${label}, opens in a new tab`,
+        on: false,
       };
     }
     const topic = EXPLORE_TABS.find((item) => item.id === tab.id);
@@ -1472,18 +1521,21 @@ async function paintExplore(token) {
 }
 
 async function paintSearchResults(token, query) {
+  const builtIn = postsSpecForQuery(query);
+  const postQuery = builtIn?.q || query;
+  const faceQuery = builtIn?.label || query;
   try {
     const [postData, actorData, packData, trendList] = await Promise.all([
-      api.searchPosts(query, null, null, searchSort),
-      api.searchActors(query),
-      api.searchStarterPacks(query).catch(() => ({ starterPacks: [] })),
+      api.searchPosts(postQuery, null, null, searchSort),
+      api.searchActors(faceQuery),
+      api.searchStarterPacks(faceQuery).catch(() => ({ starterPacks: [] })),
       loadTrends().catch(() => []),
     ]);
     if (token !== generation) return;
     paintSearchTabs(query);
     const people = (actorData.actors || []).slice(0, 5).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
     const packs = (packData.starterPacks || []).slice(0, 4).map((pack) => packHtml(pack)).join('');
-    const matched = matchingTrends(trendList, query).slice(0, 5);
+    const matched = matchingTrends(trendList, faceQuery).slice(0, 5);
     const trendCards = trendsHtml(matched);
     resetPosts();
     const matchedPosts = visibleSearchPosts(postData.posts);
@@ -1496,12 +1548,12 @@ async function paintSearchResults(token, query) {
     let missed = '';
     let listedTrends = trendSection;
     if (!people && !packs && !postsHtml) {
-      missed = emptyHtml('No results', `Nothing matched "${query}".`) + (trendSection || trendBlock(preferLive(trendList).slice(0, 5)));
+      missed = emptyHtml('No results', `Nothing matched "${faceQuery}".`) + (trendSection || trendBlock(preferLive(trendList).slice(0, 5)));
       listedTrends = '';
     }
     $('search-results').innerHTML = `${peopleBlock}${packsBlock}${listedTrends}${hiddenNote}${postsHtml}${missed}`;
     const more = async (cursor) => {
-      const page = await api.searchPosts(query, cursor, null, searchSort);
+      const page = await api.searchPosts(postQuery, cursor, null, searchSort);
       if (token !== generation) return;
       resetPosts();
       const html = feedHtml(visibleSearchPosts(page.posts).map((post) => ({ post })));
@@ -2541,6 +2593,24 @@ function topicLabel(id) {
   return SEARCH_TOPICS.find((item) => item.id === id)?.label || 'Topic';
 }
 
+function searchItemLabel(item) {
+  if (!item) return 'Search';
+  if (item.kind === 'term') return item.label || item.q || 'Search';
+  if (item.kind === 'posts') return postsSpec(item.id)?.label || 'Posts';
+  if (item.kind === 'link') return linkSpec(item.id)?.label || 'Link';
+  return topicLabel(item.id);
+}
+
+function searchItemNote(item) {
+  if (item?.kind === 'posts') return 'Posts';
+  if (item?.kind === 'link') return 'Opens in a new tab';
+  return 'Topic';
+}
+
+function searchItemFlag(item) {
+  return item?.kind === 'posts' && item.id === 'ukraine';
+}
+
 function pinSearchDraft() {
   if (!searchDraft) return;
   const rest = searchDraft.filter((item) => !(item.kind === 'topic' && item.id === 'foryou'));
@@ -2566,9 +2636,10 @@ function paintSearchEditor() {
   pinSearchDraft();
   const showing = searchDraft;
   const preview = showing.map((item, index) => {
-    const label = item.kind === 'term' ? (item.label || item.q || 'Search') : topicLabel(item.id);
+    const label = searchItemLabel(item);
     const on = index === 0 ? ' aria-selected="true"' : '';
-    return `<span role="tab"${on}>${escapeHtml(label)}</span>`;
+    const mark = searchItemFlag(item) ? uaFlag() : '';
+    return `<span role="tab"${on}>${mark}${escapeHtml(label)}</span>`;
   }).join('');
   const rows = showing.map((item, index) => {
     if (item.kind === 'topic' && item.id === 'foryou') {
@@ -2576,23 +2647,30 @@ function paintSearchEditor() {
     }
     const up = index <= 1 ? ' disabled' : '';
     const down = index === showing.length - 1 ? ' disabled' : '';
-    const name = item.kind === 'term' ? (item.label || item.q || 'Search') : topicLabel(item.id);
+    const name = searchItemLabel(item);
     const moves = `<span class="lane-moves"><button type="button" class="lane-move" data-act="search-up" data-index="${index}"${up} aria-label="Move ${escapeHtml(name)} left">${CHEVRON_LEFT}</button><button type="button" class="lane-move" data-act="search-down" data-index="${index}"${down} aria-label="Move ${escapeHtml(name)} right">${CHEVRON_RIGHT}</button><button type="button" class="danger mini" data-act="search-remove" data-index="${index}">Remove</button></span>`;
     if (item.kind === 'term') {
       return `<div class="lane-row" data-search-index="${index}"><span class="search-fields"><input data-search-label maxlength="40" value="${escapeHtml(item.label || '')}" placeholder="Name" aria-label="Name"><input data-search-q maxlength="200" value="${escapeHtml(item.q || '')}" placeholder="Search term" aria-label="Search term"></span>${moves}</div>`;
     }
-    return `<div class="lane-row" data-search-index="${index}"><span><strong>${escapeHtml(topicLabel(item.id))}</strong><span class="handle">Topic</span></span>${moves}</div>`;
+    const mark = searchItemFlag(item) ? uaFlag() : '';
+    const title = mark ? `<span class="shelf-title">${mark}<strong>${escapeHtml(name)}</strong></span>` : `<strong>${escapeHtml(name)}</strong>`;
+    return `<div class="lane-row" data-search-index="${index}"><span>${title}<span class="handle">${escapeHtml(searchItemNote(item))}</span></span>${moves}</div>`;
   }).join('');
-  const have = new Set(showing.filter((item) => item.kind === 'topic').map((item) => item.id));
-  const available = SEARCH_TOPICS.filter((item) => item.id !== 'foryou' && !have.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Topic</span></span><button type="button" class="text-btn" data-act="search-topic" data-topic="${escapeHtml(item.id)}">Add</button></div>`).join('');
+  const haveTopics = new Set(showing.filter((item) => item.kind === 'topic').map((item) => item.id));
+  const havePosts = new Set(showing.filter((item) => item.kind === 'posts').map((item) => item.id));
+  const haveLinks = new Set(showing.filter((item) => item.kind === 'link').map((item) => item.id));
+  const topicRows = SEARCH_TOPICS.filter((item) => item.id !== 'foryou' && !haveTopics.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Topic</span></span><button type="button" class="text-btn" data-act="search-topic" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
+  const postRows = SEARCH_POSTS.filter((item) => !havePosts.has(item.id)).map((item) => `<div class="lane-row"><span><span class="shelf-title">${item.id === 'ukraine' ? uaFlag() : ''}<strong>${escapeHtml(item.label)}</strong></span><span class="handle">Posts</span></span><button type="button" class="text-btn" data-act="search-posts" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
+  const linkRows = SEARCH_LINKS.filter((item) => !haveLinks.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Opens in a new tab</span></span><button type="button" class="text-btn" data-act="search-link" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
+  const available = [...postRows, ...topicRows, ...linkRows].join('');
   forgetStrips(body);
   body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist">${preview}</div></div>
     <h3>On this row</h3>
     ${rows}
     <h3>Add a search</h3>
     <div class="search-add"><input id="search-add-label" maxlength="40" placeholder="Name, optional" aria-label="Name for the search"><input id="search-add-q" maxlength="200" placeholder="Search term" aria-label="Search term"><button type="button" class="primary small" data-act="search-add">Add</button></div>
-    <h3>Topics</h3>
-    ${available || '<p class="dim">Every topic is on the row.</p>'}
+    <h3>Add back</h3>
+    ${available || '<p class="dim">Everything is on the row.</p>'}
     <button type="button" class="primary lanes-save" data-act="search-save">Save</button>`;
   watchStrips(body);
 }
@@ -2639,11 +2717,13 @@ function editSearchDraft(act, button) {
   if (!searchDraft) return;
   syncSearchDraft();
   pinSearchDraft();
-  if (act === 'search-topic') {
+  if (act === 'search-topic' || act === 'search-posts' || act === 'search-link') {
+    const kind = act === 'search-posts' ? 'posts' : act === 'search-link' ? 'link' : 'topic';
     const id = button?.dataset.topic || '';
-    if (!SEARCH_TOPICS.some((item) => item.id === id) || id === 'foryou') return;
-    if (searchDraft.some((item) => item.kind === 'topic' && item.id === id)) return;
-    searchDraft.push({ kind: 'topic', id });
+    const known = kind === 'posts' ? SEARCH_POSTS : kind === 'link' ? SEARCH_LINKS : SEARCH_TOPICS;
+    if (!known.some((item) => item.id === id) || (kind === 'topic' && id === 'foryou')) return;
+    if (searchDraft.some((item) => item.kind === kind && item.id === id)) return;
+    searchDraft.push({ kind, id });
     paintSearchEditor();
     queueSearchSave({ close: false, note: 'Added to Search' });
     return;
@@ -4968,7 +5048,7 @@ function tourStepList() {
     {
       kicker: 'Search',
       title: 'Find people and posts',
-      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. The … on the topic row edits that row and adds a search of your own.',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. Ukraine on that row shows posts about Ukraine. SociallyDead opens the directory in a new tab. The … edits the row.',
       targets: ['#rail-q', '[data-nav="search"]'],
     },
     {
@@ -8002,7 +8082,7 @@ async function handleChromeAct(act, event) {
     await queueLaneSave({ close: true, note: 'Home tabs saved' });
     return true;
   }
-  if (act === 'search-up' || act === 'search-down' || act === 'search-remove' || act === 'search-topic') {
+  if (act === 'search-up' || act === 'search-down' || act === 'search-remove' || act === 'search-topic' || act === 'search-posts' || act === 'search-link') {
     event.preventDefault();
     editSearchDraft(act, button);
     return true;
@@ -9751,7 +9831,7 @@ function onKey(event) {
       closeAlphaMenu(true);
       return;
     }
-    if (document.querySelector('.ua-wrap.is-open')) {
+    if (layerOpen($('ua-menu'))) {
       event.preventDefault();
       closeUkraineMenu(true);
       return;
@@ -9918,6 +9998,7 @@ function bind() {
     if (performance.now() - layerOpenedAt >= 450) {
       closeMenu();
       closeAppMenu();
+      closeUkraineMenu();
     } else {
       placeOpenLayers();
     }
@@ -9932,9 +10013,13 @@ function bind() {
   $('app-menu')?.addEventListener('click', (event) => {
     if (event.target.closest('a, button')) closeAppMenu();
   });
+  $('ua-mark')?.addEventListener('click', () => toggleUkraineMenu());
+  $('ua-menu')?.addEventListener('click', (event) => {
+    if (event.target.closest('a')) closeUkraineMenu();
+  });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
-    if (!event.target.closest('.ua-wrap')) closeUkraineMenu();
+    if (!event.target.closest('#ua-menu, #ua-mark')) closeUkraineMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
@@ -11072,106 +11157,52 @@ function bindAlphaDoor() {
   }, { capture: true });
 }
 
-function playUkraineDoor() {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return;
-  if (!alphaAudio) alphaAudio = new AudioCtx();
-  const ctx = alphaAudio;
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-  const now = ctx.currentTime;
-  const master = ctx.createGain();
-  master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.7);
-  master.connect(ctx.destination);
-
-  [523, 659, 784].forEach((freq, index) => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    const gain = ctx.createGain();
-    const start = now + index * 0.07;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(index === 2 ? 0.08 : 0.14, start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.42);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(start);
-    osc.stop(start + 0.44);
-  });
-}
-
-function releaseUkraineShut() {
-  const wrap = document.querySelector('.ua-wrap');
-  const menu = document.getElementById('ua-menu');
-  if (!wrap?.classList.contains('is-shut')) return;
-  if (wrap.matches(':hover')) return;
-  if (wrap.contains(document.activeElement)) return;
-  wrap.classList.remove('is-shut');
-  menu?.removeAttribute('inert');
-}
-
 function closeUkraineMenu(focus) {
-  const wrap = document.querySelector('.ua-wrap');
-  const mark = document.getElementById('ua-mark');
-  const menu = document.getElementById('ua-menu');
-  if (!wrap?.classList.contains('is-open')) return;
-  wrap.classList.remove('is-open');
-  mark?.setAttribute('aria-expanded', 'false');
-  menu?.setAttribute('aria-hidden', 'true');
-  const hold = Boolean(focus) || wrap.matches(':hover') || wrap.contains(document.activeElement);
-  if (hold) {
-    wrap.classList.add('is-shut');
-    menu?.setAttribute('inert', '');
-  } else {
-    wrap.classList.remove('is-shut');
-    menu?.removeAttribute('inert');
-  }
-  if (focus) mark?.focus();
+  const menu = $('ua-menu');
+  const button = $('ua-mark');
+  if (!layerOpen(menu)) return;
+  hideLayer(menu);
+  button?.setAttribute('aria-expanded', 'false');
+  if (focus) button?.focus();
 }
 
-function bindUkraineDoor() {
-  const mark = document.getElementById('ua-mark');
-  const wrap = mark?.closest('.ua-wrap');
-  const menu = document.getElementById('ua-menu');
-  if (!mark || !wrap) return;
-  const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let last = 0;
-  const play = () => {
-    if (quiet) return;
-    const now = performance.now();
-    if (now - last < 900) return;
-    last = now;
-    try { playUkraineDoor(); } catch { /* this browser kept the chime */ }
-  };
-  mark.addEventListener('pointerenter', play);
-  mark.addEventListener('focus', play);
-  wrap.addEventListener('pointerleave', releaseUkraineShut);
-  wrap.addEventListener('focusout', () => setTimeout(releaseUkraineShut, 0));
-  menu?.addEventListener('click', (event) => {
-    if (event.target.closest('a')) closeUkraineMenu();
-  });
-  mark.addEventListener('click', () => {
-    if (wrap.classList.contains('is-open')) {
-      closeUkraineMenu();
-      play();
-      return;
-    }
-    wrap.classList.remove('is-shut');
-    menu?.removeAttribute('inert');
-    wrap.classList.add('is-open');
-    mark.setAttribute('aria-expanded', 'true');
-    menu?.setAttribute('aria-hidden', 'false');
-    closeAppMenu();
-    closeMenu();
-    closeAlphaMenu();
-    play();
-  });
+function toggleUkraineMenu() {
+  const menu = $('ua-menu');
+  const button = $('ua-mark');
+  if (!menu || !button) return;
+  if (layerOpen(menu)) {
+    closeUkraineMenu();
+    return;
+  }
+  closeMenu();
+  closeAppMenu();
+  closeAlphaMenu();
+  hideTip();
+  showLayer(menu);
+  button.setAttribute('aria-expanded', 'true');
+  placeUkraineMenu();
+  requestAnimationFrame(() => { if (layerOpen(menu)) placeUkraineMenu(); });
+}
+
+function placeUkraineMenu() {
+  const menu = $('ua-menu');
+  const button = $('ua-mark');
+  if (!menu || !button || !layerOpen(menu)) return;
+  const rect = button.getBoundingClientRect();
+  const frame = viewportFrame();
+  const width = menu.offsetWidth || 180;
+  const height = menu.offsetHeight || 0;
+  let left = rect.left;
+  let top = rect.bottom + 4;
+  if (left + width > frame.width - 8) left = frame.width - width - 8;
+  if (top + height > frame.height - 8 && rect.top - height - 4 >= 8) top = rect.top - height - 4;
+  menu.style.position = 'fixed';
+  menu.style.right = 'auto';
+  pinBox(menu, Math.max(8, left), Math.max(8, top));
 }
 
 async function boot() {
   bindAlphaDoor();
-  bindUkraineDoor();
   applyDesign(designOn());
   applyA11y(a11yPrefs());
   setupCall({ toast });
@@ -11251,6 +11282,7 @@ function placeOpenLayers() {
   }
   const appMenu = $('app-menu');
   if (layerOpen(appMenu)) placeAppMenu();
+  if (layerOpen($('ua-menu'))) placeUkraineMenu();
   const card = $('hovercard');
   if (card && !card.hidden && card._anchor?.isConnected) placeHover(card, card._anchor);
 }

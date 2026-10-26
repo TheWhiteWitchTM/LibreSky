@@ -8,7 +8,7 @@ import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/a
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
-import { callIsRequest, callMayRing, goldFeedGate, homeAllows, normalizeSearchTabs, searchAllows, sortThreadReplies } from '../js/prefs.js';
+import { callIsRequest, callMayRing, defaultSearchTabs, goldFeedGate, homeAllows, normalizeSearchTabs, SEARCH_LINKS, SEARCH_POSTS, searchAllows, settleSearchTabs, sortThreadReplies } from '../js/prefs.js';
 import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
@@ -1040,6 +1040,31 @@ assert.equal(savedTabs[1].q, 'cats');
 assert.equal(savedTabs[1].label, 'Cats');
 assert.equal(savedTabs[2].id, 'news');
 assert.equal(savedTabs.length, 3);
+const shelf = normalizeSearchTabs([
+  { kind: 'posts', id: 'ukraine' },
+  { kind: 'posts', id: 'nope' },
+  { kind: 'link', id: 'sociallydead' },
+  { kind: 'link', id: 'evil' },
+  { kind: 'posts', id: 'ukraine' },
+  { kind: 'topic', id: 'news' },
+]);
+assert.deepEqual(shelf.map((item) => `${item.kind}:${item.id}`), ['topic:foryou', 'posts:ukraine', 'link:sociallydead', 'topic:news']);
+const defaults = defaultSearchTabs();
+assert.equal(defaults[0].id, 'foryou');
+assert.deepEqual(defaults[1], { kind: 'posts', id: 'ukraine' });
+assert.equal(defaults.at(-1).kind, 'link');
+assert.equal(defaults.at(-1).id, 'sociallydead');
+assert.equal(SEARCH_POSTS.find((item) => item.id === 'ukraine').q, 'Ukraine OR Україна');
+assert.equal(SEARCH_LINKS.find((item) => item.id === 'sociallydead').href, 'https://thewhitewitchtm.github.io/sociallydead/');
+const migrated = settleSearchTabs({ tabs: [{ kind: 'topic', id: 'news' }] });
+assert.equal(migrated.rev, 2);
+assert.equal(migrated.tabs[1].id, 'ukraine');
+assert.equal(migrated.tabs.at(-1).id, 'sociallydead');
+const keptOff = settleSearchTabs({ rev: 2, tabs: [{ kind: 'topic', id: 'news' }] });
+assert.deepEqual(keptOff.tabs.map((item) => item.id), ['foryou', 'news']);
+assert.match(appSource, /tab-flag/);
+assert.match(appSource, /opens in a new tab/);
+assert.match(appSource, /search-posts/);
 assert.match(index, /id="more-btn"[\s\S]*?<path fill="currentColor" d="M12 2\.75a9\.25/);
 assert.match(appSource, /nav: 'calls'/);
 assert.doesNotMatch(appSource, /paintCallTools/);

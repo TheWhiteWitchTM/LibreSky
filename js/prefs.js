@@ -42,7 +42,16 @@ export const SEARCH_TOPICS = [
   { id: 'culture', label: 'Culture' },
   { id: 'tech', label: 'Tech' },
 ];
+export const SEARCH_POSTS = [
+  { id: 'ukraine', label: 'Ukraine', q: 'Ukraine OR Україна' },
+];
+export const SEARCH_LINKS = [
+  { id: 'sociallydead', label: 'SociallyDead', href: 'https://thewhitewitchtm.github.io/sociallydead/' },
+];
 const SEARCH_TOPIC_IDS = new Set(SEARCH_TOPICS.map((item) => item.id));
+const SEARCH_POST_IDS = new Set(SEARCH_POSTS.map((item) => item.id));
+const SEARCH_LINK_IDS = new Set(SEARCH_LINKS.map((item) => item.id));
+const SEARCH_REV = 2;
 const VOICE_KEY = 'libresky.voice';
 const EMOJI_KEY = 'libresky.emoji';
 const THEME_KEY = 'libresky.theme';
@@ -185,15 +194,34 @@ function cleanSearchText(value, max) {
 }
 
 export function defaultSearchTabs() {
-  return SEARCH_TOPICS.map((item) => ({ kind: 'topic', id: item.id }));
+  return [
+    { kind: 'topic', id: 'foryou' },
+    { kind: 'posts', id: 'ukraine' },
+    ...SEARCH_TOPICS.filter((item) => item.id !== 'foryou').map((item) => ({ kind: 'topic', id: item.id })),
+    { kind: 'link', id: 'sociallydead' },
+  ];
 }
 
 export function normalizeSearchTabs(tabs) {
   const list = [];
   const seenTopics = new Set();
   const seenTerms = new Set();
+  const seenPosts = new Set();
+  const seenLinks = new Set();
   (Array.isArray(tabs) ? tabs : []).forEach((item) => {
     if (!item || typeof item !== 'object') return;
+    if (item.kind === 'posts') {
+      if (!SEARCH_POST_IDS.has(item.id) || seenPosts.has(item.id)) return;
+      seenPosts.add(item.id);
+      list.push({ kind: 'posts', id: item.id });
+      return;
+    }
+    if (item.kind === 'link') {
+      if (!SEARCH_LINK_IDS.has(item.id) || seenLinks.has(item.id)) return;
+      seenLinks.add(item.id);
+      list.push({ kind: 'link', id: item.id });
+      return;
+    }
     const topicId = SEARCH_TOPIC_IDS.has(item.id) ? item.id : '';
     if (item.kind === 'topic' || (topicId && !item.q && !item.query)) {
       if (!topicId || topicId === 'foryou' || seenTopics.has(topicId)) return;
@@ -221,15 +249,38 @@ export function normalizeSearchTabs(tabs) {
   return [{ kind: 'topic', id: 'foryou' }, ...list];
 }
 
+function withSearchShelf(tabs) {
+  const next = tabs.map((item) => ({ ...item }));
+  if (!next.some((item) => item.kind === 'posts' && item.id === 'ukraine')) {
+    next.splice(1, 0, { kind: 'posts', id: 'ukraine' });
+  }
+  if (!next.some((item) => item.kind === 'link' && item.id === 'sociallydead')) {
+    next.push({ kind: 'link', id: 'sociallydead' });
+  }
+  return next;
+}
+
+export function settleSearchTabs(saved) {
+  if (!saved || !Array.isArray(saved.tabs)) return { tabs: defaultSearchTabs(), rev: SEARCH_REV };
+  const rev = Number(saved.rev) || 1;
+  let tabs = normalizeSearchTabs(saved.tabs);
+  if (rev < SEARCH_REV) tabs = withSearchShelf(tabs);
+  return { tabs, rev: Math.max(rev, SEARCH_REV) };
+}
+
 export function searchTabs() {
   const saved = readJson(SEARCHES_KEY);
-  if (!saved || !Array.isArray(saved.tabs)) return defaultSearchTabs();
-  return normalizeSearchTabs(saved.tabs);
+  const settled = settleSearchTabs(saved);
+  if (saved && Array.isArray(saved.tabs) && (Number(saved.rev) || 1) < SEARCH_REV) {
+    writeJson(SEARCHES_KEY, settled);
+    queueClient();
+  }
+  return settled.tabs;
 }
 
 export function saveSearchTabs(tabs) {
   const next = normalizeSearchTabs(tabs);
-  writeJson(SEARCHES_KEY, { tabs: next });
+  writeJson(SEARCHES_KEY, { tabs: next, rev: SEARCH_REV });
   queueClient();
   return next;
 }
@@ -588,7 +639,12 @@ function applyClient(record) {
     });
   }
   if (record.searches && Array.isArray(record.searches.tabs)) {
-    writeJson(SEARCHES_KEY, { tabs: normalizeSearchTabs(record.searches.tabs) });
+    const incomingRev = Number(record.searches.rev) || 1;
+    const localRev = Number(readJson(SEARCHES_KEY)?.rev) || 1;
+    if (!(localRev >= SEARCH_REV && incomingRev < SEARCH_REV)) {
+      const settled = settleSearchTabs({ tabs: record.searches.tabs, rev: Math.max(incomingRev, localRev) });
+      writeJson(SEARCHES_KEY, settled);
+    }
   }
   if (record.languages && typeof record.languages === 'object') saveLanguagePrefs(record.languages);
   if (Array.isArray(record.emoji)) writeJson(EMOJI_KEY, record.emoji.filter((item) => typeof item === 'string').slice(0, 24));
@@ -652,7 +708,7 @@ function clientRecord() {
     sounds: soundPrefs(),
     voice: voicePrefs(),
     search: searchPrefs(),
-    searches: { tabs: searchTabs() },
+    searches: settleSearchTabs(readJson(SEARCHES_KEY)),
     languages: languagePrefs(),
     theme: themeName(),
     a11y: a11yPrefs(),

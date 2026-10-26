@@ -6,7 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 26 October 2026
 
-- A Ukraine mark sits beside the alpha. It opens a hanging card with a Ukraine flag and a thumbs up, a Russian flag and a thumbs down, and links to UNITED24, Come Back Alive, and the Prytula Foundation.
+- Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row and opens the directory in a new tab.
+- A Ukraine flag sits beside the alpha. It opens a plain menu with the picture of both flags and links to UNITED24, Come Back Alive, and the Prytula Foundation.
 
 ## 25 October 2026
 

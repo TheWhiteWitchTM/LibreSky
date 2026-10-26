@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-26-ukraine';
+const CACHE = 'libresky-2026-10-26-search-shelf';
 
 const SHELL = [
   './',
