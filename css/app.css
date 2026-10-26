@@ -546,7 +546,8 @@ img { max-width: 100%; }
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.sticky-head:not(:has(#tabs:not([hidden]))):not(:has(#home-compose:not([hidden]))) { display: none; }
+.sticky-head:has(#tabs[hidden]) { display: none; }
+#home-compose { background: var(--bg); }
 .head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .to-top,
 .head-post {
