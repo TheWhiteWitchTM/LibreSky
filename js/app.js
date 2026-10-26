@@ -73,7 +73,6 @@ import {
   dropFollowHold,
   followBackToday,
   followDeskPrefs,
-  goldFeedGate,
   followHoldSet,
   holdFollowTargets,
   noteFollowBack,
@@ -154,7 +153,6 @@ const hoverProfiles = new Map();
 let homeLanes = [];
 let homeLanesDid = '';
 let lanesAt = 0;
-let homeSample = [];
 let laneDraft = null;
 let laneSaveChain = Promise.resolve();
 let shownProfile = null;
@@ -319,7 +317,7 @@ function measureHead() {
   if (head) document.documentElement.style.setProperty('--head-h', `${Math.ceil(head.getBoundingClientRect().height)}px`);
 }
 
-function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menuLabel = 'More' }) {
+function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menuLabel = 'More', compose = false }) {
   const titleEl = $('title');
   titleEl.textContent = title;
   const icon = $('page-icon');
@@ -344,6 +342,7 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
     else link.removeAttribute('aria-current');
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
+  paintHomeCompose(compose);
   measureHead();
   requestAnimationFrame(measureHead);
   if (!$('tour')?.hidden) requestAnimationFrame(placeTour);
@@ -464,6 +463,7 @@ function updateAccount() {
   avatar.innerHTML = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
   const href = profile?.handle ? profileHash(profile) : '#/';
   document.querySelectorAll('a[data-nav="profile"]').forEach((nav) => { nav.href = href; });
+  if (!$('home-compose')?.hidden) paintHomeCompose(true);
 }
 
 async function loadMe() {
@@ -1212,6 +1212,7 @@ function paintHomeChrome(active) {
     tabs: homeTabs(active),
     menuAct: 'tab-menu',
     menuLabel: 'Home menu',
+    compose: true,
   });
 }
 
@@ -1271,8 +1272,6 @@ async function showHome(active) {
     const now = homeActive();
     if (!now) return;
     if (changed) paintHomeChrome(now);
-    const slot = $('view')?.querySelector('.prompt');
-    if (slot && now.kind === 'lane') slot.outerHTML = homePrompt();
   });
   if (lane && !signedIn()) {
     $('view').innerHTML = homeLead('') + emptyHtml('This tab is on your account', 'Sign in to open lists and feeds you added to Home.', '<button type="button" class="primary" data-act="signin">Sign in with Bluesky</button>');
@@ -1287,8 +1286,7 @@ async function showHome(active) {
     else data = await api.getFeed(lane.value);
     if (token !== generation) return;
     const raw = data.feed || [];
-    homeSample = raw;
-    const banner = homeLead(homePrompt());
+    const banner = homeLead('');
     const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
     const posted = feedHtml(items);
@@ -1401,38 +1399,31 @@ function homeLead(banner) {
   return `<div class="home-lead">${banner || ''}${ask}</div>`;
 }
 
-function postingTarget() {
-  const active = homeActive();
-  if (active?.kind !== 'lane') return null;
-  const name = homeLanes.find((item) => item.value === active.value)?.label
-    || (active.type === 'list' ? 'This list' : 'This feed');
-  return { type: active.type, value: active.value, name };
-}
-
+// A post is one record in your repo. Following, Discover, lists, and feeds only choose which posts to show.
 function homePrompt() {
   if (!signedIn()) return '';
   const profile = account();
   const initial = escapeHtml((profile?.displayName || profile?.handle || 'You').charAt(0).toUpperCase());
   const src = profile?.avatar ? `<img src="${escapeHtml(profile.avatar)}" alt="">` : '';
   const face = `<span class="avatar" data-initial="${initial}">${src}</span>`;
-  const target = postingTarget();
-  if (!target) {
-    return `<button type="button" class="prompt" data-act="compose">${face}<span>What's up?</span></button>`;
+  return `<button type="button" class="prompt" data-act="compose">${face}<span>What's up?</span></button>`;
+}
+
+function paintHomeCompose(show) {
+  const slot = $('home-compose');
+  if (!slot) return;
+  if (!show || !signedIn()) {
+    const was = !slot.hidden || slot.innerHTML !== '';
+    slot.hidden = true;
+    slot.innerHTML = '';
+    if (was) measureHead();
+    return;
   }
-  const name = escapeHtml(target.name);
-  if (target.type === 'feed') {
-    const knownGold = /\/app\.bsky\.feed\.generator\/verified-news$/.test(target.value || '');
-    const gate = knownGold || goldFeedGate(homeSample);
-    const gold = profile?.verification?.verifiedStatus === 'valid';
-    if (gate && !gold) {
-      return `<div class="prompt prompt-note" role="note">${face}<span class="prompt-copy"><span>${name}</span><small>This feed shows gold-verified accounts. A post from here would not appear.</small></span></div>`;
-    }
-    const note = gate
-      ? 'This feed shows gold-verified accounts, and it still chooses which posts appear.'
-      : 'This goes on your profile. The feed adds posts on its own.';
-    return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>${name}</span><small>${escapeHtml(note)}</small></span></button>`;
-  }
-  return `<button type="button" class="prompt" data-act="compose">${face}<span class="prompt-copy"><span>${name}</span><small>This goes on your profile.</small></span></button>`;
+  const html = homePrompt();
+  const changed = slot.hidden || slot.innerHTML !== html;
+  slot.hidden = false;
+  if (slot.innerHTML !== html) slot.innerHTML = html;
+  if (changed) measureHead();
 }
 
 function sortHtml() {
@@ -5414,8 +5405,7 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   else if (quoteSource) context.innerHTML = `<p class="dim">Quoting <strong>@${escapeHtml(quoteSource.author?.handle || '')}</strong></p><p>${escapeHtml((quoteSource.record?.text || '').slice(0, 160))}</p>`;
   else context.innerHTML = '';
   const area = $('compose-text');
-  const freshPost = !source && !replySource && !quoteSource;
-  area.placeholder = freshPost ? (postingTarget()?.name || "What's up?") : "What's up?";
+  area.placeholder = "What's up?";
   const keepExternal = source?.external?.url && !quoteSource && !gifEmbed(source.external) ? source.external : null;
   area.value = source
     ? ensureTrailingLink(source.text, keepExternal?.url || '')
