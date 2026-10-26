@@ -1,13 +1,17 @@
 # Changes
 
-The paint is still wet. This is the record of the alpha you can [open today](https://thewhitewitchtm.github.io/LibreSky/).
+This is the record of the beta you can [open today](https://thewhitewitchtm.github.io/LibreSky/).
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
 ## 26 October 2026
 
-- Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row and opens the directory in a new tab.
-- A Ukraine flag sits beside the alpha. It opens a plain menu with the picture of both flags and links to UNITED24, Come Back Alive, and the Prytula Foundation.
+- Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row with a folder, and opens the directory in a new tab.
+- The mark beside the menu is beta. Click it for Debug and Design view. Hover leaves it shut.
+- The Ukraine flag beside it opens the swinging door again: both flags, and links to UNITED24, Come Back Alive, and the Prytula Foundation. Click opens it. Hover leaves it shut.
+- About is in the menu. It links to the landing page, The White Witch, and Mira's World, and lists the same contact points.
+- Help and Config no longer claim to belong to the page you are on.
+- A profile banner stays hidden until the picture has decoded, so it does not flash on the way in.
 
 ## 25 October 2026
 

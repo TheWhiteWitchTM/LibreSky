@@ -290,6 +290,10 @@ function uaFlag() {
   return '<svg class="tab-flag" viewBox="0 0 32 22" aria-hidden="true"><rect width="32" height="11" fill="#005BBB"/><rect y="11" width="32" height="11" fill="#FFD500"/></svg>';
 }
 
+function dirMark() {
+  return '<svg class="tab-dir" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.5 6.2A1.7 1.7 0 0 1 5.2 4.5h4.1l1.7 1.8h7.8A1.7 1.7 0 0 1 20.5 8v9.3a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7V6.2z"/></svg>';
+}
+
 function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {}) {
   const links = tabs.map((tab) => {
     const explore = tab.explore ? ` data-explore="${escapeHtml(tab.explore)}"` : '';
@@ -297,7 +301,7 @@ function tabStrip(tabs, { menuAct = '', menuLabel = 'More', sticky = false } = {
     const role = tab.external ? 'link' : 'tab';
     const selected = tab.external ? '' : ` aria-selected="${tab.on ? 'true' : 'false'}"`;
     const named = tab.aria ? ` aria-label="${escapeHtml(tab.aria)}"` : '';
-    const mark = tab.flag === 'ua' ? uaFlag() : '';
+    const mark = tab.flag === 'ua' ? uaFlag() : (tab.directory ? dirMark() : '');
     return `<a role="${role}" href="${escapeHtml(tab.href)}"${selected}${named}${explore}${external}>${mark}<span>${escapeHtml(tab.label)}</span></a>`;
   }).join('');
   const menu = menuAct
@@ -949,7 +953,8 @@ function searchTabItems(query, trends) {
         href: spec?.href || '#',
         label,
         external: true,
-        aria: `${label}, opens in a new tab`,
+        directory: true,
+        aria: `${label}, directory, opens in a new tab`,
         on: false,
       };
     }
@@ -2283,6 +2288,7 @@ async function showProfile(actor, tab) {
     shownProfile = profile;
     forgetStrips($('view'));
     $('view').innerHTML = `${profileHtml(profile)}<div id="profile-tabs"></div>${pinHtml}${blank}`;
+    revealProfileBanner();
     paintProfileTabs();
     $('profile-action').innerHTML = action;
     remember();
@@ -2603,12 +2609,18 @@ function searchItemLabel(item) {
 
 function searchItemNote(item) {
   if (item?.kind === 'posts') return 'Posts';
-  if (item?.kind === 'link') return 'Opens in a new tab';
+  if (item?.kind === 'link') return 'Directory';
   return 'Topic';
 }
 
 function searchItemFlag(item) {
   return item?.kind === 'posts' && item.id === 'ukraine';
+}
+
+function searchItemMark(item) {
+  if (searchItemFlag(item)) return uaFlag();
+  if (item?.kind === 'link') return dirMark();
+  return '';
 }
 
 function pinSearchDraft() {
@@ -2638,7 +2650,7 @@ function paintSearchEditor() {
   const preview = showing.map((item, index) => {
     const label = searchItemLabel(item);
     const on = index === 0 ? ' aria-selected="true"' : '';
-    const mark = searchItemFlag(item) ? uaFlag() : '';
+    const mark = searchItemMark(item);
     return `<span role="tab"${on}>${mark}${escapeHtml(label)}</span>`;
   }).join('');
   const rows = showing.map((item, index) => {
@@ -2652,7 +2664,7 @@ function paintSearchEditor() {
     if (item.kind === 'term') {
       return `<div class="lane-row" data-search-index="${index}"><span class="search-fields"><input data-search-label maxlength="40" value="${escapeHtml(item.label || '')}" placeholder="Name" aria-label="Name"><input data-search-q maxlength="200" value="${escapeHtml(item.q || '')}" placeholder="Search term" aria-label="Search term"></span>${moves}</div>`;
     }
-    const mark = searchItemFlag(item) ? uaFlag() : '';
+    const mark = searchItemMark(item);
     const title = mark ? `<span class="shelf-title">${mark}<strong>${escapeHtml(name)}</strong></span>` : `<strong>${escapeHtml(name)}</strong>`;
     return `<div class="lane-row" data-search-index="${index}"><span>${title}<span class="handle">${escapeHtml(searchItemNote(item))}</span></span>${moves}</div>`;
   }).join('');
@@ -2661,7 +2673,7 @@ function paintSearchEditor() {
   const haveLinks = new Set(showing.filter((item) => item.kind === 'link').map((item) => item.id));
   const topicRows = SEARCH_TOPICS.filter((item) => item.id !== 'foryou' && !haveTopics.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Topic</span></span><button type="button" class="text-btn" data-act="search-topic" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
   const postRows = SEARCH_POSTS.filter((item) => !havePosts.has(item.id)).map((item) => `<div class="lane-row"><span><span class="shelf-title">${item.id === 'ukraine' ? uaFlag() : ''}<strong>${escapeHtml(item.label)}</strong></span><span class="handle">Posts</span></span><button type="button" class="text-btn" data-act="search-posts" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
-  const linkRows = SEARCH_LINKS.filter((item) => !haveLinks.has(item.id)).map((item) => `<div class="lane-row"><span><strong>${escapeHtml(item.label)}</strong><span class="handle">Opens in a new tab</span></span><button type="button" class="text-btn" data-act="search-link" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
+  const linkRows = SEARCH_LINKS.filter((item) => !haveLinks.has(item.id)).map((item) => `<div class="lane-row"><span><span class="shelf-title">${dirMark()}<strong>${escapeHtml(item.label)}</strong></span><span class="handle">Directory</span></span><button type="button" class="text-btn" data-act="search-link" data-topic="${escapeHtml(item.id)}">Add</button></div>`);
   const available = [...postRows, ...topicRows, ...linkRows].join('');
   forgetStrips(body);
   body.innerHTML = `<div class="tab-strip lane-strip"><div class="tab-scroller" role="tablist">${preview}</div></div>
@@ -3619,7 +3631,6 @@ function showSettings() {
   const sounds = soundPrefs();
   const tabs = SETTINGS_TABS.map(([id, label]) => `<button type="button" role="tab" id="settings-tab-${id}" data-settings-tab="${id}" aria-selected="${settingsTab === id ? 'true' : 'false'}" aria-controls="settings-${id}" tabindex="${settingsTab === id ? '0' : '-1'}">${label}</button>`).join('');
   $('view').innerHTML = `<section class="settings">
-    <p class="dim">Config and Help are page scoped. On Home, Search, a feed, or a thread, Config opens that page. This page holds the rest.</p>
     <div class="settings-tabs" role="tablist" aria-label="Settings">${tabs}</div>
     ${settingsPanel('you', `<h2>Accounts</h2>
     <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8.</p>
@@ -5024,7 +5035,7 @@ function tourStepList() {
     {
       kicker: 'Menu',
       title: 'Help, config, and this tour',
-      copy: 'The menu holds Help, Config, Downloads, this tour, and Support development.',
+      copy: 'The menu holds Help, Config, About, Downloads, this tour, and Support development.',
       targets: ['#app-menu-btn'],
     },
     {
@@ -5048,7 +5059,7 @@ function tourStepList() {
     {
       kicker: 'Search',
       title: 'Find people and posts',
-      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. Ukraine on that row shows posts about Ukraine. SociallyDead opens the directory in a new tab. The … edits the row.',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. Ukraine on that row shows posts about Ukraine. SociallyDead, with a folder, opens the directory in a new tab. The … edits the row.',
       targets: ['#rail-q', '[data-nav="search"]'],
     },
     {
@@ -7507,9 +7518,6 @@ function openAbout() {
 
 function openHelp() {
   const dialog = $('help');
-  const scope = $('help-scope');
-  const title = $('title')?.textContent?.trim() || 'this page';
-  if (scope) scope.textContent = `Help and Config are page scoped. You are on ${title}.`;
   if (dialog && !dialog.open) dialog.showModal();
 }
 
@@ -8042,6 +8050,11 @@ async function handleChromeAct(act, event) {
   if (act === 'help') {
     event.preventDefault();
     openHelp();
+    return true;
+  }
+  if (act === 'about') {
+    event.preventDefault();
+    openAbout();
     return true;
   }
   if (act === 'config') {
@@ -9831,7 +9844,7 @@ function onKey(event) {
       closeAlphaMenu(true);
       return;
     }
-    if (layerOpen($('ua-menu'))) {
+    if (document.querySelector('.ua-wrap.is-open')) {
       event.preventDefault();
       closeUkraineMenu(true);
       return;
@@ -10013,13 +10026,9 @@ function bind() {
   $('app-menu')?.addEventListener('click', (event) => {
     if (event.target.closest('a, button')) closeAppMenu();
   });
-  $('ua-mark')?.addEventListener('click', () => toggleUkraineMenu());
-  $('ua-menu')?.addEventListener('click', (event) => {
-    if (event.target.closest('a')) closeUkraineMenu();
-  });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
-    if (!event.target.closest('#ua-menu, #ua-mark')) closeUkraineMenu();
+    if (!event.target.closest('.ua-wrap')) closeUkraineMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
@@ -11086,69 +11095,72 @@ async function checkProfileAi() {
   }
 }
 
-function releaseAlphaShut() {
-  const wrap = document.querySelector('.alpha-wrap');
-  const menu = document.getElementById('alpha-menu');
-  if (!wrap?.classList.contains('is-shut')) return;
-  if (wrap.matches(':hover')) return;
-  if (wrap.contains(document.activeElement)) return;
-  wrap.classList.remove('is-shut');
-  menu?.removeAttribute('inert');
+function setDoor(wrap, mark, menu, open) {
+  if (!wrap) return;
+  wrap.classList.toggle('is-open', open);
+  mark?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu?.setAttribute('aria-hidden', open ? 'false' : 'true');
 }
 
 function closeAlphaMenu(focus) {
   const wrap = document.querySelector('.alpha-wrap');
-  const mark = document.getElementById('alpha-mark');
-  const menu = document.getElementById('alpha-menu');
   if (!wrap?.classList.contains('is-open')) return;
-  wrap.classList.remove('is-open');
-  mark?.setAttribute('aria-expanded', 'false');
-  menu?.setAttribute('aria-hidden', 'true');
-  const hold = Boolean(focus) || wrap.matches(':hover') || wrap.contains(document.activeElement);
-  if (hold) {
-    wrap.classList.add('is-shut');
-    menu?.setAttribute('inert', '');
-  } else {
-    wrap.classList.remove('is-shut');
-    menu?.removeAttribute('inert');
-  }
-  if (focus) mark?.focus();
+  setDoor(wrap, document.getElementById('alpha-mark'), document.getElementById('alpha-menu'), false);
+  if (focus) document.getElementById('alpha-mark')?.focus();
 }
 
-function bindAlphaDoor() {
-  const mark = document.getElementById('alpha-mark');
-  const wrap = mark?.closest('.alpha-wrap');
-  const menu = document.getElementById('alpha-menu');
-  if (!mark || !wrap) return;
+function closeUkraineMenu(focus) {
+  const wrap = document.querySelector('.ua-wrap');
+  if (!wrap?.classList.contains('is-open')) return;
+  setDoor(wrap, $('ua-mark'), $('ua-menu'), false);
+  if (focus) $('ua-mark')?.focus();
+}
+
+function bindSwing(markId, closeOthers, sound) {
+  const mark = document.getElementById(markId);
+  const menuId = mark?.getAttribute('aria-controls') || '';
+  const menu = menuId ? document.getElementById(menuId) : null;
+  const wrap = mark?.parentElement;
+  if (!mark || !wrap || !menu) return;
   const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let last = 0;
   const play = () => {
-    if (quiet) return;
+    if (!sound || quiet) return;
     const now = performance.now();
     if (now - last < 900) return;
     last = now;
     try { playAlphaDoor(); } catch { /* this browser kept the chime */ }
   };
-  mark.addEventListener('pointerenter', play);
-  mark.addEventListener('focus', play);
-  wrap.addEventListener('pointerleave', releaseAlphaShut);
-  wrap.addEventListener('focusout', () => setTimeout(releaseAlphaShut, 0));
-  mark.addEventListener('click', () => {
+  const shut = (focus) => {
+    if (markId === 'ua-mark') closeUkraineMenu(focus);
+    else closeAlphaMenu(focus);
+  };
+  mark.addEventListener('click', (event) => {
+    event.stopPropagation();
     if (wrap.classList.contains('is-open')) {
-      closeAlphaMenu();
-      play();
+      shut();
       return;
     }
-    wrap.classList.remove('is-shut');
-    menu?.removeAttribute('inert');
-    wrap.classList.add('is-open');
-    mark.setAttribute('aria-expanded', 'true');
-    menu?.setAttribute('aria-hidden', 'false');
+    closeOthers();
+    setDoor(wrap, mark, menu, true);
+    play();
+  });
+  menu.addEventListener('click', (event) => {
+    if (event.target.closest('a')) shut();
+  });
+}
+
+function bindAlphaDoor() {
+  bindSwing('alpha-mark', () => {
     closeAppMenu();
     closeMenu();
     closeUkraineMenu();
-    play();
-  });
+  }, true);
+  bindSwing('ua-mark', () => {
+    closeAppMenu();
+    closeMenu();
+    closeAlphaMenu();
+  }, false);
   document.addEventListener('pointerdown', () => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
@@ -11157,48 +11169,22 @@ function bindAlphaDoor() {
   }, { capture: true });
 }
 
-function closeUkraineMenu(focus) {
-  const menu = $('ua-menu');
-  const button = $('ua-mark');
-  if (!layerOpen(menu)) return;
-  hideLayer(menu);
-  button?.setAttribute('aria-expanded', 'false');
-  if (focus) button?.focus();
-}
-
-function toggleUkraineMenu() {
-  const menu = $('ua-menu');
-  const button = $('ua-mark');
-  if (!menu || !button) return;
-  if (layerOpen(menu)) {
-    closeUkraineMenu();
-    return;
-  }
-  closeMenu();
-  closeAppMenu();
-  closeAlphaMenu();
-  hideTip();
-  showLayer(menu);
-  button.setAttribute('aria-expanded', 'true');
-  placeUkraineMenu();
-  requestAnimationFrame(() => { if (layerOpen(menu)) placeUkraineMenu(); });
-}
-
-function placeUkraineMenu() {
-  const menu = $('ua-menu');
-  const button = $('ua-mark');
-  if (!menu || !button || !layerOpen(menu)) return;
-  const rect = button.getBoundingClientRect();
-  const frame = viewportFrame();
-  const width = menu.offsetWidth || 180;
-  const height = menu.offsetHeight || 0;
-  let left = rect.left;
-  let top = rect.bottom + 4;
-  if (left + width > frame.width - 8) left = frame.width - width - 8;
-  if (top + height > frame.height - 8 && rect.top - height - 4 >= 8) top = rect.top - height - 4;
-  menu.style.position = 'fixed';
-  menu.style.right = 'auto';
-  pinBox(menu, Math.max(8, left), Math.max(8, top));
+function revealProfileBanner() {
+  const img = document.querySelector('#view .profile .banner img');
+  if (!img) return;
+  const show = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (img.isConnected) img.classList.add('is-in');
+      });
+    });
+  };
+  const decoded = () => {
+    if (typeof img.decode === 'function') img.decode().then(show, show);
+    else show();
+  };
+  if (img.complete && img.naturalWidth) decoded();
+  else img.addEventListener('load', decoded, { once: true });
 }
 
 async function boot() {
@@ -11282,7 +11268,6 @@ function placeOpenLayers() {
   }
   const appMenu = $('app-menu');
   if (layerOpen(appMenu)) placeAppMenu();
-  if (layerOpen($('ua-menu'))) placeUkraineMenu();
   const card = $('hovercard');
   if (card && !card.hidden && card._anchor?.isConnected) placeHover(card, card._anchor);
 }

@@ -9,7 +9,7 @@
   &nbsp;
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0b2548?style=for-the-badge"></a>
   &nbsp;
-  <a href="CHANGES.md"><img alt="Alpha" src="https://img.shields.io/badge/build-alpha-49b7ff?style=for-the-badge"></a>
+  <a href="CHANGES.md"><img alt="Beta" src="https://img.shields.io/badge/build-beta-49b7ff?style=for-the-badge"></a>
 </p>
 
 # LibreSky
@@ -54,11 +54,9 @@ You can browse before you sign in, or sign in with an app password. This browser
 | Search | Trending topics first, then people, posts, and feeds |
 | Sidebar | Notifications, chat, bookmarks, your profile, calls, and AI Assist |
 | More | Feeds, lists, starter packs, settings, About, Privacy, and Terms |
-| Menu | Help and Config for the page you are on, plus downloads and support |
+| Menu | Help, Config, About, downloads, and support |
 
 Posts come from your Bluesky account. The whole client is this site.
-
-Help and Config follow the page. On Home they tune the feed. On a thread they set the reply order. On Search they set Latest or Top, people you follow, replies, languages, and sensitive posts.
 
 ## Write it
 
@@ -130,7 +128,7 @@ The pages and scripts are about 1.5 MB. A service worker stores that shell, so t
 
 ## Yours to read
 
-MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this alpha is in [Changes](CHANGES.md).
+MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this beta is in [Changes](CHANGES.md).
 
 LibreSky is free. [Support development](https://thewhitewitchtm.github.io/LibreSky/#/support) keeps the browser client, the desktop apps, and what comes next moving.
 

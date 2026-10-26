@@ -390,7 +390,7 @@ export function profileHtml(profile) {
   const banner = safeUrl(profile.banner || '');
   const name = profile.displayName || profile.handle;
   return `<header class="profile">
-    <div class="banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div>
+    <div class="banner">${banner ? `<img src="${attr(banner)}" alt="" decoding="async" onerror="this.remove()">` : ''}</div>
     <div class="profile-row">
       ${avatar(profile.avatar, name, 'xl')}
       <div id="profile-action"></div>
