@@ -362,6 +362,7 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
   });
   document.title = title === 'Home' || title === 'Discover' ? 'LibreSky' : `${title} — LibreSky`;
   paintHomeCompose(compose);
+  if (nav !== 'search') clearSearchLead();
   measureHead();
   requestAnimationFrame(measureHead);
   if (!$('tour')?.hidden) requestAnimationFrame(placeTour);
@@ -973,7 +974,7 @@ function searchTabItems(query, trends) {
 }
 
 function paintSearchTabs(query) {
-  const host = $('search-tabs');
+  const host = $('tabs');
   if (!host) return;
   const trends = Array.isArray(trendCache.list) ? trendCache.list : null;
   let items = searchTabItems(query, trends);
@@ -982,13 +983,25 @@ function paintSearchTabs(query) {
     items = searchTabItems('', trends);
   }
   forgetStrips(host);
+  host.hidden = false;
   host.innerHTML = tabStrip(items, { menuAct: 'search-menu', menuLabel: 'Search menu' });
   watchStrips(host);
+  measureHead();
 }
 
-function searchPageHtml(query) {
-  const controls = query ? sortHtml() : '';
-  return `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label></form><div id="search-tabs" class="search-pin"></div><div id="search-controls">${controls}</div><div id="search-results"></div>`;
+function paintSearchLead(query) {
+  const slot = $('search-lead');
+  if (!slot) return;
+  const html = `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label></form>`;
+  slot.hidden = false;
+  if (slot.innerHTML !== html) slot.innerHTML = html;
+}
+
+function clearSearchLead() {
+  const slot = $('search-lead');
+  if (!slot || slot.hidden) return;
+  slot.hidden = true;
+  slot.innerHTML = '';
 }
 
 function preferLive(trends) {
@@ -1503,15 +1516,20 @@ async function showSearch(query, options = {}) {
   const focus = options.focus !== false;
   const token = ++generation;
   searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
-  setChrome({ title: 'Search', nav: 'search' });
   const known = Array.isArray(trendCache.list) ? trendCache.list : null;
+  setChrome({
+    title: 'Search',
+    nav: 'search',
+    tabs: searchTabItems(query, known),
+    menuAct: 'search-menu',
+    menuLabel: 'Search menu',
+  });
+  paintSearchLead(query);
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  $('view').innerHTML = searchPageHtml(query);
-  paintSearchTabs(query);
-  const results = $('search-results');
-  if (results) results.innerHTML = placeholder;
+  const controls = query ? sortHtml() : '';
+  $('view').innerHTML = `<div id="search-controls">${controls}</div><div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -4869,7 +4887,7 @@ function showUkraine() {
   generation += 1;
   setChrome({ title: 'Support Ukraine', nav: 'ukraine', back: true });
   window.scrollTo(0, 0);
-  $('view').innerHTML = `<div class="support-page"><div class="ua-banner" aria-hidden="true"><svg viewBox="0 0 240 160"><rect width="240" height="80" fill="#005BBB"/><rect y="80" width="240" height="80" fill="#FFD500"/></svg></div><h2>Support Ukraine</h2><p>Ukraine is defending itself. The flag in the header opens this page. A gift goes to the group you choose. LibreSky does not see the payment and does not take a cut.</p><section class="ua-give"><h3>UNITED24</h3><p>The official fundraising platform of Ukraine. Gifts go to defense, medical aid, and rebuilding.</p><p><a class="primary support-pay" href="https://u24.gov.ua/" target="_blank" rel="noopener noreferrer">Give through UNITED24</a></p></section><section class="ua-give"><h3>Come Back Alive</h3><p>A Ukrainian foundation that equips the armed forces and publishes what it bought.</p><p><a class="primary support-pay" href="https://savelife.in.ua/en/donate-en/" target="_blank" rel="noopener noreferrer">Give through Come Back Alive</a></p></section><section class="ua-give"><h3>Prytula Foundation</h3><p>The Serhiy Prytula Charity Foundation funds defense, demining, and humanitarian aid.</p><p><a class="primary support-pay" href="https://prytulafoundation.org/en" target="_blank" rel="noopener noreferrer">Give through the Prytula Foundation</a></p></section><p class="dim">Each link opens in a new tab.</p></div>`;
+  $('view').innerHTML = `<div class="support-page"><div class="ua-banner" aria-hidden="true"><svg viewBox="0 0 240 160"><rect width="240" height="80" fill="#005BBB"/><rect y="80" width="240" height="80" fill="#FFD500"/></svg></div><h2>Support Ukraine</h2><p>Ukraine is defending itself. This page is where a gift goes. Pick the group, and the payment happens on their site. LibreSky does not see it and does not take a cut.</p><section class="ua-give"><h3>UNITED24</h3><p>The official fundraising platform of Ukraine. Gifts go to defense, medical aid, and rebuilding.</p><p><a class="primary support-pay" href="https://u24.gov.ua/" target="_blank" rel="noopener noreferrer">Give through UNITED24</a></p></section><section class="ua-give"><h3>Come Back Alive</h3><p>A Ukrainian foundation that equips the armed forces and publishes what it bought.</p><p><a class="primary support-pay" href="https://savelife.in.ua/en/donate-en/" target="_blank" rel="noopener noreferrer">Give through Come Back Alive</a></p></section><section class="ua-give"><h3>Prytula Foundation</h3><p>The Serhiy Prytula Charity Foundation funds defense, demining, and humanitarian aid.</p><p><a class="primary support-pay" href="https://prytulafoundation.org/en" target="_blank" rel="noopener noreferrer">Give through the Prytula Foundation</a></p></section><p class="dim">Each group opens in a new tab.</p></div>`;
 }
 
 function showDownloads() {
@@ -5140,7 +5158,6 @@ function openTour(index = 0) {
   closeAppMenu();
   closeMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   const steps = tourStepList();
   tourIndex = Math.max(0, Math.min(index, steps.length - 1));
   overlay.hidden = false;
@@ -5342,7 +5359,6 @@ function route() {
   closeMenu();
   closeAppMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   if (designOn()) paintDesignReadout();
   hideSuggest();
   closeHover();
@@ -6547,7 +6563,6 @@ function toggleAppMenu() {
   }
   closeMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   hideTip();
   showLayer(menu);
   button.setAttribute('aria-expanded', 'true');
@@ -9856,11 +9871,6 @@ function onKey(event) {
       closeAlphaMenu(true);
       return;
     }
-    if (document.querySelector('.ua-wrap.is-open')) {
-      event.preventDefault();
-      closeUkraineMenu(true);
-      return;
-    }
     const menu = $('menu');
     if (layerOpen(menu)) {
       event.preventDefault();
@@ -10011,7 +10021,6 @@ function bind() {
       closeMenu();
       closeAppMenu();
       closeAlphaMenu();
-      closeUkraineMenu();
     }
     placeFresh();
     placeTour();
@@ -10023,7 +10032,6 @@ function bind() {
     if (performance.now() - layerOpenedAt >= 450) {
       closeMenu();
       closeAppMenu();
-      closeUkraineMenu();
     } else {
       placeOpenLayers();
     }
@@ -10040,7 +10048,6 @@ function bind() {
   });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
-    if (!event.target.closest('.ua-wrap')) closeUkraineMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
@@ -10278,12 +10285,13 @@ function bind() {
     const q = $('rail-q').value.trim();
     if (q) location.hash = `#/search/${encodeURIComponent(q)}`;
   });
+  $('search-lead')?.addEventListener('submit', (event) => {
+    if (event.target.id !== 'search-form') return;
+    event.preventDefault();
+    const q = $('search-q').value.trim();
+    location.hash = q ? `#/search/${encodeURIComponent(q)}` : '#/search';
+  });
   $('view').addEventListener('submit', (event) => {
-    if (event.target.id === 'search-form') {
-      event.preventDefault();
-      const q = $('search-q').value.trim();
-      location.hash = q ? `#/search/${encodeURIComponent(q)}` : '#/search';
-    }
     if (event.target.id === 'chat-form') {
       event.preventDefault();
       const input = $('chat-text');
@@ -11121,13 +11129,6 @@ function closeAlphaMenu(focus) {
   if (focus) document.getElementById('alpha-mark')?.focus();
 }
 
-function closeUkraineMenu(focus) {
-  const wrap = document.querySelector('.ua-wrap');
-  if (!wrap?.classList.contains('is-open')) return;
-  setDoor(wrap, $('ua-mark'), $('ua-menu'), false);
-  if (focus) $('ua-mark')?.focus();
-}
-
 function bindSwing(markId, closeOthers, sound) {
   const mark = document.getElementById(markId);
   const menuId = mark?.getAttribute('aria-controls') || '';
@@ -11144,8 +11145,7 @@ function bindSwing(markId, closeOthers, sound) {
     try { playAlphaDoor(); } catch { /* this browser kept the chime */ }
   };
   const shut = (focus) => {
-    if (markId === 'ua-mark') closeUkraineMenu(focus);
-    else closeAlphaMenu(focus);
+    closeAlphaMenu(focus);
   };
   mark.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -11166,7 +11166,6 @@ function bindAlphaDoor() {
   bindSwing('alpha-mark', () => {
     closeAppMenu();
     closeMenu();
-    closeUkraineMenu();
   }, true);
   document.addEventListener('pointerdown', () => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;

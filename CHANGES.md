@@ -6,10 +6,10 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 26 October 2026
 
-- Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row with a folder, and opens the directory in a new tab.
+- Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row with a folder, and opens the directory in a new tab. Scroll, and the search box leaves. The tabs stay, the same way the writing line leaves on Home.
+- About lists The White Witch and Mira's World first, each with a picture, then a list that starts with LibreSky on GitHub.
 - The mark beside the menu is beta. Click it for Debug and Design view. Hover leaves it shut.
 - The Ukraine flag beside beta is only the flag. Click it to open Support Ukraine. Hover does not open a menu.
-- About lists The White Witch and Mira's World first, each with a picture, then LibreSky on GitHub, and the same contact points.
 - Help and Config no longer claim to belong to the page you are on.
 - A profile banner stays hidden until the picture has decoded, so it does not flash on the way in.
 
