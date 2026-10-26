@@ -188,7 +188,8 @@ img { max-width: 100%; }
 .top-mark .mark { width: 32px; height: 32px; }
 .app-menu { position: relative; flex: none; }
 .app-top > .app-menu { z-index: 6; }
-.app-top > .alpha-wrap { z-index: 7; }
+.app-top > .alpha-wrap,
+.app-top > .ua-wrap { z-index: 7; }
 .alpha-wrap { position: relative; flex: none; }
 .menu-btn {
   width: 40px;
@@ -353,28 +354,148 @@ img { max-width: 100%; }
   68% { transform: rotate(-5deg); }
   100% { opacity: 1; transform: rotate(0deg); }
 }
-.alpha-wrap.is-open .alpha-door { opacity: 1; pointer-events: auto; }
+.alpha-wrap.is-open .alpha-door,
+.ua-wrap.is-open .ua-door { opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: no-preference) {
-  .alpha-wrap.is-open .alpha-door {
+  .alpha-wrap.is-open .alpha-door,
+  .ua-wrap.is-open .ua-door {
     animation: alpha-door-swing 0.8s cubic-bezier(.2, .85, .2, 1) both;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .alpha-wrap.is-open .alpha-door { transform: none; }
+  .alpha-wrap.is-open .alpha-door,
+  .ua-wrap.is-open .ua-door { transform: none; }
 }
+.ua-wrap { position: relative; flex: none; }
 .ua-mark {
+  position: relative;
+  z-index: 4;
   display: block;
   flex: none;
   width: 42px;
   height: 28px;
   margin-right: 6px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(8, 20, 40, 0.45);
+  cursor: pointer;
 }
 .ua-mark:hover { filter: brightness(1.06); }
-.ua-mark[aria-current="page"] { box-shadow: 0 0 0 2px #005BBB; }
+.ua-mark[aria-expanded="true"] { box-shadow: 0 0 0 2px #005BBB; }
 .ua-pin { display: block; width: 100%; height: 100%; }
+.ua-door {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 5;
+  width: 214px;
+  margin: 0 0 0 -107px;
+  transform: rotate(-16deg);
+  transform-origin: center top;
+  opacity: 0;
+  pointer-events: none;
+}
+.ua-door-string {
+  display: block;
+  width: 2px;
+  height: 14px;
+  margin: 0 auto;
+  border-radius: 1px;
+  background: linear-gradient(#005BBB, #FFD500);
+}
+.ua-door-card {
+  display: block;
+  padding: 8px 10px 12px;
+  border: 1px solid rgba(0, 91, 187, 0.55);
+  border-radius: 10px 10px 18px 18px;
+  background: linear-gradient(#12325c, #071422);
+  color: #f4f7fb;
+  text-align: center;
+  font-family: Palatino, "Palatino Linotype", Georgia, serif;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.15;
+  letter-spacing: 0;
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.35);
+}
+.ua-door-card::before {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 2px auto 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 4px, #FFD500 5px 7px, #12325c 8px);
+  box-shadow: 0 0 0 1px rgba(255, 213, 0, 0.45);
+}
+.ua-door-kicker {
+  display: block;
+  color: #FFD500;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  text-transform: uppercase;
+}
+.ua-door-card strong {
+  display: block;
+  margin: 1px 0 6px;
+  font-size: 22px;
+  font-style: italic;
+  letter-spacing: 0.12em;
+}
+.ua-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+.ua-pair figure { margin: 0; }
+.ua-pair svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.35);
+}
+.ua-pair figcaption {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ua-pair .is-up figcaption { color: #ffe58a; }
+.ua-pair .is-down figcaption { color: #f0b4b4; }
+.ua-door-note {
+  display: block;
+  margin-top: 6px;
+  color: #c5d4ea;
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 600;
+}
+.ua-item {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 213, 0, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f7fb;
+  font-family: Palatino, "Palatino Linotype", Georgia, serif;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+.ua-item:hover { background: rgba(0, 91, 187, 0.45); }
 @media (max-width: 720px) {
   .app-top { gap: 4px; }
   .top-mark,
