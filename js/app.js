@@ -319,6 +319,10 @@ function paintPageIcon(nav) {
   const slot = $('page-icon');
   if (!slot) return;
   slot.setAttribute('aria-hidden', 'true');
+  if (nav === 'ukraine') {
+    slot.innerHTML = '<svg class="ua-pin" viewBox="0 0 48 32" aria-hidden="true"><rect width="48" height="16" fill="#005BBB"/><rect y="16" width="48" height="16" fill="#FFD500"/></svg>';
+    return;
+  }
   const key = MORE_NAV.has(nav) ? 'more' : nav;
   const source = document.querySelector(`[data-nav="${CSS.escape(key)}"] .ico`);
   if (source) slot.replaceChildren(source.cloneNode(true));
@@ -984,7 +988,7 @@ function paintSearchTabs(query) {
 
 function searchPageHtml(query) {
   const controls = query ? sortHtml() : '';
-  return `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label><div id="search-tabs"></div><div id="search-controls">${controls}</div></form><div id="search-results"></div>`;
+  return `<form class="search-page" id="search-form"><label class="search"><input id="search-q" value="${escapeHtml(query)}" placeholder="Search Bluesky" autocomplete="off" enterkeyhint="search"></label></form><div id="search-tabs" class="search-pin"></div><div id="search-controls">${controls}</div><div id="search-results"></div>`;
 }
 
 function preferLive(trends) {
@@ -4861,6 +4865,13 @@ function showSupport() {
   $('view').innerHTML = `<div class="support-page"><h2>Support development</h2><p>LibreSky is free. A payment helps the work continue: the browser client, the desktop apps, and what comes next.</p><p><a class="primary support-pay" href="https://www.paypal.com/ncp/payment/4P85EQRES3RGU" target="_blank" rel="noopener noreferrer">PayPal</a></p><p class="dim">PayPal opens in a new tab. LibreSky does not see the payment.</p></div>`;
 }
 
+function showUkraine() {
+  generation += 1;
+  setChrome({ title: 'Support Ukraine', nav: 'ukraine', back: true });
+  window.scrollTo(0, 0);
+  $('view').innerHTML = `<div class="support-page"><div class="ua-banner" aria-hidden="true"><svg viewBox="0 0 240 160"><rect width="240" height="80" fill="#005BBB"/><rect y="80" width="240" height="80" fill="#FFD500"/></svg></div><h2>Support Ukraine</h2><p>Ukraine is defending itself. The flag in the header opens this page. A gift goes to the group you choose. LibreSky does not see the payment and does not take a cut.</p><section class="ua-give"><h3>UNITED24</h3><p>The official fundraising platform of Ukraine. Gifts go to defense, medical aid, and rebuilding.</p><p><a class="primary support-pay" href="https://u24.gov.ua/" target="_blank" rel="noopener noreferrer">Give through UNITED24</a></p></section><section class="ua-give"><h3>Come Back Alive</h3><p>A Ukrainian foundation that equips the armed forces and publishes what it bought.</p><p><a class="primary support-pay" href="https://savelife.in.ua/en/donate-en/" target="_blank" rel="noopener noreferrer">Give through Come Back Alive</a></p></section><section class="ua-give"><h3>Prytula Foundation</h3><p>The Serhiy Prytula Charity Foundation funds defense, demining, and humanitarian aid.</p><p><a class="primary support-pay" href="https://prytulafoundation.org/en" target="_blank" rel="noopener noreferrer">Give through the Prytula Foundation</a></p></section><p class="dim">Each link opens in a new tab.</p></div>`;
+}
+
 function showDownloads() {
   generation += 1;
   setChrome({ title: 'Download', nav: 'downloads', back: true });
@@ -5361,6 +5372,7 @@ function route() {
   if (a === 'pack' && b) return showPack(b);
   if (a === 'downloads') return showDownloads();
   if (a === 'support') return showSupport();
+  if (a === 'ukraine') return showUkraine();
   if (a === 'settings') return showSettings();
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
@@ -11156,11 +11168,6 @@ function bindAlphaDoor() {
     closeMenu();
     closeUkraineMenu();
   }, true);
-  bindSwing('ua-mark', () => {
-    closeAppMenu();
-    closeMenu();
-    closeAlphaMenu();
-  }, false);
   document.addEventListener('pointerdown', () => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
