@@ -12,6 +12,7 @@ import {
   convoUnread,
   messageSender,
   parseCallMessage,
+  parseShareMessage,
   richText,
   safeUrl,
   timeAgo,
@@ -674,6 +675,7 @@ function messagePreview(message) {
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
   if (parseCallMessage(message.text)) return 'Call';
+  if (parseShareMessage(message.text)) return 'File';
   if (message.text) return message.text;
   if (message.embed) return 'Sent a post';
   return 'Message';
@@ -747,7 +749,7 @@ export function messageHtml(message, me, options = {}) {
   const mine = Boolean(sender && sender === me);
   const text = message?.text || nested?.text || '';
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-  if (parseCallMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
+  if (parseCallMessage(text) || parseShareMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
   const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';
@@ -854,6 +856,33 @@ export function callRequestHtml(offer) {
   const name = offer?.name || 'Someone';
   const label = video ? 'Video call request' : 'Voice call request';
   return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
+}
+
+export function shareBannerHtml(offer, extra = {}) {
+  const name = extra.name || offer?.name || 'a file';
+  const sizeLabel = extra.sizeLabel || '';
+  const detail = sizeLabel ? `${name} · ${sizeLabel}` : name;
+  const rkey = attr(offer?.rkey || '');
+  const convo = attr(extra.convoId || '');
+  const peer = attr(extra.peerDid || '');
+  const label = extra.incoming ? `Wants to send ${escapeHtml(String(detail).trim())}` : escapeHtml(String(detail).trim());
+  return `<div class="share-banner" role="status">${icon('image')}<span>${label}</span>${extra.incoming ? `<button type="button" class="primary small" data-act="share-accept" data-rkey="${rkey}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="share-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button>` : ''}</div>`;
+}
+
+export function shareFileHtml(file, { mine = false } = {}) {
+  const name = escapeHtml(file?.name || 'file');
+  const raw = String(file?.url || '');
+  const href = raw.startsWith('blob:') ? raw : safeUrl(raw);
+  const type = String(file?.type || '');
+  const image = type.startsWith('image/') && href;
+  const video = type.startsWith('video/') && href;
+  const media = image
+    ? `<img src="${attr(href)}" alt="${name}">`
+    : (video ? `<video src="${attr(href)}" controls playsinline></video>` : '');
+  const chip = href
+    ? `<a class="file-chip" href="${attr(href)}" download="${name}">${name}</a>`
+    : `<span class="file-chip">${name}</span>`;
+  return `<div class="bubble file${mine ? ' mine' : ''}">${media}${chip}</div>`;
 }
 
 export function callBannerHtml(offer, extra = {}) {

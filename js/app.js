@@ -1,5 +1,6 @@
 import * as api from './api.js';
 import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
+import { acceptShare, canShare, declineShare, hangShare, incomingShare, isSharing, prettySize, setupShare, startShare } from './share.js';
 import {
   accountIcon,
   actorHtml,
@@ -21,6 +22,8 @@ import {
   linkPreviewHtml,
   assistantHtml,
   messageHtml,
+  shareBannerHtml,
+  shareFileHtml,
   notificationsHtml,
   notificationSubjects,
   packHtml,
@@ -59,7 +62,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseHash, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseHash, parseShareMessage, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -1092,22 +1095,14 @@ const TOP_AFTER = 80;
 function placeColumnPill(node) {
   if (!node || node.hidden) return;
   const column = document.querySelector('.center');
-  if (!column) return;
-  const head = document.querySelector('.sticky-head');
+  const bar = document.querySelector('.app-top');
+  if (!column || !bar) return;
   const rect = column.getBoundingClientRect();
-  let below = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 52;
-  if (head && getComputedStyle(head).display !== 'none') {
-    const box = head.getBoundingClientRect();
-    if (box.height > 0) below = box.bottom;
-  }
-  const stuck = document.querySelector('.profile-tabs');
-  if (stuck) {
-    const box = stuck.getBoundingClientRect();
-    if (box.height > 0 && box.top <= below + 2) below = Math.max(below, box.bottom);
-  }
+  const barBox = bar.getBoundingClientRect();
   const height = Math.ceil(node.getBoundingClientRect().height) || 36;
+  const top = barBox.top + Math.max(4, (barBox.height - height) / 2);
   node.style.left = `${rect.left + rect.width / 2}px`;
-  node.style.top = `${Math.max(8, below - Math.max(height - 6, 18))}px`;
+  node.style.top = `${top}px`;
 }
 
 function placeFresh() {
@@ -1937,6 +1932,75 @@ function clearChatCallChrome() {
   $('view')?.querySelectorAll('.call-banner, .call-actions').forEach((node) => node.remove());
 }
 
+function paintShareLive(text, progress) {
+  const thread = $('view')?.querySelector('.chat-thread');
+  if (!thread) return;
+  let bar = thread.querySelector('.share-live');
+  if (!text) {
+    bar?.remove();
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.className = 'share-live';
+    const reply = thread.querySelector('.reply-bar');
+    if (reply) reply.insertAdjacentElement('beforebegin', bar);
+    else thread.append(bar);
+  }
+  const pct = Number.isFinite(progress) ? ` ${Math.round(progress * 100)}%` : '';
+  bar.innerHTML = `<span>${escapeHtml(text)}${pct}</span><button type="button" class="text-btn mini" data-act="share-cancel">Cancel</button>`;
+}
+
+function paintIncomingShare(messages, peerDid, convoId) {
+  const thread = $('view')?.querySelector('.chat-thread');
+  if (!thread) return;
+  thread.querySelectorAll('.share-banner').forEach((node) => node.remove());
+  if (isSharing()) return;
+  const offer = incomingShare(messages, myDid(), peerDid);
+  if (!offer?.rkey) return;
+  const reply = thread.querySelector('.reply-bar');
+  const html = shareBannerHtml(offer, {
+    incoming: true,
+    convoId,
+    peerDid,
+    name: offer.name,
+    size: offer.size,
+    sizeLabel: offer.size ? prettySize(offer.size) : '',
+  });
+  if (reply) reply.insertAdjacentHTML('beforebegin', html);
+  else thread.insertAdjacentHTML('beforeend', html);
+}
+
+function appendShareFile(file, mine) {
+  const list = $('view')?.querySelector('.messages');
+  if (!list || !file?.blob) return;
+  const url = URL.createObjectURL(file.blob);
+  list.insertAdjacentHTML('beforeend', shareFileHtml({ url, name: file.name, type: file.type }, { mine }));
+  list.scrollTop = list.scrollHeight;
+}
+
+async function beginShare(file) {
+  const form = $('chat-form');
+  const convoId = form?.dataset.convo || '';
+  const peerDid = form?.dataset.peer || '';
+  if (!file || !convoId || !peerDid) return;
+  if (isInCall()) {
+    toast('Hang up the call first.');
+    return;
+  }
+  if ($('view')?.dataset.convoStatus === 'request') {
+    try {
+      await api.acceptConvo(convoId);
+      if ($('view')) $('view').dataset.convoStatus = 'accepted';
+      $('view')?.querySelector('.request-banner')?.remove();
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
+  }
+  await startShare({ convoId, peerDid, file });
+}
+
 function watchOpenChat(convoId, peerDid, token) {
   stopChatTimer();
   chatTimer = setInterval(async () => {
@@ -1972,6 +2036,7 @@ function watchOpenChat(convoId, peerDid, token) {
           if (!mine) {
             fromThem = true;
             if (parseCallMessage(message.text)?.kind === 'offer') incomingOffer = true;
+            if (parseShareMessage(message.text)?.kind === 'offer') incomingOffer = true;
           }
         });
         if (added && near) list.scrollTop = list.scrollHeight;
@@ -1986,6 +2051,7 @@ function watchOpenChat(convoId, peerDid, token) {
         if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
       }
       clearChatCallChrome();
+      paintIncomingShare(messages, peerDid, convoId);
     } catch {
       /* the open chat stays as it is */
     }
@@ -2080,6 +2146,7 @@ async function showMessages(convoId) {
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
     const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
+    const chatPlus = `<button type="button" class="icon-btn chat-plus" data-act="chat-file" aria-label="Send a photo or file" data-tip="Photo or file">${icon('plus')}</button><input id="chat-file" type="file" accept="image/*,video/*,audio/*,.pdf,.zip,.txt,.json" hidden>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
     if (other) fillChatTitle(other, token);
     else {
@@ -2090,8 +2157,10 @@ async function showMessages(convoId) {
     }
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
-    $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form"><div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
+    $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form" data-peer="${escapeHtml(peerDid)}" data-convo="${escapeHtml(convoId)}">${chatPlus}<div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
     clearChatCallChrome();
+    paintIncomingShare(messages, peerDid, convoId);
+    if (isSharing()) paintShareLive('Transfer in progress…');
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
     applyFieldLanguage(area);
@@ -5221,6 +5290,10 @@ async function startCallToHandle(media) {
   if (!signedIn()) return requireSignIn();
   if (!canCall()) {
     toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+    return;
+  }
+  if (isSharing()) {
+    toast('Finish the file transfer first.');
     return;
   }
   const input = $('call-handle');
@@ -8761,6 +8834,10 @@ async function handleChromeAct(act, event) {
       toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
       return true;
     }
+    if (isSharing()) {
+      toast('Finish the file transfer first.');
+      return true;
+    }
     const peer = button?.dataset.peer || document.querySelector('.chat-head')?.dataset.peer;
     const media = act === 'call-video' ? 'video' : 'audio';
     try {
@@ -8827,6 +8904,63 @@ async function handleChromeAct(act, event) {
       $('view')?.querySelector('.call-banner')?.remove();
       button?.closest('.call-actions')?.remove();
     });
+    return true;
+  }
+  if (act === 'chat-file') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    if (isInCall()) {
+      toast('Hang up the call first.');
+      return true;
+    }
+    if (isSharing()) {
+      toast('A file is already on the way.');
+      return true;
+    }
+    if (!canShare()) {
+      toast('Sending a file needs a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      return true;
+    }
+    $('chat-file')?.click();
+    return true;
+  }
+  if (act === 'share-accept') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    if (isInCall()) {
+      toast('Hang up the call first.');
+      return true;
+    }
+    const peer = button?.dataset.peer || $('chat-form')?.dataset.peer || '';
+    const [page, id] = parseHash();
+    const convoId = button?.dataset.convo || (page === 'messages' ? id : '');
+    const rkey = button?.dataset.rkey || '';
+    button?.closest('.share-banner')?.remove();
+    const requested = $('view')?.dataset.convoStatus === 'request';
+    if (requested && convoId) {
+      api.acceptConvo(convoId).then(() => {
+        if ($('view')) {
+          $('view').dataset.convoStatus = 'accepted';
+          $('view').querySelector('.request-banner')?.remove();
+        }
+      }).catch(() => {});
+    }
+    acceptShare({ convoId, peerDid: peer, rkey }).catch((error) => toast(error.message));
+    return true;
+  }
+  if (act === 'share-decline') {
+    event.preventDefault();
+    const [page, id] = parseHash();
+    const convoId = button?.dataset.convo || (page === 'messages' ? id : '');
+    const rkey = button?.dataset.rkey || '';
+    declineShare(convoId, rkey).then(() => {
+      button?.closest('.share-banner')?.remove();
+    });
+    return true;
+  }
+  if (act === 'share-cancel') {
+    event.preventDefault();
+    hangShare(true);
     return true;
   }
   if (act === 'follow-back') {
@@ -9625,6 +9759,10 @@ async function onMenu(event) {
     if (!signedIn()) return requireSignIn();
     if (!canCall()) {
       toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      return;
+    }
+    if (isSharing()) {
+      toast('Finish the file transfer first.');
       return;
     }
     const peer = shownProfile?.did || '';
@@ -10460,6 +10598,12 @@ function bind() {
     synth.onvoiceschanged = fillVoiceSelect;
   }
   document.body.addEventListener('click', onClick);
+  document.addEventListener('change', (event) => {
+    if (event.target?.id !== 'chat-file') return;
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) beginShare(file);
+  });
   document.addEventListener('pointerdown', () => {
     const ctx = playSound.ctx;
     ctx?.resume?.().catch(() => {});
@@ -11759,6 +11903,11 @@ async function boot() {
   applyDesign(designOn());
   applyA11y(a11yPrefs());
   setupCall({ toast });
+  setupShare({
+    toast,
+    onFile(file, extra) { appendShareFile(file, Boolean(extra?.mine)); },
+    onStatus(text, progress) { paintShareLive(text, progress); },
+  });
   bind();
   loadPassword();
   let result = null;

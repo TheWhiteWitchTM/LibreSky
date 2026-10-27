@@ -3,14 +3,15 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
-import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
+import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, defaultSearchTabs, goldFeedGate, homeAllows, normalizeSearchTabs, SEARCH_LINKS, SEARCH_POSTS, searchAllows, settleSearchTabs, sortThreadReplies } from '../js/prefs.js';
 import { activeDid, forgetAccount, getPasswordBook, listAccounts, loadDraft, saveAccount, saveDraft, setActiveDid, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
+import { prettySize } from '../js/share.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -977,6 +978,13 @@ assert.doesNotMatch(index, /class="head-post"[\s\S]{0,240}<span>Post<\/span>/);
 assert.match(index, /id="to-top"[^>]*hidden/);
 assert.match(appSource, /function syncToTop/);
 assert.match(appSource, /y > TOP_AFTER && !freshPopupOpen\(\)/);
+const pillFn = appSource.slice(appSource.indexOf('function placeColumnPill'), appSource.indexOf('function placeFresh'));
+assert.match(pillFn, /querySelector\('\.app-top'\)/);
+assert.match(pillFn, /querySelector\('\.center'\)/);
+assert.doesNotMatch(pillFn, /profile-tabs|sticky-head/);
+assert.match(appSource, /data-act="chat-file"/);
+assert.match(appSource, /id="chat-file"/);
+assert.match(index, /The plus on the left of the box sends a photo or a file/);
 const searchView = appSource.slice(appSource.indexOf('async function showSearch'), appSource.indexOf('async function paintExplore'));
 assert.doesNotMatch(searchView, /sortHtml|search-sort|search-controls/);
 assert.match(appSource, /data-sort="latest"/);
@@ -1115,6 +1123,8 @@ const chatForm = appSource.slice(chatAt, appSource.indexOf('clearChatCallChrome(
 assert.ok(chatForm.length > 40);
 assert.doesNotMatch(chatForm, /chat-hint|Enter adds a line|Shift\+Enter sends\./);
 assert.doesNotMatch(chatForm, /call-audio|call-video|Voice call|Video call/);
+assert.match(chatForm, /\$\{chatPlus\}/);
+assert.match(appSource, /chat-plus/);
 assert.match(index, /libresky\.ai/);
 assert.match(await readFile(path.join(root, 'js/ai.js'), 'utf8'), /libresky\.ai/);
 assert.doesNotMatch(index, /nav-pill/);
@@ -1304,6 +1314,26 @@ assert.equal(assembleCallSdp([
 assert.equal(assembleCallSdp([
   { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:other'), '');
+const shareOffer = parseShareMessage('Wants to send a file photo.jpg 2048 https://thewhitewitchtm.github.io/LibreSky/#/f/2222222222222');
+assert.equal(shareOffer.kind, 'offer');
+assert.equal(shareOffer.name, 'photo.jpg');
+assert.equal(shareOffer.size, 2048);
+assert.equal(shareOffer.rkey, '2222222222222');
+assert.equal(parseShareMessage('Declined the file https://example.com/#/f/2222222222222').kind, 'decline');
+assert.equal(parseShareMessage('hello'), null);
+assert.equal(assembleShareSdp([
+  { text: `File data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
+], '2222222222222', 'did:peer'), sdp);
+assert.equal(prettySize(2048), '2 KB');
+const shareHidden = messageHtml({ id: 'm-file', text: 'Wants to send a file photo.jpg 2048 https://example.com/#/f/2222222222222', sender: { did: 'did:them' } }, 'did:me');
+assert.match(shareHidden, /hidden/);
+assert.doesNotMatch(shareHidden, /class="bubble|Wants to send a file|photo\.jpg/);
+const shareBar = shareBannerHtml({ rkey: '2222222222222', name: 'photo.jpg', size: 2048 }, { incoming: true, convoId: 'room', peerDid: 'did:them', sizeLabel: '2 KB' });
+assert.match(shareBar, /data-act="share-accept"/);
+assert.match(shareBar, /photo\.jpg/);
+const sharePic = shareFileHtml({ url: 'blob:https://example.com/abc', name: 'cat.png', type: 'image/png' }, { mine: true });
+assert.match(sharePic, /blob:https:\/\/example.com\/abc/);
+assert.match(sharePic, /class="bubble file mine"/);
 const started = messageHtml({ id: 'm1', text: 'Started a voice call https://example.com/#/c/2222222222222', sender: { did: 'did:them' } }, 'did:me');
 assert.match(started, /hidden/);
 assert.match(started, /data-id="m1"/);

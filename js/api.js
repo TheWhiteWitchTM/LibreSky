@@ -881,6 +881,13 @@ export function createCallSignal(record) {
   });
 }
 
+export function createShareSignal(record) {
+  return xrpc('com.atproto.repo.createRecord', {
+    body: { ...recordBody('com.libresky.share', record), validate: false },
+    auth: 'required',
+  });
+}
+
 export async function getPublicRecord(repo, collection, rkey) {
   const found = await resolvePds(repo);
   const url = new URL('/xrpc/com.atproto.repo.getRecord', found.pds);

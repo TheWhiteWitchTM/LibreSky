@@ -452,6 +452,73 @@ export function partitionConvos({ accepted, legacyRequests, requestItems } = {})
 
 const CALL_RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
 
+export function parseShareMessage(text) {
+  const raw = String(text || '').trim();
+  const data = raw.match(/^File data ([234567abcdefghijklmnopqrstuvwxyz]{13}) (\d+)\/(\d+) ([A-Za-z0-9_-]+)$/);
+  if (data) {
+    return {
+      kind: 'data',
+      rkey: data[1],
+      index: Number(data[2]),
+      total: Number(data[3]),
+      chunk: data[4],
+      name: '',
+      size: 0,
+    };
+  }
+  let kind = '';
+  if (/^Wants to send a file\b/.test(raw)) kind = 'offer';
+  else if (/^Accepted the file\b/.test(raw)) kind = 'answer';
+  else if (/^Declined the file\b/.test(raw)) kind = 'decline';
+  else if (/^File transfer ended\b/.test(raw)) kind = 'end';
+  else return null;
+  const link = raw.match(/https?:\/\/\S+/)?.[0] || '';
+  let rkey = '';
+  try {
+    const parts = new URL(link).hash.replace(/^#/, '').split('/').filter(Boolean);
+    const index = parts.indexOf('f');
+    const candidate = index >= 0 ? decodeURIComponent(parts[index + 1] || '') : '';
+    if (CALL_RKEY.test(candidate)) rkey = candidate;
+  } catch {
+    rkey = '';
+  }
+  let name = '';
+  let size = 0;
+  const meta = raw.match(/^Wants to send a file (\S+) (\d+)\b/);
+  if (meta) {
+    try { name = decodeURIComponent(meta[1]); } catch { name = meta[1]; }
+    size = Number(meta[2]) || 0;
+  }
+  return { kind, rkey, name, size };
+}
+
+export function assembleShareSdp(messages, rkey, sender) {
+  const parts = new Map();
+  let total = 0;
+  for (const message of messages || []) {
+    if (sender && messageSender(message) !== sender) continue;
+    const parsed = parseShareMessage(message?.text);
+    if (parsed?.kind !== 'data' || parsed.rkey !== rkey || !parsed.chunk) continue;
+    parts.set(parsed.index, parsed.chunk);
+    total = parsed.total || total;
+  }
+  if (!total || parts.size < total) return '';
+  let packed = '';
+  for (let index = 1; index <= total; index += 1) {
+    if (!parts.has(index)) return '';
+    packed += parts.get(index);
+  }
+  try {
+    const normalized = packed.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
 export function parseCallMessage(text) {
   const raw = String(text || '').trim();
   let kind = '';

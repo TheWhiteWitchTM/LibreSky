@@ -6,10 +6,11 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 27 October 2026
 
-- Up and the new-posts pill sit higher in the column and stay above the header and a profile.
+- Up and the new-posts pill sit in the top bar, in the center of the column, in the same spot on every page.
+- The plus on the left of a chat sends a photo or a file over WebRTC. The other person accepts, both need LibreSky open, and a strict network or HTTP proxy can block it the same way it can block a call.
 - Turning off follow alerts keeps the bell and the sound quiet. Follows stay on the notifications page.
 - Search tabs match. Ukraine still lists posts about Ukraine, in English and in Ukrainian. Latest and Top stay in page config, so that tab no longer draws a switch the others do not have.
-- Up shows in the middle of the column, in the same place as new posts, and only after the page has scrolled. While new posts are showing, Up stays hidden.
+- Up only shows after the page has scrolled. While new posts are showing, Up stays hidden.
 - The control at the right edge is only a plus. Page config sits just behind it and opens the settings for the page you are on.
 - Page config stays on the page. Chat sets who can message you. Calls sets who can call you. Notifications sets which notices show up. AI Assist sets the model. Your profile sets your name and picture. Home, Search, and a thread use that same panel.
 - App passwords are the list on the account server. A Bluesky login cannot read that list, so the account password opens it for this tab and is not saved. A second account signed in on this browser stays in the account list.
