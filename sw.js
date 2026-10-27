@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-27-page-config';
+const CACHE = 'libresky-2026-10-27-settings-tabs';
 
 const SHELL = [
   './',

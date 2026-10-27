@@ -205,16 +205,213 @@ export async function deletePasswordSession(session) {
   }).catch(() => {});
 }
 
-export function listAppPasswords() {
-  return xrpc('com.atproto.server.listAppPasswords', { auth: 'required' });
+const APP_PASS_ADMIN_KEY = 'libresky.appPassAdmin';
+let appPassAdmin = null;
+let appPassRefresh = null;
+
+function jwtPayload(token) {
+  try {
+    const part = String(token || '').split('.')[1];
+    if (!part) return null;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (part.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
 }
 
-export function createAppPassword(name) {
-  return xrpc('com.atproto.server.createAppPassword', { body: { name }, auth: 'required' });
+function tokenScopes(token) {
+  const scope = jwtPayload(token)?.scope;
+  if (Array.isArray(scope)) return scope.map((item) => String(item));
+  if (typeof scope === 'string') return scope.split(/\s+/).filter(Boolean);
+  return [];
+}
+
+function tokenManagesAppPasswords(token) {
+  const scopes = tokenScopes(token);
+  if (scopes.includes('com.atproto.appPass') || scopes.includes('com.atproto.appPassPrivileged')) return false;
+  if (scopes.includes('com.atproto.access')) return true;
+  return scopes.length === 0;
+}
+
+function readAppPassAdmin() {
+  if (appPassAdmin?.accessJwt && appPassAdmin?.did && appPassAdmin?.pds) return appPassAdmin;
+  try {
+    const raw = sessionStorage.getItem(APP_PASS_ADMIN_KEY);
+    const data = raw ? JSON.parse(raw) : null;
+    if (data?.accessJwt && data?.did && data?.pds) {
+      appPassAdmin = data;
+      return appPassAdmin;
+    }
+  } catch {
+    /* this tab can ask for the account password again */
+  }
+  return null;
+}
+
+function storeAppPassAdmin(session) {
+  appPassAdmin = session;
+  try { sessionStorage.setItem(APP_PASS_ADMIN_KEY, JSON.stringify(session)); }
+  catch { /* the session stays in memory for this page */ }
+}
+
+export async function clearAppPassAdmin(did) {
+  const saved = readAppPassAdmin();
+  if (!saved) return;
+  if (did && saved.did !== did) return;
+  appPassAdmin = null;
+  try { sessionStorage.removeItem(APP_PASS_ADMIN_KEY); } catch { /* already dropped */ }
+  await deletePasswordSession(saved);
+}
+
+function appPassAuthError(message = 'Enter your account password to manage app passwords.') {
+  const error = new Error(message);
+  error.code = 'AppPassAuth';
+  return error;
+}
+
+async function refreshAppPassAdmin(session) {
+  if (!session?.refreshJwt || !session?.pds) return false;
+  if (!appPassRefresh) {
+    appPassRefresh = (async () => {
+      const res = await fetch(`${session.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.refreshSession`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.refreshJwt}` },
+      });
+      if (!res.ok) {
+        appPassAdmin = null;
+        try { sessionStorage.removeItem(APP_PASS_ADMIN_KEY); } catch { /* the form can open again */ }
+        return false;
+      }
+      const data = await read(res);
+      storeAppPassAdmin({
+        ...session,
+        accessJwt: data.accessJwt,
+        refreshJwt: data.refreshJwt,
+        handle: data.handle || session.handle,
+        did: data.did || session.did,
+      });
+      return true;
+    })().finally(() => { appPassRefresh = null; });
+  }
+  return appPassRefresh;
+}
+
+async function adminFetch(session, ns, options = {}) {
+  const method = options.method || (options.body !== undefined ? 'POST' : 'GET');
+  const path = `/xrpc/${ns}${query(options.params)}`;
+  const headers = new Headers();
+  headers.set('Authorization', `Bearer ${session.accessJwt}`);
+  if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+  const res = await fetch(`${session.pds.replace(/\/$/, '')}${path}`, {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
+  });
+  if (res.status === 401 && !options.retried) {
+    const refreshed = await refreshAppPassAdmin(session);
+    if (refreshed && appPassAdmin) return adminFetch(appPassAdmin, ns, { ...options, retried: true });
+  }
+  try {
+    return await read(res);
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      appPassAdmin = null;
+      try { sessionStorage.removeItem(APP_PASS_ADMIN_KEY); } catch { /* the form can open again */ }
+      const next = appPassAuthError();
+      next.status = error.status;
+      throw next;
+    }
+    throw error;
+  }
+}
+
+function liveAppPassSession() {
+  if (getOauth()) return null;
+  const session = getPassword();
+  if (!session?.accessJwt || !session?.pds || !session?.did) return null;
+  if (!tokenManagesAppPasswords(session.accessJwt)) return null;
+  return session;
+}
+
+async function appPassCall(ns, options) {
+  const did = currentDid();
+  const live = liveAppPassSession();
+  if (live && (!did || live.did === did)) return xrpc(ns, { ...options, auth: 'required' });
+  let admin = readAppPassAdmin();
+  if (!admin || (did && admin.did !== did)) throw appPassAuthError();
+  if (accessExpired(admin.accessJwt)) {
+    const refreshed = await refreshAppPassAdmin(admin);
+    if (!refreshed || !appPassAdmin) throw appPassAuthError();
+    admin = appPassAdmin;
+  }
+  return adminFetch(admin, ns, options);
+}
+
+export async function loginForAppPasswords(identifier, password, authFactorToken) {
+  const id = String(identifier || '').trim().replace(/^@/, '');
+  if (!id || !password) throw appPassAuthError('Enter the account password.');
+  const found = await resolvePds(id);
+  const body = { identifier: id, password };
+  if (authFactorToken) body.authFactorToken = String(authFactorToken).trim();
+  const res = await fetch(`${found.pds.replace(/\/$/, '')}/xrpc/com.atproto.server.createSession`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data;
+  try {
+    data = await read(res);
+  } catch (error) {
+    if (error?.data?.error === 'AuthFactorTokenRequired') {
+      const next = new Error('This account uses a sign-in code.');
+      next.code = 'AuthFactorTokenRequired';
+      next.status = error.status;
+      next.data = error.data;
+      throw next;
+    }
+    throw error;
+  }
+  const session = {
+    accessJwt: data.accessJwt,
+    refreshJwt: data.refreshJwt,
+    did: data.did,
+    handle: data.handle,
+    pds: found.pds,
+  };
+  const want = currentDid();
+  const scopes = tokenScopes(session.accessJwt);
+  const appPass = scopes.includes('com.atproto.appPass') || scopes.includes('com.atproto.appPassPrivileged');
+  if (appPass || (want && session.did !== want)) {
+    await deletePasswordSession(session);
+    if (appPass) throw appPassAuthError('That password is an app password. Enter the account password.');
+    throw new Error('That password is for a different account.');
+  }
+  storeAppPassAdmin(session);
+  return session;
+}
+
+export function listAppPasswords() {
+  return appPassCall('com.atproto.server.listAppPasswords');
+}
+
+export function createAppPassword(name, privileged) {
+  const body = { name };
+  if (privileged) body.privileged = true;
+  return appPassCall('com.atproto.server.createAppPassword', { body });
 }
 
 export function revokeAppPassword(name) {
-  return xrpc('com.atproto.server.revokeAppPassword', { body: { name }, auth: 'required' });
+  return appPassCall('com.atproto.server.revokeAppPassword', { body: { name } });
+}
+
+export function getNotificationPreferences() {
+  return xrpc('app.bsky.notification.getPreferences', { auth: 'required' });
+}
+
+export function putNotificationPreferences(preferences) {
+  return xrpc('app.bsky.notification.putPreferencesV2', { body: preferences, auth: 'required' });
 }
 
 export function getMutes(cursor) {

@@ -13591,13 +13591,14 @@ function loopbackMetadata() {
     dpop_bound_access_tokens: true
   };
 }
-function createClient() {
+function createClient(options = {}) {
   const host = location.hostname;
   const loop = host === "127.0.0.1" || host === "[::1]" || host === "localhost";
   return new BrowserOAuthClient({
     clientMetadata: loop ? loopbackMetadata() : client_metadata_default,
     responseMode: "query",
-    handleResolver: "https://public.api.bsky.app"
+    handleResolver: "https://public.api.bsky.app",
+    onSessionDeleted: options.onSessionDeleted
   });
 }
 export {

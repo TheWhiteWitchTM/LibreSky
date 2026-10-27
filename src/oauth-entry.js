@@ -20,12 +20,13 @@ function loopbackMetadata() {
   };
 }
 
-export function createClient() {
+export function createClient(options = {}) {
   const host = location.hostname;
   const loop = host === '127.0.0.1' || host === '[::1]' || host === 'localhost';
   return new BrowserOAuthClient({
     clientMetadata: loop ? loopbackMetadata() : metadata,
     responseMode: 'query',
     handleResolver: 'https://public.api.bsky.app',
+    onSessionDeleted: options.onSessionDeleted,
   });
 }

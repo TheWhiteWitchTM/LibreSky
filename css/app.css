@@ -3252,6 +3252,10 @@ body.ringing { padding-bottom: 120px; }
 .switch-row strong, .switch-row .dim { display: block; }
 .switch-row .dim { font-weight: 500; }
 .switch-row input { width: 18px; height: 18px; accent-color: var(--blue); flex: none; }
+.note-pref { padding: 4px 0 8px; border-bottom: 1px solid var(--border); }
+.note-pref h3 { margin-bottom: 0; }
+.note-pref .segmented { margin: 8px 0 0; }
+.note-pref .switch-row { border-bottom: 0; padding: 8px 0; }
 #tune { width: min(440px, calc(100vw - 24px)); }
 #tune form { padding: 8px 16px 18px; }
 

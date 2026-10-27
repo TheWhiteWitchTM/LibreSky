@@ -41,11 +41,63 @@ export function getPassword() {
   return password;
 }
 
+const PASSWORD_BOOK_KEY = 'libresky.passwordSessions';
+
+function passwordBook() {
+  const data = readJson(PASSWORD_BOOK_KEY);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  return data;
+}
+
+function writePasswordBook(book) {
+  localStorage.setItem(PASSWORD_BOOK_KEY, JSON.stringify(book));
+}
+
+export function getPasswordBook(did) {
+  if (!did) return null;
+  const session = passwordBook()[did];
+  if (!session?.accessJwt) return null;
+  if (session.did && session.did !== did) return null;
+  return session.did ? session : { ...session, did };
+}
+
+export function listPasswordSessions() {
+  return Object.entries(passwordBook()).map(([did, session]) => {
+    if (!session?.accessJwt || !did) return null;
+    return session.did ? session : { ...session, did };
+  }).filter(Boolean);
+}
+
+export function forgetPassword(did) {
+  if (!did) return;
+  const book = passwordBook();
+  if (!book[did]) return;
+  delete book[did];
+  writePasswordBook(book);
+}
+
+function rememberPasswordSession(session) {
+  if (!session?.did || !session.accessJwt) return;
+  const book = passwordBook();
+  book[session.did] = session;
+  writePasswordBook(book);
+  const existing = listAccounts().find((item) => item.did === session.did && item.kind === 'password');
+  if (!existing) return;
+  saveAccount({
+    ...existing,
+    handle: session.handle || existing.handle || '',
+    displayName: session.displayName || existing.displayName || '',
+    avatar: session.avatar || existing.avatar || '',
+    session,
+  }, { activate: false, front: false });
+}
+
 export function setPassword(next) {
   password = next;
   if (next) {
     localStorage.setItem(PASSWORD_KEY, JSON.stringify(next));
     if (next.handle) setLastHandle(next.handle);
+    rememberPasswordSession(next);
   } else localStorage.removeItem(PASSWORD_KEY);
 }
 
@@ -154,20 +206,89 @@ export function listAccounts() {
   return list.filter((item) => item && item.did && (item.kind === 'oauth' || item.kind === 'password'));
 }
 
-export function rememberAccount(entry) {
+const ACCOUNT_LIMIT = 8;
+
+export function saveAccount(entry, options = {}) {
   if (!entry?.did || (entry.kind !== 'oauth' && entry.kind !== 'password')) return;
-  const next = [entry, ...listAccounts().filter((item) => item.did !== entry.did)].slice(0, 8);
+  const activate = options.activate === true;
+  const front = options.front !== false;
+  const active = localStorage.getItem(ACTIVE_KEY) || '';
+  const prior = listAccounts();
+  let ordered;
+  if (front || !prior.some((item) => item.did === entry.did)) {
+    ordered = [entry, ...prior.filter((item) => item.did !== entry.did)];
+  } else {
+    ordered = prior.map((item) => (item.did === entry.did ? entry : item));
+  }
+  let next = ordered;
+  if (ordered.length > ACCOUNT_LIMIT) {
+    const protect = new Set([entry.did, active].filter(Boolean));
+    const extras = ordered.filter((item) => !protect.has(item.did));
+    const room = Math.max(0, ACCOUNT_LIMIT - protect.size);
+    const drop = new Set(extras.slice(room).map((item) => item.did));
+    next = ordered.filter((item) => !drop.has(item.did));
+  }
   localStorage.setItem(ROSTER_KEY, JSON.stringify(next));
-  localStorage.setItem(ACTIVE_KEY, entry.did);
+  if (activate) localStorage.setItem(ACTIVE_KEY, entry.did);
+}
+
+export function rememberAccount(entry) {
+  saveAccount(entry, { activate: true });
 }
 
 export function forgetAccount(did) {
   const next = listAccounts().filter((item) => item.did !== did);
   localStorage.setItem(ROSTER_KEY, JSON.stringify(next));
+  forgetPassword(did);
   if (localStorage.getItem(ACTIVE_KEY) === did) {
     if (next[0]) localStorage.setItem(ACTIVE_KEY, next[0].did);
     else localStorage.removeItem(ACTIVE_KEY);
   }
+}
+
+export function listStoredOauthDids() {
+  return new Promise((resolve) => {
+    const finish = (keys) => resolve(Array.isArray(keys) ? keys : []);
+    if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') {
+      finish([]);
+      return;
+    }
+    indexedDB.databases().then((list) => {
+      const names = (list || []).map((db) => db && db.name);
+      if (!names.includes('@atproto-oauth-client')) {
+        finish([]);
+        return;
+      }
+      let request;
+      try { request = indexedDB.open('@atproto-oauth-client'); }
+      catch { finish([]); return; }
+      request.onupgradeneeded = () => {
+        try { request.transaction?.abort(); } catch { /* leave the existing database alone */ }
+      };
+      request.onerror = () => finish([]);
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('session')) {
+          db.close();
+          finish([]);
+          return;
+        }
+        try {
+          const tx = db.transaction('session', 'readonly');
+          const req = tx.objectStore('session').getAllKeys();
+          req.onsuccess = () => {
+            const keys = (req.result || []).filter((key) => typeof key === 'string' && key.startsWith('did:'));
+            db.close();
+            finish(keys);
+          };
+          req.onerror = () => { db.close(); finish([]); };
+        } catch {
+          try { db.close(); } catch { /* already closed */ }
+          finish([]);
+        }
+      };
+    }).catch(() => finish([]));
+  });
 }
 
 export function activeDid() {

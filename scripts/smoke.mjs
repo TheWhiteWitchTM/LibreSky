@@ -9,7 +9,7 @@ import { accountGone, aiTag, applyShortLinks, assembleCallSdp, bskyPostParts, ca
 import { emojiGroups, flagEmoji } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, defaultSearchTabs, goldFeedGate, homeAllows, normalizeSearchTabs, SEARCH_LINKS, SEARCH_POSTS, searchAllows, settleSearchTabs, sortThreadReplies } from '../js/prefs.js';
-import { loadDraft, saveDraft, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
+import { activeDid, forgetAccount, getPasswordBook, listAccounts, loadDraft, saveAccount, saveDraft, setActiveDid, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
 
@@ -471,6 +471,24 @@ assert.equal(loadLocalAi().model, 'phi3');
 clearLocalAi();
 assert.equal(loadDraft(), 'draft for one');
 assert.ok(learnedWordList().some((word) => word.toLowerCase() === 'libresky'));
+setPassword(null);
+assert.equal(getPasswordBook('did:plc:one').handle, 'one.bsky.social');
+assert.equal(getPasswordBook('did:plc:two').handle, 'two.bsky.social');
+setActiveDid('did:keep');
+saveAccount({ kind: 'password', did: 'did:plc:two', handle: 'two.bsky.social', displayName: 'Two', avatar: '', session: getPasswordBook('did:plc:two') }, { activate: false });
+setPassword({ accessJwt: 'new', refreshJwt: 'new', did: 'did:plc:two', handle: 'two.bsky.social', pds: 'https://bsky.social' });
+assert.equal(activeDid(), 'did:keep');
+assert.equal(listAccounts().find((item) => item.did === 'did:plc:two').session.accessJwt, 'new');
+setActiveDid('did:plc:two');
+for (let i = 0; i < 10; i += 1) {
+  saveAccount({ kind: 'oauth', did: `did:plc:extra${i}`, handle: `extra${i}.bsky.social`, displayName: '', avatar: '' }, { activate: false });
+}
+assert.equal(activeDid(), 'did:plc:two');
+assert.equal(listAccounts().length, 8);
+assert.equal(listAccounts().some((item) => item.did === 'did:plc:two'), true);
+forgetAccount('did:plc:one');
+assert.equal(getPasswordBook('did:plc:one'), null);
+assert.equal(getPasswordBook('did:plc:two').accessJwt, 'new');
 setPassword(null);
 const aloud = speechText({
   author: { displayName: 'Ada' },
@@ -1011,6 +1029,11 @@ assert.match(index, /id="compose-save-draft"/);
 assert.match(index, /Save as draft/);
 assert.match(index, /class="skip"/);
 assert.match(appSource, /data-settings-tab/);
+assert.match(appSource, /openSettings\('notifications'\)/);
+assert.match(appSource, /openSettings\('ai'\)/);
+assert.match(appSource, /openSettingsForPage/);
+assert.match(appSource, /loginForAppPasswords/);
+assert.match(await readFile(path.join(root, 'js/api.js'), 'utf8'), /app\.bsky\.notification\.putPreferencesV2/);
 assert.match(appSource, /contrast-dark/);
 assert.match(appSource, /requestCloseComposer/);
 assert.doesNotMatch(index, /ai\.js|styles\.css|grok-sidebar/);

@@ -39,12 +39,16 @@ import {
   forgetAccount,
   getOauth,
   getPassword,
+  getPasswordBook,
   lastHandle,
   listAccounts,
+  listPasswordSessions,
+  listStoredOauthDids,
   loadDraft,
   loadPassword,
   mutedWords,
   rememberAccount,
+  saveAccount,
   saveDraft,
   setActiveDid,
   setLastHandle,
@@ -1626,6 +1630,179 @@ const NOTE_FILTERS = [
   ['follows', 'Follows', ['follow']],
 ];
 
+const NOTE_PREF_ROWS = [
+  ['reply', 'Replies', true],
+  ['mention', 'Mentions', true],
+  ['quote', 'Quotes', true],
+  ['like', 'Likes', true],
+  ['repost', 'Reposts', true],
+  ['follow', 'New followers', true],
+  ['likeViaRepost', 'Likes of your reposts', true],
+  ['repostViaRepost', 'Reposts of your reposts', true],
+  ['subscribedPost', 'Posts you subscribed to', false],
+  ['starterpackJoined', 'Starter packs', false],
+  ['verified', 'Verified', false],
+  ['unverified', 'Unverified', false],
+];
+
+const NOTE_REASON_KEY = {
+  like: 'like',
+  repost: 'repost',
+  follow: 'follow',
+  mention: 'mention',
+  reply: 'reply',
+  quote: 'quote',
+  'starterpack-joined': 'starterpackJoined',
+  verified: 'verified',
+  unverified: 'unverified',
+  'like-via-repost': 'likeViaRepost',
+  'repost-via-repost': 'repostViaRepost',
+  'subscribed-post': 'subscribedPost',
+};
+
+let notePrefs = null;
+let notePrefsDid = '';
+let notePrefSeq = 0;
+let noteSave = Promise.resolve();
+
+function notePrefsSource(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const wrapped = raw.preferences;
+  if (wrapped && typeof wrapped === 'object' && !raw.reply && !raw.like && !raw.follow && !raw.mention) return wrapped;
+  return raw;
+}
+
+function normalizeNotePrefs(raw) {
+  const source = notePrefsSource(raw);
+  const next = {};
+  if (source.chat && typeof source.chat === 'object') next.chat = source.chat;
+  for (const [key, , filterable] of NOTE_PREF_ROWS) {
+    const item = source[key] && typeof source[key] === 'object' ? source[key] : {};
+    const pref = { list: item.list !== false, push: item.push !== false };
+    if (filterable) pref.include = item.include === 'follows' ? 'follows' : 'all';
+    next[key] = pref;
+  }
+  return next;
+}
+
+function notePrefsPayload(prefs) {
+  const body = {};
+  if (prefs.chat && typeof prefs.chat === 'object') body.chat = prefs.chat;
+  for (const [key, , filterable] of NOTE_PREF_ROWS) {
+    const item = prefs[key] || {};
+    const row = { list: item.list !== false, push: item.push !== false };
+    if (filterable) row.include = item.include === 'follows' ? 'follows' : 'all';
+    body[key] = row;
+  }
+  return body;
+}
+
+function notificationListed(note) {
+  const key = NOTE_REASON_KEY[note?.reason || ''];
+  if (!key || !notePrefs?.[key]) return true;
+  return notePrefs[key].list !== false;
+}
+
+async function ensureNotePrefs() {
+  const did = myDid();
+  if (!did) return null;
+  if (notePrefs && notePrefsDid === did) return notePrefs;
+  try {
+    const data = await api.getNotificationPreferences();
+    if (myDid() !== did) return notePrefsDid === did ? notePrefs : null;
+    notePrefs = normalizeNotePrefs(data);
+    notePrefsDid = did;
+  } catch {
+    if (notePrefsDid !== did) notePrefs = null;
+  }
+  return notePrefsDid === did ? notePrefs : null;
+}
+
+function notificationSettingsHtml() {
+  return `<h2>Notifications</h2>
+    <p class="dim">These settings are stored with Bluesky, so the official app uses them too. On this page is what shows in Notifications. Phone alert is the official app’s alert. People you follow is applied by Bluesky.</p>
+    <div id="note-prefs"><p class="dim">Loading notification settings…</p></div>`;
+}
+
+function paintNotePrefs() {
+  const box = $('note-prefs');
+  if (!box || !notePrefs) return;
+  box.innerHTML = NOTE_PREF_ROWS.map(([key, label, filterable]) => {
+    const pref = notePrefs[key] || { list: true, push: true, include: 'all' };
+    const who = filterable ? `<div class="segmented wrap" role="group" aria-label="${escapeHtml(label)}">
+      <button type="button" data-note-who="${key}" data-include="all" aria-pressed="${pref.include === 'follows' ? 'false' : 'true'}">Everyone</button>
+      <button type="button" data-note-who="${key}" data-include="follows" aria-pressed="${pref.include === 'follows' ? 'true' : 'false'}">People you follow</button>
+    </div>` : '';
+    return `<div class="note-pref"><h3>${escapeHtml(label)}</h3>${who}
+      ${switchRow(`note.${key}.list`, 'On this page', pref.list !== false)}
+      ${switchRow(`note.${key}.push`, 'Phone alert', pref.push !== false)}
+    </div>`;
+  }).join('');
+}
+
+async function loadNotificationPrefs() {
+  const seq = ++notePrefSeq;
+  const box = $('note-prefs');
+  if (!signedIn()) {
+    notePrefs = null;
+    notePrefsDid = '';
+    if (box) box.innerHTML = '<p class="dim">Sign in to choose which notifications show up.</p>';
+    return;
+  }
+  if (notePrefs && notePrefsDid === myDid()) {
+    if (box) paintNotePrefs();
+  } else if (box) box.innerHTML = '<p class="dim">Loading notification settings…</p>';
+  try {
+    const data = await api.getNotificationPreferences();
+    if (seq !== notePrefSeq) return;
+    notePrefs = normalizeNotePrefs(data);
+    notePrefsDid = myDid();
+    if ($('note-prefs')) paintNotePrefs();
+  } catch (error) {
+    if (seq !== notePrefSeq) return;
+    if ($('note-prefs') && (!notePrefs || notePrefsDid !== myDid())) {
+      $('note-prefs').innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load notification settings.')}</p>`;
+    }
+  }
+}
+
+function queueNoteSave(mutator) {
+  if (!signedIn()) return;
+  noteSave = noteSave.then(async () => {
+    try {
+      if (!notePrefs || notePrefsDid !== myDid()) await ensureNotePrefs();
+      if (!notePrefs) throw new Error('Could not load notification settings.');
+      notePrefs = mutator(notePrefs);
+      notePrefsDid = myDid();
+      paintNotePrefs();
+      await api.putNotificationPreferences(notePrefsPayload(notePrefs));
+    } catch (error) {
+      toast(error.message || 'Could not save notification settings.');
+      notePrefs = null;
+      notePrefsDid = '';
+      loadNotificationPrefs();
+    }
+  });
+}
+
+function saveNoteField(key, field, value) {
+  if (field !== 'list' && field !== 'push') return;
+  if (!NOTE_PREF_ROWS.some(([id]) => id === key)) return;
+  queueNoteSave((current) => {
+    const prev = current[key] || { list: true, push: true };
+    return { ...current, [key]: { ...prev, [field]: Boolean(value) } };
+  });
+}
+
+function setNoteInclude(key, include) {
+  if (include !== 'all' && include !== 'follows') return;
+  if (!NOTE_PREF_ROWS.some(([id, , filterable]) => id === key && filterable)) return;
+  queueNoteSave((current) => {
+    const prev = current[key] || { list: true, push: true, include: 'all' };
+    return { ...current, [key]: { ...prev, include } };
+  });
+}
+
 async function showNotifications(filter) {
   const token = ++generation;
   const current = NOTE_FILTERS.some(([id]) => id === filter) ? filter : '';
@@ -1645,7 +1822,10 @@ async function showNotifications(filter) {
   }
   showSkeletons();
   try {
-    const data = await api.getNotifications(null, null, reasons);
+    const [data] = await Promise.all([
+      api.getNotifications(null, null, reasons),
+      ensureNotePrefs(),
+    ]);
     if (token !== generation) return;
     const subjects = new Map();
     const learn = async (notes) => {
@@ -1658,7 +1838,7 @@ async function showNotifications(filter) {
         } catch { /* snippets and media previews are optional */ }
       }
     };
-    let all = data.notifications || [];
+    let all = (data.notifications || []).filter(notificationListed);
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
@@ -1671,7 +1851,7 @@ async function showNotifications(filter) {
     const more = async (cursor) => {
       const page = await api.getNotifications(cursor, null, reasons);
       if (token !== generation) return;
-      const extra = page.notifications || [];
+      const extra = (page.notifications || []).filter(notificationListed);
       await learn(extra);
       if (token !== generation) return;
       all = all.concat(extra);
@@ -3526,6 +3706,10 @@ function onPrefToggle(name, checked) {
   } else if (name === 'a11y.reader') {
     applyA11y(saveA11yPrefs({ reader: checked }));
     return;
+  } else if (name.startsWith('note.')) {
+    const [, key, field] = name.split('.');
+    saveNoteField(key, field, checked);
+    return;
   } else if (name === 'follow.notify') {
     saveFollowDeskPrefs({ notify: checked });
     refreshBadge();
@@ -3619,6 +3803,7 @@ function fillVoiceSelect() {
 
 const SETTINGS_TABS = [
   ['you', 'You'],
+  ['notifications', 'Notifications'],
   ['follows', 'Follows'],
   ['safety', 'Safety'],
   ['display', 'Display'],
@@ -3628,6 +3813,45 @@ const SETTINGS_TABS = [
   ['ai', 'AI'],
 ];
 let settingsTab = 'you';
+
+function settingsHash(id) {
+  return id && id !== 'you' ? `#/settings/${id}` : '#/settings';
+}
+
+function settingsTabFromHash() {
+  const [page, tab] = parseHash();
+  if (page === 'settings' && SETTINGS_TABS.some(([id]) => id === tab)) return tab;
+  return 'you';
+}
+
+function syncSettingsHash(id) {
+  const hash = settingsHash(id);
+  const here = location.hash || '#/';
+  if (here !== hash) history.replaceState(null, '', `${location.pathname}${location.search}${hash}`);
+  if (navStack.length && String(navStack[navStack.length - 1] || '').startsWith('#/settings')) {
+    navStack[navStack.length - 1] = hash;
+  }
+}
+
+function openSettings(tab) {
+  const id = SETTINGS_TABS.some(([item]) => item === tab) ? tab : 'you';
+  const hash = settingsHash(id);
+  settingsTab = id;
+  const here = location.hash || '#/';
+  if (here === hash) {
+    if (document.querySelector(`[data-settings-panel="${id}"]`)) selectSettingsTab(id);
+    else showSettings();
+    return;
+  }
+  location.hash = hash;
+}
+
+function openSettingsForPage() {
+  const [page] = parseHash();
+  if (page === 'notifications') return openSettings('notifications');
+  if (page === 'ai') return openSettings('ai');
+  return openSettings('you');
+}
 
 function settingsPanel(id, body) {
   const on = settingsTab === id;
@@ -3668,6 +3892,7 @@ function displaySettingsHtml() {
 function showSettings() {
   generation += 1;
   const token = generation;
+  settingsTab = settingsTabFromHash();
   setChrome({ title: 'Settings', nav: 'settings', back: true });
   const words = mutedWords();
   const sounds = soundPrefs();
@@ -3675,22 +3900,34 @@ function showSettings() {
   $('view').innerHTML = `<section class="settings">
     <div class="settings-tabs" role="tablist" aria-label="Settings">${tabs}</div>
     ${settingsPanel('you', `<h2>Accounts</h2>
-    <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8.</p>
+    <p class="dim">Switch accounts without dropping the others. This browser keeps up to 8. A second Bluesky login on this browser stays in this list.</p>
     <div id="account-list">${accountListHtml()}</div>
     <div class="toolbar">
       <button type="button" class="primary small" data-act="add-account">Add account</button>
       ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary small" data-act="signin">Sign in</button>'}
     </div>
     <h2>App passwords</h2>
-    <p class="dim">Create a token for another app. The password is shown once, then only the name stays here.</p>
-    <form id="app-pass-form" class="mute-form"><input id="app-pass-name" placeholder="App name" maxlength="40" autocomplete="off"><button class="primary small" type="submit">Create</button></form>
+    <p class="dim">Tokens for other apps, stored on your account server. The password is shown once, then only the name stays here.</p>
+    <div id="app-pass-unlock" hidden>
+      <p class="dim">A Bluesky login cannot list these. Enter the account password. LibreSky opens a server session with it and does not save the password.</p>
+      <form id="app-pass-unlock-form" class="mute-form">
+        <input id="app-pass-secret" type="password" autocomplete="current-password" placeholder="Account password">
+        <input id="app-pass-code" inputmode="numeric" autocomplete="one-time-code" placeholder="Sign-in code" hidden>
+        <button class="primary small" type="submit">Show app passwords</button>
+      </form>
+    </div>
+    <form id="app-pass-form" class="mute-form" hidden>
+      <input id="app-pass-name" placeholder="App name" maxlength="40" autocomplete="off">
+      <label><input id="app-pass-privileged" type="checkbox"> Also allow direct messages</label>
+      <button class="primary small" type="submit">Create</button>
+    </form>
     <div id="app-pass-reveal" hidden></div>
     <div id="app-pass-list"><p class="dim">Loading app passwords…</p></div>
-    <p class="dim">If this server refuses the request, create one at <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>
     <h2>Messages and calls</h2>
     <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
     ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
     ${profileSettingsHtml()}`)}
+    ${settingsPanel('notifications', notificationSettingsHtml())}
     ${settingsPanel('follows', followCleanupPanel())}
     ${settingsPanel('safety', `<h2>Muted accounts</h2>
     <div id="muted-accounts" class="directory"><p class="dim">Loading muted accounts…</p></div>
@@ -3723,21 +3960,26 @@ function showSettings() {
   loadChatAllow(token);
   fillVoiceSelect();
   if (settingsTab === 'follows') loadFollowCleanup(token);
+  if (settingsTab === 'notifications') loadNotificationPrefs();
   if ($('ai-local-form')) findLocalAi({ silent: true });
+  document.getElementById(`settings-tab-${settingsTab}`)?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
 }
 
 function selectSettingsTab(id) {
   if (!SETTINGS_TABS.some(([tab]) => tab === id)) return;
   settingsTab = id;
+  syncSettingsHash(id);
   document.querySelectorAll('[data-settings-tab]').forEach((button) => {
     const on = button.dataset.settingsTab === id;
     button.setAttribute('aria-selected', on ? 'true' : 'false');
     button.tabIndex = on ? 0 : -1;
+    if (on) button.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   });
   document.querySelectorAll('[data-settings-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== id;
   });
   if (id === 'follows') loadFollowCleanup();
+  if (id === 'notifications') loadNotificationPrefs();
 }
 
 const CLEANUP_UNFOLLOW_CAP = 30;
@@ -4513,23 +4755,44 @@ async function loadSettingsLists(token) {
   await Promise.all([loadAppPasswords(token), loadMutedAccounts(token), loadBlockedAccounts(token)]);
 }
 
+function paintAppPassGate(mode) {
+  const unlock = $('app-pass-unlock');
+  const form = $('app-pass-form');
+  if (unlock) unlock.hidden = mode !== 'unlock';
+  if (form) form.hidden = mode !== 'ready';
+}
+
 async function loadAppPasswords(token = generation) {
   const box = $('app-pass-list');
   if (!box) return;
   if (!signedIn()) {
-    box.innerHTML = '<p class="dim">Sign in to create tokens for other apps.</p>';
+    paintAppPassGate('off');
+    box.innerHTML = '<p class="dim">Sign in to see app passwords.</p>';
     return;
   }
   try {
     const data = await api.listAppPasswords();
     if (token !== generation || !$('app-pass-list')) return;
+    paintAppPassGate('ready');
     const rows = data.passwords || [];
     box.innerHTML = rows.length
-      ? rows.map((item) => `<div class="person"><span class="person-link"><strong>${escapeHtml(item.name || 'App')}</strong><span class="handle">${escapeHtml(item.createdAt ? new Date(item.createdAt).toLocaleString() : '')}</span></span><button type="button" class="danger mini" data-act="revoke-token" data-name="${escapeHtml(item.name || '')}">Revoke</button></div>`).join('')
+      ? rows.map((item) => {
+        const when = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
+        const access = item.privileged ? 'Direct messages' : 'Standard';
+        const detail = [when, access].filter(Boolean).join(' · ');
+        return `<div class="person"><span class="person-link"><strong>${escapeHtml(item.name || 'App')}</strong><span class="handle">${escapeHtml(detail)}</span></span><button type="button" class="danger mini" data-act="revoke-token" data-name="${escapeHtml(item.name || '')}">Revoke</button></div>`;
+      }).join('')
       : '<p class="dim">No app passwords yet.</p>';
   } catch (error) {
     if (token !== generation || !$('app-pass-list')) return;
-    box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'App passwords are unavailable for this sign-in.')} Use <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>`;
+    const denied = error?.code === 'AppPassAuth' || error?.status === 401 || error?.status === 403;
+    if (denied) {
+      paintAppPassGate('unlock');
+      box.innerHTML = '<p class="dim">Enter the account password to list the app passwords on this account.</p>';
+      return;
+    }
+    paintAppPassGate('off');
+    box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load app passwords.')}</p>`;
   }
 }
 
@@ -4663,13 +4926,7 @@ function toggleAiModels() {
 
 function openAiSettings() {
   closeAiModels();
-  settingsTab = 'ai';
-  if (parseHash()[0] === 'settings') {
-    if ($('settings-tab-ai')) selectSettingsTab('ai');
-    else showSettings();
-    return;
-  }
-  location.hash = '#/settings';
+  openSettings('ai');
 }
 
 async function scanLocalModels() {
@@ -7602,7 +7859,11 @@ function openPageConfig() {
     openAiSettings();
     return;
   }
-  location.hash = '#/settings';
+  if (a === 'notifications') {
+    openSettings('notifications');
+    return;
+  }
+  openSettings('you');
 }
 
 function openLegal(which) {
@@ -9132,7 +9393,7 @@ async function onMenu(event) {
   if (id === 'go-bookmarks') return void (location.hash = '#/bookmarks');
   if (id === 'go-calls') return void (location.hash = '#/calls');
   if (id === 'go-downloads') return void (location.hash = '#/downloads');
-  if (id === 'go-settings' || id === 'settings-go') return void (location.hash = '#/settings');
+  if (id === 'go-settings' || id === 'settings-go') return openSettingsForPage();
   if (id === 'go-about') return openAbout();
   if (id === 'go-privacy') return openLegal('privacy');
   if (id === 'go-terms') return openLegal('terms');
@@ -9676,7 +9937,9 @@ async function useAccount(entry) {
   if (!entry?.did) throw new Error('That account is not saved on this browser.');
   if (entry.kind === 'password') {
     setOauth(null);
-    setPassword(entry.session);
+    const session = getPasswordBook(entry.did) || entry.session;
+    if (!session?.accessJwt) throw new Error('That sign-in expired. Add the account again.');
+    setPassword(session);
     const ok = await api.ensurePasswordSession();
     if (!ok) {
       forgetAccount(entry.did);
@@ -9735,8 +9998,9 @@ async function removeAccount(did) {
   if (!entry) return;
   const name = entry.handle ? `@${entry.handle}` : 'this account';
   if (!window.confirm(`Remove ${name} from this browser?`)) return;
+  await api.clearAppPassAdmin(did);
   if (entry.kind === 'oauth') await revokeOauth(did);
-  if (entry.kind === 'password') await api.deletePasswordSession(entry.session);
+  if (entry.kind === 'password') await api.deletePasswordSession(getPasswordBook(did) || entry.session);
   forgetAccount(did);
   toast('Account removed');
   if (parseHash()[0] === 'settings') showSettings();
@@ -9753,6 +10017,7 @@ async function signOut() {
     setOauth(null);
     await revokeOauth(oauthSub);
   }
+  await api.clearAppPassAdmin(did);
   forgetAccount(did);
   me.profile = null;
   const next = listAccounts()[0];
@@ -10430,6 +10695,10 @@ function bind() {
       event.preventDefault();
       submitAppPassword();
     }
+    if (event.target.id === 'app-pass-unlock-form') {
+      event.preventDefault();
+      unlockAppPasswords(event);
+    }
   });
   $('view').addEventListener('keyup', (event) => {
     if (event.target.id === 'chat-text' || event.target.id === 'ai-text' || event.target.id === 'new-chat-handle') scheduleSuggest(event.target);
@@ -10659,6 +10928,12 @@ function bind() {
       selectSettingsTab(settingsTabId);
       return;
     }
+    const noteWho = event.target.closest('[data-note-who]');
+    if (noteWho?.dataset.noteWho && noteWho.dataset.include) {
+      event.preventDefault();
+      setNoteInclude(noteWho.dataset.noteWho, noteWho.dataset.include);
+      return;
+    }
     const cleanupButton = event.target.closest('[data-cleanup]');
     if (cleanupButton?.dataset.value) {
       event.preventDefault();
@@ -10858,13 +11133,49 @@ async function revokeOauth(did) {
   if (marked && marked !== did) localStorage.setItem(key, marked);
 }
 
+async function unlockAppPasswords(event) {
+  if (!signedIn()) return requireSignIn();
+  const secret = $('app-pass-secret');
+  const code = $('app-pass-code');
+  const password = secret?.value || '';
+  if (!password) return;
+  const factor = code && !code.hidden ? code.value.trim() : '';
+  if (code && !code.hidden && !factor) {
+    toast('Enter the sign-in code for this account.');
+    return;
+  }
+  const button = event?.target?.querySelector?.('button[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    await api.loginForAppPasswords(me.profile?.handle || myDid(), password, factor);
+    if (secret) secret.value = '';
+    if (code) {
+      code.value = '';
+      code.hidden = true;
+    }
+    toast('App passwords unlocked');
+    await loadAppPasswords();
+  } catch (error) {
+    if (error?.code === 'AuthFactorTokenRequired') {
+      if (code) {
+        code.hidden = false;
+        code.focus();
+      }
+      toast('Enter the sign-in code for this account.');
+    } else toast(error.message || 'Could not open app passwords.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
 async function submitAppPassword() {
   if (!signedIn()) return requireSignIn();
   const input = $('app-pass-name');
   const name = input?.value.trim() || '';
   if (!name) return;
+  const privileged = Boolean($('app-pass-privileged')?.checked);
   try {
-    const created = await api.createAppPassword(name);
+    const created = await api.createAppPassword(name, privileged);
     const password = created?.password || created?.appPassword || '';
     const box = $('app-pass-reveal');
     if (box) {
@@ -10872,13 +11183,15 @@ async function submitAppPassword() {
       box.innerHTML = `<p><strong>${escapeHtml(created?.name || name)}</strong></p><p class="token">${escapeHtml(password)}</p><button type="button" class="primary small" data-act="copy-token" data-token="${escapeHtml(password)}">Copy</button><p class="dim">Copy it now. LibreSky does not keep this password.</p>`;
     }
     if (input) input.value = '';
+    const flag = $('app-pass-privileged');
+    if (flag) flag.checked = false;
     toast('App password created');
     await loadAppPasswords();
   } catch (error) {
-    const box = $('app-pass-reveal');
-    if (box) {
-      box.hidden = false;
-      box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not create an app password.')} Create one at <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener noreferrer">Bluesky app passwords</a>.</p>`;
+    if (error?.code === 'AppPassAuth' || error?.status === 401 || error?.status === 403) {
+      paintAppPassGate('unlock');
+      toast('Enter the account password to create an app password.');
+      return;
     }
     toast(error.message || 'Could not create an app password.');
   }
@@ -11240,6 +11553,71 @@ function revealProfileBanner() {
   else img.addEventListener('load', decoded, { once: true });
 }
 
+let accountNameSeq = 0;
+
+async function hydrateAccountNames() {
+  const seq = ++accountNameSeq;
+  const missing = listAccounts().filter((entry) => entry.did && !entry.handle);
+  for (const entry of missing) {
+    try {
+      const profile = await api.getProfile(entry.did);
+      if (seq !== accountNameSeq) return;
+      if (!profile?.handle && !profile?.displayName) continue;
+      const current = listAccounts().find((item) => item.did === entry.did);
+      if (!current) continue;
+      saveAccount({
+        ...current,
+        handle: profile.handle || current.handle || '',
+        displayName: profile.displayName || current.displayName || profile.handle || '',
+        avatar: profile.avatar || current.avatar || '',
+      }, { activate: false, front: false });
+    } catch {
+      /* the account still shows by did */
+    }
+  }
+  if (seq !== accountNameSeq) return;
+  const box = $('account-list');
+  if (box) box.innerHTML = accountListHtml();
+}
+
+async function adoptStoredAccounts() {
+  const before = activeDid();
+  const seen = new Set(listAccounts().map((item) => item.did));
+  let dids = [];
+  try { dids = await listStoredOauthDids(); } catch { dids = []; }
+  for (const did of dids) {
+    if (!did || seen.has(did)) continue;
+    saveAccount({ kind: 'oauth', did, handle: '', displayName: '', avatar: '' }, { activate: false });
+    seen.add(did);
+  }
+  for (const session of listPasswordSessions()) {
+    if (!session?.did) continue;
+    const existing = listAccounts().find((item) => item.did === session.did);
+    if (existing?.kind === 'password') {
+      saveAccount({
+        ...existing,
+        handle: session.handle || existing.handle,
+        displayName: session.displayName || existing.displayName,
+        avatar: session.avatar || existing.avatar,
+        session,
+      }, { activate: false, front: false });
+      continue;
+    }
+    if (existing) continue;
+    saveAccount({
+      kind: 'password',
+      did: session.did,
+      handle: session.handle || '',
+      displayName: session.displayName || session.handle || '',
+      avatar: session.avatar || '',
+      session,
+    }, { activate: false });
+    seen.add(session.did);
+  }
+  if (before) setActiveDid(before);
+  if (listAccounts().some((entry) => entry.did && !entry.handle)) hydrateAccountNames();
+}
+
 async function boot() {
   bindAlphaDoor();
   applyDesign(designOn());
@@ -11250,30 +11628,31 @@ async function boot() {
   let result = null;
   try {
     const mod = await import('./vendor/auth.js');
-    client = mod.createClient();
-    client.addEventListener?.('deleted', (event) => {
-      const sub = event?.detail?.sub || event?.sub || '';
-      const current = getOauth()?.sub || '';
-      if (!current || (sub && sub !== current)) return;
-      setOauth(null);
-      forgetAccount(current);
-      const next = listAccounts()[0];
-      if (next) {
-        useAccount(next).then(() => {
-          closeGate();
-          route();
-          toast('Your Bluesky session ended. Switched accounts.');
-        }).catch(() => {
-          me.profile = null;
-          updateAccount();
-          openGate();
-        });
-        return;
-      }
-      me.profile = null;
-      updateAccount();
-      toast('Your Bluesky session ended. Sign in again.');
-      openGate();
+    client = mod.createClient({
+      onSessionDeleted(sub) {
+        const current = getOauth()?.sub || '';
+        if (!current || sub !== current) return;
+        setOauth(null);
+        api.clearAppPassAdmin(current);
+        forgetAccount(current);
+        const next = listAccounts()[0];
+        if (next) {
+          useAccount(next).then(() => {
+            closeGate();
+            route();
+            toast('Your Bluesky session ended. Switched accounts.');
+          }).catch(() => {
+            me.profile = null;
+            updateAccount();
+            openGate();
+          });
+          return;
+        }
+        me.profile = null;
+        updateAccount();
+        toast('Your Bluesky session ended. Sign in again.');
+        openGate();
+      },
     });
     result = await client.init();
   } catch (error) {
@@ -11284,6 +11663,7 @@ async function boot() {
   } catch {
     /* a saved session can still be opened on the next visit */
   }
+  try { await adoptStoredAccounts(); } catch { /* the account list still shows what was saved */ }
   try { browsing = sessionStorage.getItem('libresky.browse') === '1'; } catch { browsing = false; }
   await loadMe();
   clearBoot();
