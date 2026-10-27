@@ -2745,7 +2745,7 @@ button.nav-link { border: 0; background: transparent; color: inherit; font: inhe
 .pack strong, .pack .handle, .pack .snip { display: block; }
 .fresh {
   position: fixed;
-  z-index: 6;
+  z-index: 24;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
@@ -2771,7 +2771,7 @@ button.nav-link { border: 0; background: transparent; color: inherit; font: inhe
 .fresh-label { font-size: 14px; }
 .to-top {
   position: fixed;
-  z-index: 6;
+  z-index: 24;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;

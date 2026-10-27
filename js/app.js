@@ -884,11 +884,6 @@ async function unreadWithoutFollows(count) {
   return Math.max(0, count - hidden);
 }
 
-function quietFollows(notes, filter) {
-  if (followDeskPrefs().notify !== false || filter === 'follows') return notes || [];
-  return (notes || []).filter((note) => note?.reason !== 'follow');
-}
-
 function loadTrends() {
   if (Array.isArray(trendCache.list) && Date.now() - trendCache.at < 60_000) return Promise.resolve(trendCache.list);
   if (!trendCache.pending) {
@@ -1101,8 +1096,14 @@ function placeColumnPill(node) {
     const box = head.getBoundingClientRect();
     if (box.height > 0) below = box.bottom;
   }
+  const stuck = document.querySelector('.profile-tabs');
+  if (stuck) {
+    const box = stuck.getBoundingClientRect();
+    if (box.height > 0 && box.top <= below + 2) below = Math.max(below, box.bottom);
+  }
+  const height = Math.ceil(node.getBoundingClientRect().height) || 36;
   node.style.left = `${rect.left + rect.width / 2}px`;
-  node.style.top = `${Math.max(8, below - 18)}px`;
+  node.style.top = `${Math.max(8, below - Math.max(height - 6, 18))}px`;
 }
 
 function placeFresh() {
@@ -1661,13 +1662,9 @@ async function showNotifications(filter) {
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
-      const shown = quietFollows(all, current);
-      const rows = notificationsHtml(shown, subjects);
+      const rows = notificationsHtml(all, subjects);
       const tools = `<div class="toolbar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>`;
-      const quiet = shown.length === 0 && all.some((note) => note?.reason === 'follow') && followDeskPrefs().notify === false && current !== 'follows';
-      const blank = quiet
-        ? emptyHtml('Follows are quiet', 'New followers stay off the bell. Open the Follows tab to see them.')
-        : emptyHtml('No notifications', 'You are all caught up.');
+      const blank = emptyHtml('No notifications', 'You are all caught up.');
       $('view').innerHTML = tools + (rows || blank);
     };
     paint();
@@ -3868,7 +3865,7 @@ function followBackPanel() {
 function followNotifyPanel() {
   const on = followDeskPrefs().notify !== false;
   return `<h2>When someone follows you</h2>
-    ${switchRow('follow.notify', 'Notify me when someone follows me', on, 'Off keeps a new follow out of the bell and the All list. The Follows tab still lists them.')}`;
+    ${switchRow('follow.notify', 'Notify me when someone follows me', on, 'Off keeps a new follow off the bell and the sound. The notifications page still lists them.')}`;
 }
 
 function followCleanupPanel() {
@@ -5117,7 +5114,7 @@ function tourStepList() {
     {
       kicker: 'Notifications',
       title: 'Likes, replies, and follows',
-      copy: 'Likes, replies, mentions, reposts, and follows land here. Settings, under Follows, chooses whether a new follow rings the bell.',
+      copy: 'Likes, replies, mentions, reposts, and follows land here. Settings, under Follows, chooses whether a new follow rings the bell or plays a sound. The page still lists them.',
       targets: ['[data-nav="notifications"]'],
     },
     {

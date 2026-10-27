@@ -6,6 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 27 October 2026
 
+- Up and the new-posts pill sit higher in the column and stay above the header and a profile.
+- Turning off follow alerts keeps the bell and the sound quiet. Follows stay on the notifications page.
 - Search tabs match. Ukraine still lists posts about Ukraine, in English and in Ukrainian. Latest and Top stay in page config, so that tab no longer draws a switch the others do not have.
 - Up shows in the middle of the column, in the same place as new posts, and only after the page has scrolled. While new posts are showing, Up stays hidden.
 - The control at the right edge is only a plus. Page config sits just behind it and opens the settings for the page you are on.

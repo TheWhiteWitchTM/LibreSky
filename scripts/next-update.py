@@ -27,6 +27,21 @@ ROOT = Path(__file__).resolve().parents[1]
 PROMPT_PATH = ROOT / "scripts" / "next-update-prompt.txt"
 
 
+def spend_held() -> str:
+    import importlib.util
+
+    path = Path("/home/andreas/Projects/bots/credits.py")
+    try:
+        spec = importlib.util.spec_from_file_location("hearth_credits", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(str(path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.allow("heavy", "loom-code")
+    except Exception:
+        return "Credits did not answer. Model jobs are held."
+
+
 def log(msg: str) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     line = f"{datetime.now(BERLIN).isoformat(timespec='seconds')} {msg}\n"
@@ -89,6 +104,10 @@ def main() -> int:
     if not prompt:
         log("missing prompt")
         return 1
+    held = spend_held()
+    if held:
+        log("safe mode: " + held)
+        return 0
     grok = os.environ.get("GROK_BIN") or str(Path.home() / ".grok" / "bin" / "grok")
     # Default Grok Build is high effort, with subagents and web search. That is
     # what emptied the Super balance. This pass stays on grok-4.7 (not Fast,
