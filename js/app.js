@@ -364,7 +364,11 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
   paintHomeCompose(compose);
   if (nav !== 'search') clearSearchLead();
   measureHead();
-  requestAnimationFrame(measureHead);
+  requestAnimationFrame(() => {
+    measureHead();
+    placeFresh();
+    syncToTop();
+  });
   if (!$('tour')?.hidden) requestAnimationFrame(placeTour);
 }
 
@@ -1084,16 +1088,39 @@ function visibleHome(items) {
   return (items || []).filter((item) => homeAllows(item, prefs, did));
 }
 
-function placeFresh() {
-  const pill = $('fresh');
-  if (!pill || pill.hidden) return;
+const TOP_AFTER = 80;
+
+function placeColumnPill(node) {
+  if (!node || node.hidden) return;
   const column = document.querySelector('.center');
-  const head = document.querySelector('.sticky-head');
   if (!column) return;
+  const head = document.querySelector('.sticky-head');
   const rect = column.getBoundingClientRect();
-  const below = head ? head.getBoundingClientRect().bottom : 64;
-  pill.style.left = `${rect.left + rect.width / 2}px`;
-  pill.style.top = `${Math.max(8, below - 18)}px`;
+  let below = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-h')) || 52;
+  if (head && getComputedStyle(head).display !== 'none') {
+    const box = head.getBoundingClientRect();
+    if (box.height > 0) below = box.bottom;
+  }
+  node.style.left = `${rect.left + rect.width / 2}px`;
+  node.style.top = `${Math.max(8, below - 18)}px`;
+}
+
+function placeFresh() {
+  placeColumnPill($('fresh'));
+}
+
+function freshPopupOpen() {
+  const pill = $('fresh');
+  return Boolean(pill && !pill.hidden);
+}
+
+function syncToTop() {
+  const button = $('to-top');
+  if (!button) return;
+  const y = window.scrollY || document.documentElement.scrollTop || 0;
+  const show = y > TOP_AFTER && !freshPopupOpen();
+  button.hidden = !show;
+  if (show) placeColumnPill(button);
 }
 
 function hideFresh() {
@@ -1101,6 +1128,7 @@ function hideFresh() {
   if (!pill) return;
   pill.hidden = true;
   pill.innerHTML = '';
+  syncToTop();
 }
 
 function paintFreshLink() {
@@ -1169,6 +1197,7 @@ function paintFresh() {
   pill.hidden = false;
   if (pill.innerHTML !== next) pill.innerHTML = next;
   placeFresh();
+  syncToTop();
 }
 
 function applyFresh() {
@@ -1497,11 +1526,6 @@ function paintHomeCompose(show) {
   if (changed) measureHead();
 }
 
-function sortHtml() {
-  searchSort = searchPrefs().sort === 'top' ? 'top' : 'latest';
-  return `<div class="segmented search-sort"><button type="button" data-sort="latest" aria-pressed="${searchSort === 'latest'}">Latest</button><button type="button" data-sort="top" aria-pressed="${searchSort === 'top'}">Top</button></div>`;
-}
-
 function searchContext() {
   return { languages: languagePrefs().content, did: myDid() };
 }
@@ -1528,8 +1552,7 @@ async function showSearch(query, options = {}) {
   const placeholder = query
     ? skeletons(4)
     : (known ? (trendBlock(visibleTrends(known)) || emptyHtml('Nothing trending', 'Nothing is happening in this tab right now.')) : skeletons(6));
-  const controls = query ? sortHtml() : '';
-  $('view').innerHTML = `<div id="search-controls">${controls}</div><div id="search-results">${placeholder}</div>`;
+  $('view').innerHTML = `<div id="search-results">${placeholder}</div>`;
   if (focus && query) $('search-q')?.focus();
   if (!query) return paintExplore(token);
   return paintSearchResults(token, query);
@@ -5088,7 +5111,7 @@ function tourStepList() {
     {
       kicker: 'Search',
       title: 'Find people and posts',
-      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. Ukraine on that row shows posts about Ukraine. SociallyDead, with a folder, opens the directory in a new tab. The … edits the row.',
+      copy: 'Search opens on what people are talking about, then finds people, posts, and starter packs. Ukraine on that row shows posts about Ukraine, the same as the other tabs. Latest and Top stay in page config. SociallyDead, with a folder, opens the directory in a new tab. The … edits the row.',
       targets: ['#rail-q', '[data-nav="search"]'],
     },
     {
@@ -10032,6 +10055,7 @@ function bind() {
       closeUkraineMenu();
     }
     placeFresh();
+    syncToTop();
     placeTour();
   }, true);
   document.addEventListener('visibilitychange', () => {
@@ -10046,6 +10070,7 @@ function bind() {
       placeOpenLayers();
     }
     placeFresh();
+    syncToTop();
     placeTour();
     if (designOn()) paintDesignReadout();
     measureHead();
@@ -11266,6 +11291,7 @@ async function boot() {
   await loadMe();
   clearBoot();
   route();
+  syncToTop();
   if (signedIn()) closeGate();
   else if (offerSignIn()) openGate();
   document.getElementById('boot-error')?.remove();

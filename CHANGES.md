@@ -4,6 +4,12 @@ This is the record of the beta you can [open today](https://thewhitewitchtm.gith
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 27 October 2026
+
+- Search tabs match. Ukraine still lists posts about Ukraine, in English and in Ukrainian. Latest and Top stay in page config, so that tab no longer draws a switch the others do not have.
+- Up shows in the middle of the column, in the same place as new posts, and only after the page has scrolled. While new posts are showing, Up stays hidden.
+- The control at the right edge is only a plus. Page config sits just behind it and opens the settings for the page you are on.
+
 ## 26 October 2026
 
 - Search starts with a Ukraine tab. The flag is the icon, and the tab lists posts about Ukraine, in English and in Ukrainian. It can be removed and added back with the other tabs. SociallyDead sits on that row with a folder, and opens the directory in a new tab. Scroll, and the search box leaves. The tabs stay, the same way the writing line leaves on Home.
