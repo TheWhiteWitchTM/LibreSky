@@ -675,7 +675,8 @@ function messagePreview(message) {
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
   if (parseCallMessage(message.text)) return 'Call';
-  if (parseShareMessage(message.text)) return 'File';
+  const share = parseShareMessage(message.text);
+  if (share) return share.kind === 'data' || share.name ? 'File' : 'Direct session';
   if (message.text) return message.text;
   if (message.embed) return 'Sent a post';
   return 'Message';
@@ -859,14 +860,18 @@ export function callRequestHtml(offer) {
 }
 
 export function shareBannerHtml(offer, extra = {}) {
+  const named = Boolean(extra.name || offer?.name);
   const name = extra.name || offer?.name || 'a file';
   const sizeLabel = extra.sizeLabel || '';
   const detail = sizeLabel ? `${name} · ${sizeLabel}` : name;
   const rkey = attr(offer?.rkey || '');
   const convo = attr(extra.convoId || '');
   const peer = attr(extra.peerDid || '');
-  const label = extra.incoming ? `Wants to send ${escapeHtml(String(detail).trim())}` : escapeHtml(String(detail).trim());
-  return `<div class="share-banner" role="status">${icon('image')}<span>${label}</span>${extra.incoming ? `<button type="button" class="primary small" data-act="share-accept" data-rkey="${rkey}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="share-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button>` : ''}</div>`;
+  const legacy = named ? ' data-legacy="1"' : '';
+  const label = !named
+    ? 'Wants a direct session'
+    : (extra.incoming ? `Wants to send ${escapeHtml(String(detail).trim())}` : escapeHtml(String(detail).trim()));
+  return `<div class="share-banner" role="status">${icon(named ? 'image' : 'lock')}<span>${label}</span>${extra.incoming ? `<button type="button" class="primary small" data-act="share-accept" data-rkey="${rkey}" data-convo="${convo}" data-peer="${peer}"${legacy}>Lock</button><button type="button" class="danger mini" data-act="share-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button>` : ''}</div>`;
 }
 
 export function shareFileHtml(file, { mine = false } = {}) {

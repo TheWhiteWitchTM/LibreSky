@@ -1,8 +1,8 @@
 import * as api from './api.js';
+import { iceConfig, waitForIce } from './ice.js';
 import { assembleCallSdp, messageSender, parseCallMessage } from './util.js';
 
 const COLLECTION = 'com.libresky.call';
-const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 const FRESH_MS = 10 * 60 * 1000;
 const RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
 const CHUNK = 900;
@@ -171,18 +171,7 @@ function showStage(media) {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
-function waitIce(pc) {
-  if (pc.iceGatheringState === 'complete') return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, 4000);
-    pc.addEventListener('icegatheringstatechange', () => {
-      if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-  });
-}
+
 
 async function mediaStream(media) {
   const video = media === 'video';
@@ -358,7 +347,7 @@ export async function startCall({ convoId, peerDid, media }) {
   let stream;
   try {
     stream = await mediaStream(media);
-    const pc = new RTCPeerConnection({ iceServers: ICE });
+    const pc = new RTCPeerConnection(await iceConfig());
     session = { pc, stream, convoId, peerDid, media, announced: false, recordUri: '', rkey: '', startedAt: Date.now(), muted: false, cameraOff: false };
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
@@ -368,7 +357,7 @@ export async function startCall({ convoId, peerDid, media }) {
     setStatus(media === 'video' ? 'Starting video call…' : 'Calling…');
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    await waitIce(pc);
+    await waitForIce(pc);
     if (token !== epoch || !session) return;
     const announced = await announce(convoId, 'offer', media, pc.localDescription.sdp);
     if (token !== epoch || !session) {
@@ -427,7 +416,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     if (!Number.isFinite(age) || age > FRESH_MS) throw new Error('That call has ended.');
     stream = await mediaStream(media || 'audio');
     const chosen = media === 'video' ? 'video' : 'audio';
-    const pc = new RTCPeerConnection({ iceServers: ICE });
+    const pc = new RTCPeerConnection(await iceConfig());
     session = { pc, stream, convoId, peerDid, media: chosen, announced: false, recordUri: '', rkey, startedAt: Date.now(), muted: false, cameraOff: false };
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
@@ -438,7 +427,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     await pc.setRemoteDescription({ type: 'offer', sdp });
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    await waitIce(pc);
+    await waitForIce(pc);
     if (token !== epoch || !session) return;
     const announced = await announce(convoId, 'answer', chosen, pc.localDescription.sdp);
     if (token !== epoch || !session) {

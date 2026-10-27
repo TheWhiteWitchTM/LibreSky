@@ -1832,6 +1832,15 @@ a.person.request-entry { width: 100%; }
   color: var(--blue);
 }
 .chat-plus:hover { background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.chat-plus.is-locking {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+}
+.chat-plus.is-locked {
+  color: var(--on-blue);
+  background: var(--blue);
+}
+.chat-plus.is-locked:hover { background: color-mix(in srgb, var(--blue) 82%, black); }
 .bubble.file { padding: 6px; }
 .bubble.file img,
 .bubble.file video {

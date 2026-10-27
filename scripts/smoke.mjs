@@ -11,7 +11,8 @@ import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, defaultSearchTabs, goldFeedGate, homeAllows, normalizeSearchTabs, SEARCH_LINKS, SEARCH_POSTS, searchAllows, settleSearchTabs, sortThreadReplies } from '../js/prefs.js';
 import { activeDid, forgetAccount, getPasswordBook, listAccounts, loadDraft, saveAccount, saveDraft, setActiveDid, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
 import { formatCallClock, setKindEnabled } from '../js/call.js';
-import { prettySize } from '../js/share.js';
+import { sdpFacts, stunServers, turnServers } from '../js/ice.js';
+import { incomingShare, prettySize } from '../js/share.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -984,7 +985,7 @@ assert.match(pillFn, /querySelector\('\.center'\)/);
 assert.doesNotMatch(pillFn, /profile-tabs|sticky-head/);
 assert.match(appSource, /data-act="chat-file"/);
 assert.match(appSource, /id="chat-file"/);
-assert.match(index, /The plus on the left of the box sends a photo or a file/);
+assert.match(index, /The lock on the left of the box opens a direct session/);
 const searchView = appSource.slice(appSource.indexOf('async function showSearch'), appSource.indexOf('async function paintExplore'));
 assert.doesNotMatch(searchView, /sortHtml|search-sort|search-controls/);
 assert.match(appSource, /data-sort="latest"/);
@@ -1321,6 +1322,15 @@ assert.equal(shareOffer.size, 2048);
 assert.equal(shareOffer.rkey, '2222222222222');
 assert.equal(parseShareMessage('Declined the file https://example.com/#/f/2222222222222').kind, 'decline');
 assert.equal(parseShareMessage('hello'), null);
+const sessionOffer = parseShareMessage('Wants a direct session https://thewhitewitchtm.github.io/LibreSky/#/f/3333333333333');
+assert.equal(sessionOffer.kind, 'offer');
+assert.equal(sessionOffer.name, '');
+assert.equal(sessionOffer.rkey, '3333333333333');
+assert.equal(parseShareMessage('Locked the session https://example.com/#/f/3333333333333').kind, 'answer');
+assert.equal(parseShareMessage('Updates the session https://example.com/#/f/3333333333333').kind, 'restart');
+assert.equal(parseShareMessage('Updated the session https://example.com/#/f/3333333333333').kind, 'restarted');
+assert.equal(parseShareMessage('Session ended https://example.com/#/f/3333333333333').kind, 'end');
+assert.equal(parseShareMessage('Declined the session https://example.com/#/f/3333333333333').kind, 'decline');
 assert.equal(assembleShareSdp([
   { text: `File data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:peer'), sdp);
@@ -1330,7 +1340,32 @@ assert.match(shareHidden, /hidden/);
 assert.doesNotMatch(shareHidden, /class="bubble|Wants to send a file|photo\.jpg/);
 const shareBar = shareBannerHtml({ rkey: '2222222222222', name: 'photo.jpg', size: 2048 }, { incoming: true, convoId: 'room', peerDid: 'did:them', sizeLabel: '2 KB' });
 assert.match(shareBar, /data-act="share-accept"/);
+assert.match(shareBar, /data-legacy="1"/);
 assert.match(shareBar, /photo\.jpg/);
+const sessionBar = shareBannerHtml({ rkey: '3333333333333' }, { incoming: true, convoId: 'room', peerDid: 'did:them' });
+assert.match(sessionBar, /Wants a direct session/);
+assert.match(sessionBar, />Lock</);
+assert.doesNotMatch(sessionBar, /data-legacy/);
+const liveOffer = incomingShare([
+  { text: 'Wants a direct session https://example.com/#/f/3333333333333', sender: { did: 'did:them' }, sentAt: new Date().toISOString() },
+], 'did:me', 'did:them');
+assert.equal(liveOffer.rkey, '3333333333333');
+assert.equal(incomingShare([
+  { text: 'Wants a direct session https://example.com/#/f/3333333333333', sender: { did: 'did:them' }, sentAt: new Date().toISOString() },
+  { text: 'Locked the session https://example.com/#/f/4444444444444', sender: { did: 'did:me' }, sentAt: new Date(Date.now() + 1000).toISOString() },
+], 'did:me', 'did:them'), null);
+const stun = stunServers().map((server) => server.urls);
+assert.ok(stun.includes('stun:stun.cloudflare.com:443'));
+assert.ok(stun.includes('stun:stun.relay.metered.ca:80'));
+const turn = turnServers();
+assert.equal(turn.length, 2);
+assert.ok(turn.some((server) => server.urls.some((url) => url.startsWith('turns:') && url.includes(':443'))));
+assert.ok(turn.some((server) => server.urls.some((url) => url.includes('transport=tcp'))));
+assert.equal(sdpFacts('a=candidate:1 1 udp 1 1.2.3.4 9 typ srflx\r\n').srflx, true);
+assert.equal(sdpFacts('a=candidate:1 1 tcp 1 1.2.3.4 443 typ relay\r\n').relayTcp, true);
+assert.match(appSource, /lock-open/);
+assert.match(appSource, /is-locked/);
+assert.match(appSource, /openShare\(/);
 const sharePic = shareFileHtml({ url: 'blob:https://example.com/abc', name: 'cat.png', type: 'image/png' }, { mine: true });
 assert.match(sharePic, /blob:https:\/\/example.com\/abc/);
 assert.match(sharePic, /class="bubble file mine"/);

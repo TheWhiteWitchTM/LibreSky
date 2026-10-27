@@ -1,6 +1,7 @@
 import * as api from './api.js';
 import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
-import { acceptShare, canShare, declineShare, hangShare, incomingShare, isSharing, prettySize, setupShare, startShare } from './share.js';
+import { warmIce } from './ice.js';
+import { acceptShare, canShare, declineShare, hangShare, incomingShare, isSharing, openShare, prettySize, sendShareFile, setupShare, shareLabel, sharePeer, sharePhase, shareProgress } from './share.js';
 import {
   accountIcon,
   actorHtml,
@@ -1948,7 +1949,44 @@ function paintShareLive(text, progress) {
     else thread.append(bar);
   }
   const pct = Number.isFinite(progress) ? ` ${Math.round(progress * 100)}%` : '';
-  bar.innerHTML = `<span>${escapeHtml(text)}${pct}</span><button type="button" class="text-btn mini" data-act="share-cancel">Cancel</button>`;
+  const ending = Number.isFinite(progress) ? 'Cancel' : 'Unlock';
+  bar.innerHTML = `<span>${escapeHtml(text)}${pct}</span><button type="button" class="text-btn mini" data-act="share-cancel">${ending}</button>`;
+}
+
+function paintChatLock() {
+  const button = document.querySelector('#chat-form .chat-plus');
+  if (!button) return;
+  const peer = $('chat-form')?.dataset.peer || '';
+  const mine = sharePeer();
+  const phase = mine && mine.peerDid === peer ? sharePhase() : 'off';
+  button.classList.toggle('is-locking', phase === 'locking');
+  button.classList.toggle('is-locked', phase === 'locked');
+  button.setAttribute('aria-pressed', phase === 'off' ? 'false' : 'true');
+  button.innerHTML = icon(phase === 'off' ? 'lock-open' : 'lock');
+  if (phase === 'locked') {
+    button.setAttribute('aria-label', 'Send a photo or file');
+    button.dataset.tip = 'Photo or file';
+  } else if (phase === 'locking') {
+    button.setAttribute('aria-label', 'Locking the session');
+    button.dataset.tip = 'Locking…';
+  } else {
+    button.setAttribute('aria-label', 'Open a direct session');
+    button.dataset.tip = 'Direct session';
+  }
+}
+
+async function ensureChatAccepted() {
+  const convoId = $('chat-form')?.dataset.convo || '';
+  if ($('view')?.dataset.convoStatus !== 'request' || !convoId) return true;
+  try {
+    await api.acceptConvo(convoId);
+    if ($('view')) $('view').dataset.convoStatus = 'accepted';
+    $('view')?.querySelector('.request-banner')?.remove();
+    return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
+  }
 }
 
 function paintIncomingShare(messages, peerDid, convoId) {
@@ -1981,24 +2019,18 @@ function appendShareFile(file, mine) {
 
 async function beginShare(file) {
   const form = $('chat-form');
-  const convoId = form?.dataset.convo || '';
   const peerDid = form?.dataset.peer || '';
-  if (!file || !convoId || !peerDid) return;
+  if (!file || !peerDid) return;
   if (isInCall()) {
     toast('Hang up the call first.');
     return;
   }
-  if ($('view')?.dataset.convoStatus === 'request') {
-    try {
-      await api.acceptConvo(convoId);
-      if ($('view')) $('view').dataset.convoStatus = 'accepted';
-      $('view')?.querySelector('.request-banner')?.remove();
-    } catch (error) {
-      toast(error.message);
-      return;
-    }
+  if (!(await ensureChatAccepted())) return;
+  if (sharePhase() === 'locked' && sharePeer()?.peerDid === peerDid) {
+    sendShareFile(file);
+    return;
   }
-  await startShare({ convoId, peerDid, file });
+  toast('Lock the session first.');
 }
 
 function watchOpenChat(convoId, peerDid, token) {
@@ -2146,7 +2178,7 @@ async function showMessages(convoId) {
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
     const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
-    const chatPlus = `<button type="button" class="icon-btn chat-plus" data-act="chat-file" aria-label="Send a photo or file" data-tip="Photo or file">${icon('plus')}</button><input id="chat-file" type="file" accept="image/*,video/*,audio/*,.pdf,.zip,.txt,.json" hidden>`;
+    const chatPlus = `<button type="button" class="icon-btn chat-plus" data-act="chat-file" aria-pressed="false" aria-label="Open a direct session" data-tip="Direct session">${icon('lock-open')}</button><input id="chat-file" type="file" multiple hidden>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
     if (other) fillChatTitle(other, token);
     else {
@@ -2160,7 +2192,9 @@ async function showMessages(convoId) {
     $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form" data-peer="${escapeHtml(peerDid)}" data-convo="${escapeHtml(convoId)}">${chatPlus}<div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
     clearChatCallChrome();
     paintIncomingShare(messages, peerDid, convoId);
-    if (isSharing()) paintShareLive('Transfer in progress…');
+    if (isSharing()) paintShareLive(shareLabel(), shareProgress());
+    paintChatLock();
+    warmIce();
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
     applyFieldLanguage(area);
@@ -5293,7 +5327,7 @@ async function startCallToHandle(media) {
     return;
   }
   if (isSharing()) {
-    toast('Finish the file transfer first.');
+    toast('Unlock the direct session first.');
     return;
   }
   const input = $('call-handle');
@@ -5616,7 +5650,7 @@ function tourStepList() {
     {
       kicker: 'Chat',
       title: 'Messages on your account',
-      copy: 'Chat uses your Bluesky account. Requests wait until you accept them. The mic beside Send types what you say.',
+      copy: 'Chat uses your Bluesky account. Requests wait until you accept them. The lock beside the box opens a direct session, then sends a file. The mic beside Send types what you say.',
       targets: ['[data-nav="messages"]'],
     },
     {
@@ -8835,7 +8869,7 @@ async function handleChromeAct(act, event) {
       return true;
     }
     if (isSharing()) {
-      toast('Finish the file transfer first.');
+      toast('Unlock the direct session first.');
       return true;
     }
     const peer = button?.dataset.peer || document.querySelector('.chat-head')?.dataset.peer;
@@ -8913,15 +8947,34 @@ async function handleChromeAct(act, event) {
       toast('Hang up the call first.');
       return true;
     }
-    if (isSharing()) {
-      toast('A file is already on the way.');
-      return true;
-    }
     if (!canShare()) {
-      toast('Sending a file needs a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      toast('A direct session needs a secure page. Open LibreSky over https, or on http://127.0.0.1.');
       return true;
     }
-    $('chat-file')?.click();
+    const form = $('chat-form');
+    const peer = form?.dataset.peer || '';
+    const convoId = form?.dataset.convo || '';
+    const mine = sharePeer();
+    const here = mine && mine.peerDid === peer;
+    if (here && sharePhase() === 'locked') {
+      $('chat-file')?.click();
+      return true;
+    }
+    if (here && sharePhase() === 'locking') {
+      hangShare(true);
+      return true;
+    }
+    if (mine && !here) {
+      toast('Unlock the other direct session first.');
+      return true;
+    }
+    const banner = $('view')?.querySelector('.share-banner [data-act="share-accept"]');
+    if (banner) {
+      banner.click();
+      return true;
+    }
+    if (!(await ensureChatAccepted())) return true;
+    openShare({ convoId, peerDid: peer, me: myDid() }).catch((error) => toast(error?.message || 'The direct session could not start.'));
     return true;
   }
   if (act === 'share-accept') {
@@ -8945,7 +8998,13 @@ async function handleChromeAct(act, event) {
         }
       }).catch(() => {});
     }
-    acceptShare({ convoId, peerDid: peer, rkey }).catch((error) => toast(error.message));
+    acceptShare({
+      convoId,
+      peerDid: peer,
+      rkey,
+      me: myDid(),
+      legacy: button?.dataset.legacy === '1',
+    }).catch((error) => toast(error.message));
     return true;
   }
   if (act === 'share-decline') {
@@ -9762,7 +9821,7 @@ async function onMenu(event) {
       return;
     }
     if (isSharing()) {
-      toast('Finish the file transfer first.');
+      toast('Unlock the direct session first.');
       return;
     }
     const peer = shownProfile?.did || '';
@@ -10600,9 +10659,9 @@ function bind() {
   document.body.addEventListener('click', onClick);
   document.addEventListener('change', (event) => {
     if (event.target?.id !== 'chat-file') return;
-    const file = event.target.files?.[0];
+    const files = [...(event.target.files || [])];
     event.target.value = '';
-    if (file) beginShare(file);
+    files.forEach((file) => beginShare(file));
   });
   document.addEventListener('pointerdown', () => {
     const ctx = playSound.ctx;
@@ -11907,6 +11966,7 @@ async function boot() {
     toast,
     onFile(file, extra) { appendShareFile(file, Boolean(extra?.mine)); },
     onStatus(text, progress) { paintShareLive(text, progress); },
+    onPhase() { paintChatLock(); },
   });
   bind();
   loadPassword();

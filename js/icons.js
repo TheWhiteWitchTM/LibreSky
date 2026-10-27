@@ -21,6 +21,8 @@ const PATHS = {
   back: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5 8 12l7 7"/>',
   close: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/>',
+  'lock-open': '<rect x="4" y="11" width="16" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8 11V8a4 4 0 0 1 7.6-1.6"/>',
+  lock: '<rect x="4" y="11" width="16" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   smile: '<circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="1.15" fill="currentColor"/><circle cx="15" cy="10" r="1.15" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8.4 13.6c.9 1.5 2.1 2.2 3.6 2.2s2.7-.7 3.6-2.2"/>',
   flag: '<path fill="currentColor" d="M6 3.5h.9l.5 1.4H20v8.6H9.6L9.1 12H6.9V20.5H5V3.5h1zm3.4 2.8-.4-1.4H7v5.6h2.4l.5 1.4h8.4V6.3H9.4z"/>',
   gif: '<rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M6.2 9.1h2.3v1.15H7.35v.7h1.05v1H7.35V15H6.2V9.1zm3.35 0h2.55v1.15h-1.4V15H9.55V9.1zm3.7 0h2.7v1.15h-1.55v.85h1.4v1.05h-1.4V15h-1.15V9.1z"/>',

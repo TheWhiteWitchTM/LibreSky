@@ -467,10 +467,12 @@ export function parseShareMessage(text) {
     };
   }
   let kind = '';
-  if (/^Wants to send a file\b/.test(raw)) kind = 'offer';
-  else if (/^Accepted the file\b/.test(raw)) kind = 'answer';
-  else if (/^Declined the file\b/.test(raw)) kind = 'decline';
-  else if (/^File transfer ended\b/.test(raw)) kind = 'end';
+  if (/^Wants to send a file\b/.test(raw) || /^Wants a direct session\b/.test(raw)) kind = 'offer';
+  else if (/^Accepted the file\b/.test(raw) || /^Locked the session\b/.test(raw)) kind = 'answer';
+  else if (/^Declined the file\b/.test(raw) || /^Declined the session\b/.test(raw)) kind = 'decline';
+  else if (/^File transfer ended\b/.test(raw) || /^Session ended\b/.test(raw)) kind = 'end';
+  else if (/^Updates the session\b/.test(raw)) kind = 'restart';
+  else if (/^Updated the session\b/.test(raw)) kind = 'restarted';
   else return null;
   const link = raw.match(/https?:\/\/\S+/)?.[0] || '';
   let rkey = '';
