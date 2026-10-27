@@ -248,7 +248,14 @@ export function forgetAccount(did) {
 
 export function listStoredOauthDids() {
   return new Promise((resolve) => {
-    const finish = (keys) => resolve(Array.isArray(keys) ? keys : []);
+    let settled = false;
+    const finish = (keys) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(Array.isArray(keys) ? keys : []);
+    };
+    const timer = setTimeout(() => finish([]), 2500);
     if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') {
       finish([]);
       return;
@@ -265,6 +272,7 @@ export function listStoredOauthDids() {
       request.onupgradeneeded = () => {
         try { request.transaction?.abort(); } catch { /* leave the existing database alone */ }
       };
+      request.onblocked = () => finish([]);
       request.onerror = () => finish([]);
       request.onsuccess = () => {
         const db = request.result;

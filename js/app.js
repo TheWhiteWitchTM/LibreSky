@@ -1,6 +1,5 @@
 import * as api from './api.js';
 import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
-import { warmIce } from './ice.js';
 import { acceptShare, canShare, declineShare, hangShare, incomingShare, isSharing, openShare, prettySize, sendShareFile, setupShare, shareLabel, sharePeer, sharePhase, shareProgress } from './share.js';
 import {
   accountIcon,
@@ -2194,7 +2193,6 @@ async function showMessages(convoId) {
     paintIncomingShare(messages, peerDid, convoId);
     if (isSharing()) paintShareLive(shareLabel(), shareProgress());
     paintChatLock();
-    warmIce();
     const area = $('chat-text');
     paintFieldHighlight(area, $('chat-highlight'));
     applyFieldLanguage(area);
@@ -11957,6 +11955,19 @@ async function adoptStoredAccounts() {
   if (listAccounts().some((entry) => entry.did && !entry.handle)) hydrateAccountNames();
 }
 
+function within(work, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    Promise.resolve(work).then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 async function boot() {
   bindAlphaDoor();
   applyDesign(designOn());
@@ -11970,9 +11981,11 @@ async function boot() {
   });
   bind();
   loadPassword();
+  const started = Date.now();
+  const left = () => Math.max(400, 12000 - (Date.now() - started));
   let result = null;
   try {
-    const mod = await import('./vendor/auth.js');
+    const mod = await within(import('./vendor/auth.js'), left());
     client = mod.createClient({
       onSessionDeleted(sub) {
         const current = getOauth()?.sub || '';
@@ -11999,18 +12012,18 @@ async function boot() {
         openGate();
       },
     });
-    result = await client.init();
+    result = await within(client.init(), left());
   } catch (error) {
-    oauthReady = error?.message || 'Sign in with Bluesky needs the published site, or http://127.0.0.1.';
+    if (error?.message !== 'timeout') oauthReady = error?.message || 'Sign in with Bluesky needs the published site, or http://127.0.0.1.';
   }
   try {
-    await settleSession(result);
+    await within(settleSession(result), left());
   } catch {
     /* a saved session can still be opened on the next visit */
   }
-  try { await adoptStoredAccounts(); } catch { /* the account list still shows what was saved */ }
+  try { await within(adoptStoredAccounts(), left()); } catch { /* the account list still shows what was saved */ }
   try { browsing = sessionStorage.getItem('libresky.browse') === '1'; } catch { browsing = false; }
-  await loadMe();
+  try { await within(loadMe(), left()); } catch { /* the feed can still open */ }
   clearBoot();
   route();
   syncToTop();

@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-27-chat-share';
+const CACHE = 'libresky-2026-10-27-chat-quiet';
 
 const SHELL = [
   './',
@@ -8,6 +8,7 @@ const SHELL = [
   './js/emoji.js',
   './js/ai.js',
   './js/call.js',
+  './js/ice.js',
   './js/share.js',
   './js/api.js',
   './js/icons.js',

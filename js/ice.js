@@ -13,9 +13,6 @@ const TURN_PASS = 'openrelayproject';
 const TURN_HOSTS = ['global.relay.metered.ca', 'standard.relay.metered.ca'];
 
 let certsPromise = null;
-let warm = null;
-let warmAt = 0;
-let warming = null;
 
 export function stunServers() {
   return STUN_URLS.map((urls) => ({ urls }));
@@ -99,30 +96,6 @@ export function waitForIce(pc, { timeout = 8000, min = 2200 } = {}) {
   });
 }
 
-export function warmIce() {
-  if (warm || warming || !globalThis.RTCPeerConnection) return warming || Promise.resolve();
-  warming = iceConfig().then((config) => {
-    warming = null;
-    if (warm) return;
-    try {
-      warm = new RTCPeerConnection(config);
-      warmAt = Date.now();
-    } catch {
-      warm = null;
-    }
-  }).catch(() => {
-    warming = null;
-  });
-  return warming;
-}
-
 export async function takePeer() {
-  if (warm && Date.now() - warmAt < 45000) {
-    const pc = warm;
-    warm = null;
-    warmAt = 0;
-    warmIce();
-    return pc;
-  }
   return new RTCPeerConnection(await iceConfig());
 }

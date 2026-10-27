@@ -731,6 +731,15 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).catch(function () {});
     }
   </script>
-  <script type="module" src="./js/app.js?v=20261027a"></script>
+  <script>
+    window.addEventListener('error', function (event) {
+      var boot = document.getElementById('boot');
+      if (!boot) return;
+      var note = boot.querySelector('p');
+      var message = event && event.message;
+      if (note && message && message !== 'Script error.') note.textContent = message;
+    });
+  </script>
+  <script type="module" src="./js/app.js?v=20261027b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

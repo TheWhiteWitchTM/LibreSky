@@ -6,7 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 27 October 2026
 
-- The lock on the left of a chat opens a direct session. It starts open. Click it and it closes. Once both people have locked it, that same control sends photos and files, and the session stays open for the next one. Public STUN servers on ports 80 and 443, and public TURN relays on those ports, are tried when a direct path is blocked.
+- The lock on the left of a chat opens a direct session. It starts open. Click it and it closes. Once both people have locked it, that same control sends photos and files, and the session stays open for the next one. Public STUN servers on ports 80 and 443, and public TURN relays on those ports, are tried when a direct path is blocked. Opening LibreSky does not start that session. A connection starts only when a chat message locks it or accepts one.
+- The loading screen moves on if sign-in or the saved login list does not answer. The client still opens.
 - Up and the new-posts pill sit in the top bar, in the center of the column, in the same spot on every page.
 - Turning off follow alerts keeps the bell and the sound quiet. Follows stay on the notifications page.
 - Search tabs match. Ukraine still lists posts about Ukraine, in English and in Ukrainian. Latest and Top stay in page config, so that tab no longer draws a switch the others do not have.
