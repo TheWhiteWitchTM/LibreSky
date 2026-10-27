@@ -11,7 +11,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 - Search tabs match. Ukraine still lists posts about Ukraine, in English and in Ukrainian. Latest and Top stay in page config, so that tab no longer draws a switch the others do not have.
 - Up shows in the middle of the column, in the same place as new posts, and only after the page has scrolled. While new posts are showing, Up stays hidden.
 - The control at the right edge is only a plus. Page config sits just behind it and opens the settings for the page you are on.
-- Config on Notifications opens notification settings. Config on AI Assist opens AI settings. The tab stays in the address, so a reload keeps it.
+- Page config stays on the page. Chat sets who can message you. Calls sets who can call you. Notifications sets which notices show up. AI Assist sets the model. Your profile sets your name and picture. Home, Search, and a thread use that same panel.
 - App passwords are the list on the account server. A Bluesky login cannot read that list, so the account password opens it for this tab and is not saved. A second account signed in on this browser stays in the account list.
 
 ## 26 October 2026

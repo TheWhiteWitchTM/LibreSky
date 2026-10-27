@@ -3464,8 +3464,11 @@ async function findLocalAi({ replaceBase = false, silent = false } = {}) {
 
 function refreshAiSettingsView() {
   const page = parseHash()[0];
+  const tune = $('tune');
+  const tuning = Boolean(tune?.open && tune.dataset.kind === 'ai');
   if (page === 'settings') showSettings();
   else if (page === 'ai') showAi();
+  if (tuning) openTune('ai');
 }
 
 async function saveAiForm(event) {
@@ -3641,21 +3644,184 @@ function profileSettingsHtml() {
 
 let tuneFeed = 'home';
 
+function onPanelClick(event) {
+  const chatChoice = event.target.closest('[data-chat-allow]')?.dataset.chatAllow;
+  if (chatChoice) {
+    chooseChatAllow(chatChoice);
+    return true;
+  }
+  const modelPick = event.target.closest('[data-ai-model]');
+  if (modelPick?.dataset.aiModel) {
+    event.preventDefault();
+    try {
+      saveLocalAi({
+        provider: 'local',
+        model: modelPick.dataset.aiModel,
+        base: modelPick.dataset.aiBase || '',
+        api: modelPick.dataset.aiApi || '',
+        runtime: modelPick.dataset.aiRuntime || '',
+      });
+      setAiSource('local');
+      toast(`${modelPick.dataset.aiRuntime || 'Local AI'} · ${modelPick.dataset.aiModel}`);
+      refreshAiSettingsView();
+    } catch (error) {
+      toast(error.message || 'Could not use that model.');
+    }
+    return true;
+  }
+  const remoteUse = event.target.closest('[data-ai-use]')?.dataset.aiUse;
+  if (remoteUse) {
+    event.preventDefault();
+    if (setActiveRemote(remoteUse)) setAiSource('account');
+    refreshAiSettingsView();
+    return true;
+  }
+  const remoteDrop = event.target.closest('[data-ai-drop]')?.dataset.aiDrop;
+  if (remoteDrop) {
+    event.preventDefault();
+    removeRemoteAi(remoteDrop);
+    if (!loadAi() && aiSource() === 'account') setAiSource('free');
+    toast('Removed that remote AI');
+    refreshAiSettingsView();
+    return true;
+  }
+  const pick = event.target.closest('[data-ai-pick]')?.dataset.aiPick;
+  if (pick === 'free' || pick === 'local' || pick === 'remote') {
+    event.preventDefault();
+    if (pick === 'remote') {
+      const id = event.target.closest('[data-ai-pick]')?.dataset.aiId || '';
+      if (id && setActiveRemote(id)) setAiSource('account');
+    } else if (pick === 'local') {
+      setAiSource('local');
+      const hasModel = Boolean(loadLocalAi()?.model) || localHits.some((hit) => hit?.models?.length);
+      if (!hasModel && localScanState === 'done') {
+        toast('No local model yet. Add one here.');
+        openAiSettings();
+        return true;
+      }
+    } else setAiSource(pick);
+    refreshAiSettingsView();
+    return true;
+  }
+  const callChoice = event.target.closest('[data-call-allow]')?.dataset.callAllow;
+  if (callChoice) {
+    chooseCallAllow(callChoice);
+    return true;
+  }
+  const noteWho = event.target.closest('[data-note-who]');
+  if (noteWho?.dataset.noteWho && noteWho.dataset.include) {
+    event.preventDefault();
+    setNoteInclude(noteWho.dataset.noteWho, noteWho.dataset.include);
+    return true;
+  }
+  const threadSort = event.target.closest('[data-thread-sort]')?.dataset.threadSort;
+  if (threadSort) {
+    chooseThreadSort(threadSort);
+    return true;
+  }
+  const sort = event.target.closest('[data-sort]')?.dataset.sort;
+  if (sort === 'latest' || sort === 'top') {
+    chooseSearchSort(sort);
+    return true;
+  }
+  return false;
+}
+
+function messagesPageHtml() {
+  const controls = signedIn()
+    ? `<div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div>`
+    : '<p class="dim">Sign in to choose who can message you.</p>';
+  return `<p class="dim">Page scoped. Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats. This is your Bluesky chat setting, so the official app uses it too.</p>${controls}`;
+}
+
+function callsPageHtml() {
+  const controls = signedIn()
+    ? `<div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>`
+    : '<p class="dim">Sign in to choose who can call you.</p>';
+  return `<p class="dim">Page scoped. Everyone lets other people send a call request. People you follow can call straight through. No one blocks new calls. This choice is saved with your LibreSky settings.</p>${controls}`;
+}
+
+function notificationPageHtml() {
+  return `<p class="dim">Page scoped. These settings are stored with Bluesky, so the official app uses them too. On this page is what shows in Notifications. Phone alert is the official app’s alert. People you follow is applied by Bluesky.</p>
+    ${followNotifyPanel()}
+    <div id="note-prefs"><p class="dim">Loading notification settings…</p></div>`;
+}
+
+function accountPageHtml() {
+  const edit = signedIn()
+    ? '<button type="button" class="primary small" data-act="edit-profile">Edit profile</button>'
+    : '<button type="button" class="primary small" data-act="signin">Sign in</button>';
+  return `<p class="dim">Page scoped. Your name, bio, avatar, banner, and pinned post are stored on the Bluesky profile record. Other Bluesky apps read that same record.</p>${edit}`;
+}
+
+function listPageHtml(uri) {
+  const open = parseHash()[0] === 'list' || !uri
+    ? ''
+    : `<p><a class="text-link" href="#/list/${encodeURIComponent(uri)}">Open this list</a></p>`;
+  return `<p class="dim">Page scoped. This list is on your Bluesky account.</p>${open}`;
+}
+
 function openTune(kind, feedId) {
   const dialog = $('tune');
   const title = $('tune-title');
   const body = $('tune-body');
   if (!dialog || !body || !title) return;
+  dialog.dataset.kind = kind || 'home';
   if (kind === 'search') {
-    title.textContent = 'Search settings';
+    title.textContent = 'Search';
     body.innerHTML = searchSettingsHtml({ heading: false });
   } else if (kind === 'thread') {
-    title.textContent = 'Threads';
+    title.textContent = 'Thread';
     body.innerHTML = threadSettingsHtml({ heading: false });
   } else if (kind === 'feed') {
     tuneFeed = feedId || 'home';
-    title.textContent = 'Feed settings';
+    title.textContent = 'Feed';
     body.innerHTML = feedSettingsBody(tuneFeed, { heading: false, title: 'Feed' });
+  } else if (kind === 'notifications') {
+    title.textContent = 'Notifications';
+    body.innerHTML = notificationPageHtml();
+    loadNotificationPrefs();
+  } else if (kind === 'messages') {
+    title.textContent = 'Messages';
+    body.innerHTML = messagesPageHtml();
+    loadChatAllow();
+  } else if (kind === 'calls') {
+    title.textContent = 'Calls';
+    body.innerHTML = callsPageHtml();
+  } else if (kind === 'ai') {
+    title.textContent = 'AI Assist';
+    body.innerHTML = aiSettingsHtml();
+    if ($('ai-local-form')) findLocalAi({ silent: true });
+  } else if (kind === 'account') {
+    title.textContent = 'Account';
+    body.innerHTML = accountPageHtml();
+  } else if (kind === 'profile') {
+    title.textContent = 'Profile';
+    body.innerHTML = '<p class="dim">Page scoped. This profile belongs to someone else. Your name, bio, and picture are on your own profile.</p>';
+  } else if (kind === 'people') {
+    title.textContent = 'People';
+    body.innerHTML = '<p class="dim">Page scoped. This is the list of people on this profile.</p>';
+  } else if (kind === 'list') {
+    title.textContent = 'List';
+    body.innerHTML = listPageHtml(feedId || '');
+  } else if (kind === 'settings') {
+    title.textContent = 'Settings';
+    body.innerHTML = '<p class="dim">Page scoped. Pick a section on this page. Chat, Calls, Notifications, AI Assist, Home, Search, a thread, and your profile keep their settings on that page.</p>';
+  } else if (kind === 'page') {
+    const names = {
+      bookmarks: 'Bookmarks',
+      feeds: 'Feeds',
+      lists: 'Lists',
+      packs: 'Starter packs',
+      downloads: 'Downloads',
+      support: 'Support',
+      ukraine: 'Ukraine',
+      likes: 'Likes',
+      reposts: 'Reposts',
+    };
+    const name = names[parseHash()[0]] || $('title')?.textContent || 'This page';
+    title.textContent = name;
+    body.innerHTML = `<p class="dim">Page scoped. ${escapeHtml(name)} has no extra settings.</p>`;
   } else {
     tuneFeed = 'home';
     title.textContent = 'Home';
@@ -4926,7 +5092,7 @@ function toggleAiModels() {
 
 function openAiSettings() {
   closeAiModels();
-  openSettings('ai');
+  openTune('ai');
 }
 
 async function scanLocalModels() {
@@ -4998,7 +5164,7 @@ async function askOnPage(text) {
   aiPendingNote = 'Page';
   const saved = activeAi();
   if (!aiReady(saved)) {
-    toast('AI Assist could not start. Add a key or a local model in Settings.');
+    toast('AI Assist could not start. Add a key or a local model.');
     openAiSettings();
     return;
   }
@@ -7828,15 +7994,28 @@ function openHelp() {
   if (dialog && !dialog.open) dialog.showModal();
 }
 
+function profileIsSelf(actor) {
+  const id = String(actor || '').replace(/^@/, '').toLowerCase();
+  if (!id) return false;
+  const did = String(myDid() || '').toLowerCase();
+  if (did && id === did) return true;
+  const handle = String(me.profile?.handle || '').toLowerCase();
+  return Boolean(handle && id === handle);
+}
+
 function openPageConfig() {
   const [a, b, c] = parseHash();
   const active = homeActive();
+  if (a === 'settings') {
+    openTune('settings');
+    return;
+  }
   if (active && (active.kind === 'following' || active.kind === 'discover')) {
     openTune('home');
     return;
   }
   if (active?.kind === 'lane' && active.type === 'list') {
-    if (active.value) location.hash = `#/list/${encodeURIComponent(active.value)}`;
+    openTune('list', active.value);
     return;
   }
   if (active?.kind === 'lane' && active.type === 'feed') {
@@ -7847,6 +8026,10 @@ function openPageConfig() {
     openTune('feed', b);
     return;
   }
+  if (a === 'list' && b) {
+    openTune('list', b);
+    return;
+  }
   if (a === 'search') {
     openTune('search');
     return;
@@ -7855,15 +8038,35 @@ function openPageConfig() {
     openTune('thread');
     return;
   }
+  if (a === 'profile' && (c === 'followers' || c === 'following')) {
+    openTune('people');
+    return;
+  }
+  if (a === 'profile' && profileIsSelf(b)) {
+    openTune('account');
+    return;
+  }
+  if (a === 'profile') {
+    openTune('profile');
+    return;
+  }
+  if (a === 'notifications') {
+    openTune('notifications');
+    return;
+  }
+  if (a === 'messages') {
+    openTune('messages');
+    return;
+  }
+  if (a === 'calls') {
+    openTune('calls');
+    return;
+  }
   if (a === 'ai') {
     openAiSettings();
     return;
   }
-  if (a === 'notifications') {
-    openSettings('notifications');
-    return;
-  }
-  openSettings('you');
+  openTune('page');
 }
 
 function openLegal(which) {
@@ -10622,7 +10825,7 @@ function bind() {
       if (!text || input.disabled) return;
       if (!aiReady(activeAi())) {
         aiComposerText = input.value;
-        toast('AI Assist could not start. Add a key or a local model in Settings.');
+        toast('AI Assist could not start. Add a key or a local model.');
         openAiSettings();
         return;
       }
@@ -10634,7 +10837,7 @@ function bind() {
       const text = event.target.querySelector('input')?.value.trim() || '';
       if (!text) return;
       if (!aiReady(activeAi())) {
-        toast('AI Assist could not start. Add a key or a local model in Settings.');
+        toast('AI Assist could not start. Add a key or a local model.');
         openAiSettings();
         return;
       }
@@ -10723,12 +10926,15 @@ function bind() {
   document.addEventListener('change', (event) => {
     if (event.target?.closest?.('#tune') && event.target.dataset?.pref) onPrefToggle(event.target.dataset.pref, event.target.checked);
     if (event.target?.id === 'voice-pick' && event.target.closest('#tune')) saveVoicePrefs({ voiceURI: event.target.value || '' });
+    if (event.target?.id === 'ai-provider' && event.target.closest('#tune')) syncAiFields();
   });
-  $('tune')?.addEventListener('click', (event) => {
-    const sort = event.target.closest('[data-sort]')?.dataset.sort;
-    if (sort === 'latest' || sort === 'top') chooseSearchSort(sort);
-    const threadSort = event.target.closest('[data-thread-sort]')?.dataset.threadSort;
-    if (threadSort) chooseThreadSort(threadSort);
+  $('tune')?.addEventListener('click', (event) => { onPanelClick(event); });
+  $('tune')?.addEventListener('input', (event) => {
+    if (event.target.id === 'ai-model') event.target.dataset.auto = '0';
+  });
+  $('tune')?.addEventListener('submit', (event) => {
+    if (event.target.id === 'ai-form') saveAiForm(event);
+    if (event.target.id === 'ai-local-form') saveLocalForm(event);
   });
   $('tune-close')?.addEventListener('click', () => $('tune')?.close());
   $('view').addEventListener('keydown', (event) => {
@@ -10858,80 +11064,10 @@ function bind() {
       insertEmoji(emoji.dataset.emoji || '');
       return;
     }
-    const chatChoice = event.target.closest('[data-chat-allow]')?.dataset.chatAllow;
-    if (chatChoice) {
-      chooseChatAllow(chatChoice);
-      return;
-    }
-    const modelPick = event.target.closest('[data-ai-model]');
-    if (modelPick?.dataset.aiModel) {
-      event.preventDefault();
-      try {
-        saveLocalAi({
-          provider: 'local',
-          model: modelPick.dataset.aiModel,
-          base: modelPick.dataset.aiBase || '',
-          api: modelPick.dataset.aiApi || '',
-          runtime: modelPick.dataset.aiRuntime || '',
-        });
-        setAiSource('local');
-        toast(`${modelPick.dataset.aiRuntime || 'Local AI'} · ${modelPick.dataset.aiModel}`);
-        refreshAiSettingsView();
-      } catch (error) {
-        toast(error.message || 'Could not use that model.');
-      }
-      return;
-    }
-    const remoteUse = event.target.closest('[data-ai-use]')?.dataset.aiUse;
-    if (remoteUse) {
-      event.preventDefault();
-      if (setActiveRemote(remoteUse)) setAiSource('account');
-      refreshAiSettingsView();
-      return;
-    }
-    const remoteDrop = event.target.closest('[data-ai-drop]')?.dataset.aiDrop;
-    if (remoteDrop) {
-      event.preventDefault();
-      removeRemoteAi(remoteDrop);
-      if (!loadAi() && aiSource() === 'account') setAiSource('free');
-      toast('Removed that remote AI');
-      refreshAiSettingsView();
-      return;
-    }
-    const pick = event.target.closest('[data-ai-pick]')?.dataset.aiPick;
-    if (pick === 'free' || pick === 'local' || pick === 'remote') {
-      event.preventDefault();
-      if (pick === 'remote') {
-        const id = event.target.closest('[data-ai-pick]')?.dataset.aiId || '';
-        if (id && setActiveRemote(id)) setAiSource('account');
-      } else if (pick === 'local') {
-        setAiSource('local');
-        const hasModel = Boolean(loadLocalAi()?.model) || localHits.some((hit) => hit?.models?.length);
-        if (!hasModel && localScanState === 'done') {
-          toast('No local model yet. Set one in Settings.');
-          openAiSettings();
-          return;
-        }
-      } else {
-        setAiSource(pick);
-      }
-      refreshAiSettingsView();
-      return;
-    }
-    const callChoice = event.target.closest('[data-call-allow]')?.dataset.callAllow;
-    if (callChoice) {
-      chooseCallAllow(callChoice);
-      return;
-    }
+    if (onPanelClick(event)) return;
     const settingsTabId = event.target.closest('[data-settings-tab]')?.dataset.settingsTab;
     if (settingsTabId) {
       selectSettingsTab(settingsTabId);
-      return;
-    }
-    const noteWho = event.target.closest('[data-note-who]');
-    if (noteWho?.dataset.noteWho && noteWho.dataset.include) {
-      event.preventDefault();
-      setNoteInclude(noteWho.dataset.noteWho, noteWho.dataset.include);
       return;
     }
     const cleanupButton = event.target.closest('[data-cleanup]');
@@ -10967,15 +11103,11 @@ function bind() {
       soundButton.textContent = next ? 'On' : 'Off';
       if (next) playSound(key);
     }
-    const threadSort = event.target.closest('[data-thread-sort]')?.dataset.threadSort;
-    if (threadSort) chooseThreadSort(threadSort);
     const word = event.target.dataset?.unmute;
     if (word) {
       syncMutedWords(mutedWords().filter((item) => item !== word));
       showSettings();
     }
-    const sort = event.target.closest('[data-sort]')?.dataset.sort;
-    if (sort === 'latest' || sort === 'top') chooseSearchSort(sort);
     const explore = event.target.closest('[data-explore]')?.dataset.explore;
     if (explore && EXPLORE_TABS.some((tab) => tab.id === explore)) {
       event.preventDefault();
@@ -11010,7 +11142,11 @@ function bind() {
     hideSuggest();
   }, true);
   bindTips();
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', () => {
+    const tune = $('tune');
+    if (tune?.open) tune.close();
+    route();
+  });
   document.querySelectorAll('[data-nav]').forEach((link) => {
     link.addEventListener('click', () => {
       const href = link.getAttribute('href');
