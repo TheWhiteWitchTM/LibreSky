@@ -1798,10 +1798,25 @@ function setNoteInclude(key, include) {
   });
 }
 
+function dedupeNotes(notes) {
+  const seen = new Set();
+  const rows = [];
+  (notes || []).forEach((note) => {
+    const key = note?.uri ? `${note.uri}:${note.reason || ''}` : '';
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    rows.push(note);
+  });
+  rows.sort((a, b) => String(b?.indexedAt || '').localeCompare(String(a?.indexedAt || '')));
+  return rows;
+}
+
 async function showNotifications(filter) {
   const token = ++generation;
   const current = NOTE_FILTERS.some(([id]) => id === filter) ? filter : '';
   const reasons = NOTE_FILTERS.find(([id]) => id === current)?.[2] || null;
+  const includeReposts = current === '';
+  const repostReasons = NOTE_FILTERS.find(([id]) => id === 'reposts')?.[2] || null;
   setChrome({
     title: 'Notifications',
     nav: 'notifications',
@@ -1817,8 +1832,9 @@ async function showNotifications(filter) {
   }
   showSkeletons();
   try {
-    const [data] = await Promise.all([
+    const [data, repostData] = await Promise.all([
       api.getNotifications(null, null, reasons),
+      includeReposts ? api.getNotifications(null, null, repostReasons).catch(() => null) : null,
       ensureNotePrefs(),
     ]);
     if (token !== generation) return;
@@ -1834,7 +1850,8 @@ async function showNotifications(filter) {
       }
     };
     let all = data.notifications || [];
-    if (current) all = all.filter(notificationListed);
+    if (includeReposts) all = dedupeNotes(all.concat(repostData?.notifications || []));
+    else if (current) all = all.filter(notificationListed);
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
@@ -1844,18 +1861,40 @@ async function showNotifications(filter) {
       $('view').innerHTML = tools + (rows || blank);
     };
     paint();
-    const more = async (cursor) => {
-      const page = await api.getNotifications(cursor, null, reasons);
+    let mainCursor = data.cursor || '';
+    let repostCursor = includeReposts ? (repostData?.cursor || '') : '';
+    const more = async () => {
+      const jobs = [];
+      if (mainCursor) jobs.push(api.getNotifications(mainCursor, null, reasons).then((page) => ({ kind: 'main', page })));
+      if (includeReposts && repostCursor) {
+        jobs.push(api.getNotifications(repostCursor, null, repostReasons).then((page) => ({ kind: 'repost', page })).catch(() => ({ kind: 'repost', page: null })));
+      }
+      if (!jobs.length) return;
+      const parts = await Promise.all(jobs);
       if (token !== generation) return;
-      let extra = page.notifications || [];
-      if (current) extra = extra.filter(notificationListed);
+      let extra = [];
+      parts.forEach(({ kind, page }) => {
+        if (kind === 'main') {
+          mainCursor = page?.cursor || '';
+          let rows = page?.notifications || [];
+          if (current) rows = rows.filter(notificationListed);
+          extra = extra.concat(rows);
+          return;
+        }
+        if (!page) {
+          repostCursor = '';
+          return;
+        }
+        repostCursor = page.cursor || '';
+        extra = extra.concat(page.notifications || []);
+      });
       await learn(extra);
       if (token !== generation) return;
-      all = all.concat(extra);
+      all = dedupeNotes(all.concat(extra));
       paint();
-      pagerFor(page.cursor, more);
+      pagerFor(mainCursor || repostCursor, more);
     };
-    pagerFor(data.cursor, more);
+    pagerFor(mainCursor || repostCursor, more);
     api.updateSeen().then(refreshBadge).catch(() => {});
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load notifications', error.message);
