@@ -1833,7 +1833,8 @@ async function showNotifications(filter) {
         } catch { /* snippets and media previews are optional */ }
       }
     };
-    let all = (data.notifications || []).filter(notificationListed);
+    let all = data.notifications || [];
+    if (current) all = all.filter(notificationListed);
     await learn(all);
     if (token !== generation) return;
     const paint = () => {
@@ -1846,7 +1847,8 @@ async function showNotifications(filter) {
     const more = async (cursor) => {
       const page = await api.getNotifications(cursor, null, reasons);
       if (token !== generation) return;
-      const extra = (page.notifications || []).filter(notificationListed);
+      let extra = page.notifications || [];
+      if (current) extra = extra.filter(notificationListed);
       await learn(extra);
       if (token !== generation) return;
       all = all.concat(extra);
