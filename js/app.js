@@ -1845,8 +1845,21 @@ async function showNotifications(filter) {
         const uris = want.slice(index, index + 25);
         try {
           const fetched = await api.getPosts(uris);
-          (fetched.posts || []).forEach((post) => subjects.set(post.uri, post));
-        } catch { /* snippets and media previews are optional */ }
+          (fetched.posts || []).forEach((post) => { if (post?.uri) subjects.set(post.uri, post); });
+        } catch {
+          for (const uri of uris) {
+            try {
+              const one = await api.getPosts([uri]);
+              (one.posts || []).forEach((post) => { if (post?.uri) subjects.set(post.uri, post); });
+              if (subjects.has(uri)) continue;
+            } catch { /* try the thread for this one post */ }
+            try {
+              const thread = await api.getPostThread(uri);
+              const post = thread?.thread?.post;
+              if (post?.uri) subjects.set(post.uri, post);
+            } catch { /* the note still links to the post */ }
+          }
+        }
       }
     };
     let all = data.notifications || [];
@@ -3219,8 +3232,8 @@ function openProfileMenu(anchor) {
   }
   if (!mine && signedIn() && !blocking) {
     items.push({ id: 'message-profile', label: 'Message' });
-    items.push({ id: 'profile-voice', label: 'Voice call' });
-    items.push({ id: 'profile-video', label: 'Video call' });
+    items.push({ id: 'profile-voice', label: 'Voice call', icon: 'phone' });
+    items.push({ id: 'profile-video', label: 'Video call', icon: 'video' });
     items.push({ id: 'profile-mute', label: profile.viewer?.muted ? 'Unmute' : 'Mute' });
   }
   if (!mine && signedIn()) {
@@ -6364,9 +6377,13 @@ function linkState(dialog, value) {
   };
 }
 
-// Last-line card URLs are left out. A link that has to stay in the post counts as its short form.
+// Last-line card URLs are left out only once the card is the thing that will be posted.
+// Until then the link stays in the count, same as the text that Post would send.
 function composerBody(dialog, value) {
-  if (!omitTrailingPostLink(value, linkState(dialog, value))) return value;
+  const state = linkState(dialog, value);
+  if (!omitTrailingPostLink(value, state)) return value;
+  const cardDrops = state.card === 'quote' || (state.card === 'external' && !state.images && !state.video && !state.gif);
+  if (!cardDrops) return value;
   return withoutTrailingUrl(value);
 }
 
@@ -6376,7 +6393,9 @@ function updateCount() {
   const value = area?.value || '';
   syncComposerLink(dialog, value);
   const body = composerBody(dialog, value);
-  const left = 300 - graphemeLength(applyShortLinks(body).text);
+  const used = graphemeLength(applyShortLinks(body).text);
+  const left = 300 - used;
+  const over = used > 300;
   const files = dialog?._files || [];
   const gif = dialog?._gif;
   const video = dialog?._video;
@@ -6384,17 +6403,24 @@ function updateCount() {
   const quoted = Boolean(dialog?.dataset.quote);
   const holdingLink = body !== value && Boolean(trailingUrl(value));
   const count = $('compose-count');
-  const used = Math.min(300, Math.max(0, 300 - left));
+  const shown = over ? used : left;
   if (count) {
-    count.style.setProperty('--p', String((used / 300) * 100));
+    count.style.setProperty('--p', String(over ? 100 : (Math.min(used, 300) / 300) * 100));
     const figure = count.querySelector('b');
-    if (figure) figure.textContent = String(left);
-    else count.textContent = String(left);
-    count.title = left < 0 ? 'Over the 300 character limit' : `${left} characters left`;
+    if (figure) figure.textContent = String(shown);
+    else count.textContent = String(shown);
+    count.title = over ? `${used} characters. The limit is 300.` : `${left} characters left`;
   }
-  count?.classList.toggle('near', left >= 0 && left <= 50);
-  count?.classList.toggle('over', left < 0);
-  $('compose-send').disabled = left < 0 || (left === 300 && !files.length && !holdingLink && !gif && !video && !attached && !quoted);
+  count?.classList.toggle('near', !over && left <= 50);
+  count?.classList.toggle('over', over);
+  const send = $('compose-send');
+  if (send) {
+    const empty = used === 0 && !files.length && !holdingLink && !gif && !video && !attached && !quoted;
+    send.disabled = over || empty;
+    send.classList.toggle('over', over);
+    if (over) send.setAttribute('aria-invalid', 'true');
+    else send.removeAttribute('aria-invalid');
+  }
   paintFieldHighlight(area, $('compose-highlight'));
   scheduleSuggest(area);
 }
@@ -7228,7 +7254,15 @@ function openMenu(anchor, items) {
   if (menu._anchor && menu._anchor !== anchor && menu._anchor.isConnected) menu._anchor.setAttribute('aria-expanded', 'false');
   menu._post = null;
   menu._anchor = anchor || null;
-  menu.innerHTML = items.map((item) => `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHtml(item.label)}</button>`).join('');
+  const seen = new Set();
+  menu.innerHTML = items.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  }).map((item) => {
+    const mark = item.icon ? icon(item.icon) : '';
+    return `<button type="button" class="${item.danger ? 'is-danger' : ''}" data-menu="${escapeHtml(item.id)}" ${item.disabled ? 'disabled' : ''}>${mark}${escapeHtml(item.label)}</button>`;
+  }).join('');
   showLayer(menu);
   if (anchor?.getBoundingClientRect) {
     placeMenu(menu, anchor);

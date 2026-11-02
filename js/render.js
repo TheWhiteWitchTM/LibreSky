@@ -428,11 +428,25 @@ const NOTE_VERB = {
   'starterpack-joined': 'joined via your starter pack',
 };
 
+function subjectUriOf(note) {
+  const uri = note?.reasonSubject || note?.record?.subject?.uri || '';
+  return typeof uri === 'string' ? uri : '';
+}
+
+function postHrefFromUri(uri) {
+  const parts = String(uri || '').replace(/^at:\/\//, '').split('/');
+  const did = parts[0] || '';
+  const rkey = parts[parts.length - 1] || '';
+  if (!did.startsWith('did:') || !rkey || rkey === did) return '';
+  return postHash({ uri, author: { did } });
+}
+
 function groupKey(note) {
   const reason = note?.reason || '';
   if (reason === 'follow' || reason === 'starterpack-joined') return reason;
   if (reason === 'like' || reason === 'repost' || reason === 'like-via-repost' || reason === 'repost-via-repost') {
-    return note.reasonSubject ? `${reason}:${note.reasonSubject}` : '';
+    const uri = subjectUriOf(note);
+    return uri ? `${reason}:${uri}` : '';
   }
   return '';
 }
@@ -583,7 +597,7 @@ export function notificationSubjects(notes) {
     const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
     const text = typeof note?.record?.text === 'string' && note.record.text.trim();
     if (spoken && (!text || note?.record?.embed)) push(note.uri);
-    push(note.reasonSubject);
+    push(subjectUriOf(note));
   });
   return uris;
 }
@@ -592,14 +606,15 @@ function notificationGroupHtml(group, subjects) {
   const first = group[0] || {};
   const reason = first.reason || '';
   const authors = group.map((note) => note.author || {});
-  const subject = subjects?.get?.(first.reasonSubject);
+  const subjectUri = subjectUriOf(first);
+  const subject = subjectUri ? subjects?.get?.(subjectUri) : undefined;
   const verb = NOTE_VERB[reason] || reason || 'interacted';
   const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
   const said = spoken ? spokenRecord(first, subjects) : null;
   const saidText = said?.text?.trim() || '';
   const subjectText = typeof subject?.record?.text === 'string' ? subject.record.text.trim() : '';
   const replyHref = spoken && first.uri ? postHash({ uri: first.uri, author: first.author }) : '';
-  const subjectHref = subject ? postHash(subject) : '';
+  const subjectHref = subject?.uri ? postHash(subject) : postHrefFromUri(subjectUri);
   const profileHref = first.author?.handle || first.author?.did ? profileHash(first.author) : '';
   const href = reason === 'follow' || reason === 'starterpack-joined' ? profileHref : (replyHref || subjectHref);
   const verbHtml = href ? `<a class="verb" href="${href}">${escapeHtml(verb)}</a>` : escapeHtml(verb);
@@ -766,7 +781,7 @@ export function assistantHtml(text, { id = '', kicker = 'Your account', actions 
 }
 
 function callButton(act, label, glyph, peer) {
-  return `<button type="button" class="call-btn" data-act="${act}" data-peer="${attr(peer || '')}" data-tip="${attr(label)}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label.replace(/ call$/, ''))}</span></button>`;
+  return `<button type="button" class="call-btn" data-act="${act}" data-peer="${attr(peer || '')}" aria-label="${attr(label)}">${icon(glyph)}<span>${escapeHtml(label)}</span></button>`;
 }
 
 function deletedAccount(actor) {

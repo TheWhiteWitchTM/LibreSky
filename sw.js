@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-10-27-chat-quiet';
+const CACHE = 'libresky-2026-11-02-fixes';
 
 const SHELL = [
   './',

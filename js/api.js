@@ -1262,11 +1262,63 @@ export function externalEmbed({ url, title, description, thumb }) {
 
 const VIDEO_SERVICE = 'https://video.bsky.app';
 
+async function readLoose(res) {
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { data = { message: text.slice(0, 240) }; }
+  }
+  return data ?? {};
+}
+
+async function videoPdsHost() {
+  const oauth = getOauth();
+  const password = getPassword();
+  let pds = !oauth && password?.pds ? password.pds : '';
+  if (!pds) {
+    const did = currentDid();
+    if (!did) throw new Error('Sign in with Bluesky to do that.');
+    pds = (await resolvePds(did)).pds;
+  }
+  const host = new URL(pds).host;
+  if (!host) throw new Error('This account cannot upload video.');
+  return host;
+}
+
+function asVideoBlob(blob) {
+  if (!blob || typeof blob !== 'object') return null;
+  let ref = blob.ref;
+  if (typeof ref === 'string' && ref) ref = { $link: ref };
+  const link = ref?.$link || blob.cid || '';
+  if (!link) return null;
+  const size = Number(blob.size);
+  return {
+    $type: 'blob',
+    ref: { $link: link },
+    mimeType: blob.mimeType || 'video/mp4',
+    ...(Number.isFinite(size) ? { size } : {}),
+  };
+}
+
+function jobBlob(data) {
+  const job = data?.jobStatus || data;
+  return asVideoBlob(job?.blob) || asVideoBlob(data?.blob);
+}
+
+function videoJobError(data, status) {
+  const job = data?.jobStatus || data || {};
+  const message = job.error || job.message || data?.message || data?.error || '';
+  if (message === 'already_exists') return 'The video service did not return the processed video.';
+  if (message) return String(message);
+  return status ? `Video processing failed (${status})` : 'Video processing failed.';
+}
+
 export async function uploadVideo(file, { signal, onProgress } = {}) {
   onProgress?.('Uploading video…');
   const exp = Math.floor(Date.now() / 1000) + 60 * 30;
+  const host = await videoPdsHost();
   const auth = await xrpc('com.atproto.server.getServiceAuth', {
-    params: { aud: 'did:web:video.bsky.app', lxm: 'app.bsky.video.uploadVideo', exp },
+    params: { aud: `did:web:${host}`, lxm: 'com.atproto.repo.uploadBlob', exp },
     auth: 'required',
     signal,
   });
@@ -1284,23 +1336,25 @@ export async function uploadVideo(file, { signal, onProgress } = {}) {
     body: file,
     signal,
   });
-  const started = await read(uploaded);
+  const started = await readLoose(uploaded);
+  const early = jobBlob(started);
+  if (early) return early;
+  if (!uploaded.ok) throw new Error(videoJobError(started, uploaded.status));
   const jobId = started.jobId || started.jobStatus?.jobId;
   if (!jobId) throw new Error('Video upload did not start.');
   onProgress?.('Processing video…');
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + 180000;
   while (Date.now() < deadline) {
     if (signal?.aborted) throw new Error('Video upload was cancelled.');
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const statusRes = await fetch(`${VIDEO_SERVICE}/xrpc/app.bsky.video.getJobStatus?jobId=${encodeURIComponent(jobId)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal,
-    });
-    const status = await read(statusRes);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const statusRes = await fetch(`${VIDEO_SERVICE}/xrpc/app.bsky.video.getJobStatus?jobId=${encodeURIComponent(jobId)}`, { signal });
+    const status = await readLoose(statusRes);
+    const blob = jobBlob(status);
+    if (blob) return blob;
     const job = status.jobStatus || status;
     const state = String(job.state || '');
-    if ((state === 'JOB_STATE_COMPLETED' || state === 'completed') && job.blob) return job.blob;
-    if (state === 'JOB_STATE_FAILED' || state === 'failed') throw new Error(job.error || 'Video processing failed.');
+    const failed = !statusRes.ok || state === 'JOB_STATE_FAILED' || state === 'failed';
+    if (failed) throw new Error(videoJobError(status, statusRes.status));
   }
   throw new Error('Video processing took too long. Try a shorter video.');
 }

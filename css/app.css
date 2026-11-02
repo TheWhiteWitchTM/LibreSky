@@ -1511,7 +1511,15 @@ a.person.request-entry { width: 100%; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.note-context { display: block; width: 100%; margin-top: 6px; }
+.note-context {
+  display: block;
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin-top: 6px;
+}
 .note-kicker {
   display: block;
   margin-bottom: 4px;
@@ -1520,12 +1528,20 @@ a.person.request-entry { width: 100%; }
   font-weight: 800;
 }
 .note-context .snip {
-  display: -webkit-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 0;
   padding: 8px 10px;
   border-radius: 10px;
   background: var(--search);
-  color: var(--text-2);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  max-height: 6.4em;
 }
 .note-line { display: block; }
 .note-line .time { font-size: calc(14px * var(--post-scale)); }
@@ -1684,6 +1700,14 @@ a.person.request-entry { width: 100%; }
 .primary:hover, .follow:hover { background: var(--blue-press); }
 .follow.on:hover { background: rgba(214, 31, 58, 0.1); color: var(--danger); border-color: transparent; }
 .primary:disabled { opacity: 0.5; cursor: default; }
+#compose-send.over,
+#compose-send.over:disabled {
+  opacity: 1;
+  background: var(--search);
+  color: var(--text-2);
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+  cursor: default;
+}
 #compose-send.warn:not(:disabled) { background: var(--orange); color: #fff; }
 #compose-send.warn:not(:disabled):hover { background: #ea580c; }
 #compose-highlight .typo, .field-highlight .typo {
@@ -1895,9 +1919,13 @@ a.person.request-entry { width: 100%; }
 .chat-thread {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   height: calc(100dvh - var(--top-h, 52px) - var(--head-h, 0px));
   min-height: 0;
   overflow: hidden;
+  contain: inline-size;
 }
 .chat-thread > .chat-head,
 .chat-thread > .request-banner,
@@ -1907,12 +1935,39 @@ a.person.request-entry { width: 100%; }
 .chat-thread > .reply-bar { flex: none; }
 .chat-thread > .messages {
   flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
 }
 .chat-thread > .reply-bar { position: relative; bottom: auto; }
+body:has(.chat-thread) { overflow: hidden; }
+.center:has(.chat-thread) {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--top-h, 52px));
+  max-height: calc(100dvh - var(--top-h, 52px));
+  min-height: 0;
+  overflow: hidden;
+}
+.center:has(.chat-thread) > #view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.center:has(.chat-thread) .chat-thread {
+  flex: 1 1 auto;
+  height: auto;
+  max-height: 100%;
+  min-height: 0;
+}
 .bubble {
+  min-width: 0;
   max-width: min(92%, 520px);
   padding: 10px 14px;
   border: 1px solid var(--incoming-border);
@@ -1920,8 +1975,17 @@ a.person.request-entry { width: 100%; }
   background: var(--incoming);
   color: var(--text);
   white-space: pre-wrap;
+  overflow: hidden;
   overflow-wrap: anywhere;
   box-shadow: 0 1px 2px rgba(15, 20, 25, 0.06);
+}
+.bubble img,
+.bubble video,
+.bubble .card,
+.bubble .quote,
+.bubble .gallery,
+.bubble .video {
+  max-width: 100%;
 }
 .bubble.fresh { animation: message-in 1.4s ease; }
 @keyframes message-in {
@@ -2009,6 +2073,7 @@ a.person.request-entry { width: 100%; }
   position: relative;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   background: var(--search);
   border-radius: 18px;
 }
@@ -2724,7 +2789,7 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 .account-switch.on { background: color-mix(in srgb, var(--blue) 14%, transparent); }
 .card.gif-card { display: block; overflow: hidden; background: #111; }
 .card.gif-card img { width: auto; max-width: 100%; max-height: 320px; margin: 0 auto; object-fit: contain; background: #111; }
-#compose-count.over b { color: var(--danger); }
+#compose-count.over b { color: var(--danger); font-size: 9px; }
 #compose-context { color: var(--text-2); font-size: 14px; }
 #compose-context p { margin: 4px 0; }
 #compose-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -2765,7 +2830,9 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
-.menu button { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 10px; font-weight: 600; color: inherit; font: inherit; }
+.menu button { display: flex; align-items: center; gap: 8px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 10px; font-weight: 600; color: inherit; font: inherit; }
+.menu button .ico { width: 18px; height: 18px; flex: none; }
+.menu button[data-menu="profile-video"] .ico { color: var(--video); }
 .menu button:hover { background: var(--hover); }
 .menu button.is-danger { color: var(--danger); }
 .menu button.is-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
@@ -3727,7 +3794,10 @@ html[data-reader="on"] .post .sr-name {
   body.ringing { padding-bottom: calc(220px + env(safe-area-inset-bottom)); }
   .reply-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
   .ai-chat { height: calc(100dvh - var(--top-h, 52px) - 64px - env(safe-area-inset-bottom)); }
-  .chat-thread { height: calc(100dvh - var(--top-h, 52px) - var(--head-h, 0px) - 64px - env(safe-area-inset-bottom)); }
+  .center:has(.chat-thread) {
+    height: calc(100dvh - var(--top-h, 52px) - 64px - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - var(--top-h, 52px) - 64px - env(safe-area-inset-bottom));
+  }
   body:has(#chat-form) .fab,
   body:has(.ai-chat) .fab { display: none; }
   body:has(.ai-chat),
