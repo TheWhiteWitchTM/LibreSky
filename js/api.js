@@ -453,8 +453,21 @@ export function getPostThread(uri, signal) {
   return xrpc('app.bsky.feed.getPostThread', { params: { uri, depth: 6, parentHeight: 20 }, signal });
 }
 
-export function getPosts(uris) {
-  return xrpc('app.bsky.feed.getPosts', { params: { uris } });
+export async function getPosts(uris) {
+  const list = [...new Set((uris || []).map((uri) => String(uri || '')).filter(Boolean))];
+  if (!list.length) return { posts: [] };
+  if (list.length <= 25) return xrpc('app.bsky.feed.getPosts', { params: { uris: list } });
+  const posts = [];
+  const seen = new Set();
+  for (let index = 0; index < list.length; index += 25) {
+    const data = await xrpc('app.bsky.feed.getPosts', { params: { uris: list.slice(index, index + 25) } });
+    (data?.posts || []).forEach((post) => {
+      if (!post?.uri || seen.has(post.uri)) return;
+      seen.add(post.uri);
+      posts.push(post);
+    });
+  }
+  return { posts };
 }
 
 export function getProfile(actor, signal) {

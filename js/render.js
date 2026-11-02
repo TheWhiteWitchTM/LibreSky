@@ -267,11 +267,19 @@ function video(embed) {
 function embedHtml(embed) {
   if (!embed) return '';
   const type = embed.$type || '';
-  if (type.endsWith('images#view')) return gallery(embed.images);
-  if (type.endsWith('external#view')) return linkCard(embed.external);
-  if (type.endsWith('record#view')) return quote(embed);
-  if (type.endsWith('recordWithMedia#view')) return `${embedHtml(embed.media)}${quote(embed.record)}`;
-  if (type.endsWith('video#view')) return video(embed);
+  if (type.includes('recordWithMedia')) return `${embedHtml(embed.media)}${quote(embed.record)}`;
+  if (type.includes('images') || (!type && embed.images)) return gallery(embed.images);
+  if (type.includes('gallery') || (!type && embed.items)) {
+    return gallery((embed.items || []).map((item) => ({
+      thumb: item.thumbnail || item.thumb,
+      fullsize: item.fullsize || item.thumbnail || item.thumb,
+      alt: item.alt || '',
+      aspectRatio: item.aspectRatio,
+    })));
+  }
+  if (type.includes('external')) return linkCard(embed.external);
+  if (type.includes('video')) return video(embed);
+  if (type.includes('record')) return quote(embed);
   return '';
 }
 
@@ -428,9 +436,38 @@ const NOTE_VERB = {
   'starterpack-joined': 'joined via your starter pack',
 };
 
+function atUri(value) {
+  if (typeof value === 'string' && value.startsWith('at://')) return value;
+  if (value && typeof value === 'object') {
+    if (typeof value.uri === 'string' && value.uri.startsWith('at://')) return value.uri;
+  }
+  return '';
+}
+
 function subjectUriOf(note) {
-  const uri = note?.reasonSubject || note?.record?.subject?.uri || '';
-  return typeof uri === 'string' ? uri : '';
+  return atUri(note?.reasonSubject)
+    || atUri(note?.record?.subject)
+    || atUri(note?.record?.embed?.record)
+    || atUri(note?.record?.reply?.parent)
+    || atUri(note?.record?.reply?.root);
+}
+
+function didFromUri(uri) {
+  const match = String(uri || '').match(/^at:\/\/(did:[^/]+)/);
+  return match ? match[1] : '';
+}
+
+function blobCid(blob) {
+  if (!blob || typeof blob !== 'object') return '';
+  if (typeof blob.ref === 'string' && blob.ref) return blob.ref;
+  return blob.ref?.$link || blob.cid || '';
+}
+
+function blobCdn(did, blob) {
+  const cid = blobCid(blob);
+  const actor = String(did || '').trim();
+  if (!cid || !actor.startsWith('did:')) return '';
+  return `https://cdn.bsky.app/img/feed_thumbnail/plain/${actor}/${cid}@jpeg`;
 }
 
 function postHrefFromUri(uri) {
@@ -493,7 +530,8 @@ function noteGlyph(reason) {
 }
 
 export function notificationHtml(note, subject) {
-  return notificationGroupHtml([note], subject ? new Map([[note.reasonSubject, subject]]) : new Map());
+  const uri = subjectUriOf(note);
+  return notificationGroupHtml([note], subject && uri ? new Map([[uri, subject]]) : new Map());
 }
 
 function textRecord(record) {
@@ -513,58 +551,70 @@ function pushShot(found, shot) {
   if (found.shots.length < 4) found.shots.push(shot);
 }
 
-function collectMedia(embed, found, depth) {
+function mediaUrl(value, did, blob) {
+  return safeUrl(typeof value === 'string' ? value : '') || blobCdn(did, blob || (value && typeof value === 'object' ? value : null));
+}
+
+function collectMedia(embed, found, depth, did) {
   if (!embed || depth > 3 || found.shots.length || found.link) return;
   const type = String(embed.$type || '');
-  if (type.endsWith('images#view')) {
-    (embed.images || []).forEach((image) => {
-      const thumb = safeUrl(image?.thumb || image?.fullsize || '');
+  const images = embed.images || [];
+  const items = embed.items || [];
+  if (type.includes('images') || (!type && images.length)) {
+    images.forEach((image) => {
+      const thumb = mediaUrl(image?.thumb || image?.fullsize, did, image?.image);
       if (thumb) pushShot(found, { thumb, alt: image.alt || '', kind: 'image' });
     });
     return;
   }
-  if (type.endsWith('gallery#view')) {
-    (embed.items || []).forEach((item) => {
-      const thumb = safeUrl(item?.thumbnail || item?.thumb || item?.fullsize || '');
+  if (type.includes('gallery') || (!type && items.length)) {
+    items.forEach((item) => {
+      const thumb = mediaUrl(item?.thumbnail || item?.thumb || item?.fullsize, did, item?.image || item?.blob);
       if (thumb) pushShot(found, { thumb, alt: item?.alt || '', kind: 'image' });
     });
     return;
   }
-  if (type.endsWith('video#view')) {
-    pushShot(found, { thumb: safeUrl(embed.thumbnail || ''), alt: embed.alt || 'Video', kind: 'video' });
+  if (type.includes('video')) {
+    const thumb = mediaUrl(embed.thumbnail, did, null);
+    if (thumb) pushShot(found, { thumb, alt: embed.alt || 'Video', kind: 'video' });
     return;
   }
-  if (type.endsWith('external#view')) {
+  if (type.includes('external')) {
     const external = embed.external || {};
     const href = safeUrl(external.uri || '');
     if (!href) return;
+    const thumb = mediaUrl(external.thumb, did, external.thumb);
     if (gifHost(href)) {
-      const thumb = safeUrl(external.thumb || '') || (/\.gif$/i.test(href) ? href : '');
-      pushShot(found, { thumb, alt: external.title || 'GIF', kind: 'gif' });
+      pushShot(found, { thumb: thumb || (/\.gif$/i.test(href) ? href : ''), alt: external.title || 'GIF', kind: 'gif' });
       return;
     }
     found.link = {
       href,
-      thumb: safeUrl(external.thumb || ''),
+      thumb,
       title: String(external.title || href),
       host: hostOf(href),
     };
     return;
   }
-  if (type.endsWith('recordWithMedia#view')) {
-    collectMedia(embed.media, found, depth + 1);
-    if (!found.shots.length && !found.link) collectMedia(embed.record, found, depth + 1);
+  if (type.includes('recordWithMedia')) {
+    collectMedia(embed.media, found, depth + 1, did);
+    if (!found.shots.length && !found.link) collectMedia(embed.record, found, depth + 1, did);
     return;
   }
-  if (type.endsWith('record#view') || type.endsWith('viewRecord')) {
+  if (type.includes('record') || type.endsWith('viewRecord')) {
     const record = embed.record || embed;
-    (record.embeds || []).forEach((child) => collectMedia(child, found, depth + 1));
+    const childDid = record.author?.did || didFromUri(record.uri) || did;
+    (record.embeds || []).forEach((child) => collectMedia(child, found, depth + 1, childDid));
+    if (!found.shots.length && !found.link && record.value?.embed) {
+      collectMedia(record.value.embed, found, depth + 1, childDid);
+    }
   }
 }
 
 function noteMediaHtml(post) {
   const found = { shots: [], link: null, total: 0 };
-  collectMedia(post?.embed, found, 0);
+  const did = post?.author?.did || didFromUri(post?.uri);
+  collectMedia(post?.embed || post?.record?.embed, found, 0, did);
   if (!found.shots.length && !found.link) return '';
   const shown = found.shots;
   const extra = found.total - shown.length;
@@ -625,7 +675,9 @@ function notificationGroupHtml(group, subjects) {
     ? `${kicker ? `<span class="note-kicker">${kicker}</span>` : ''}<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
     : '';
   const snippet = context ? `<span class="note-context">${context}</span>` : '';
-  const mediaPost = spoken ? subjects?.get?.(first.uri) : subject;
+  const mediaPost = spoken
+    ? (subjects?.get?.(first.uri) || (first.record?.embed ? { uri: first.uri, author: first.author, record: first.record, embed: first.record.embed } : null))
+    : subject;
   const media = noteMediaHtml(mediaPost);
   const unread = group.some((note) => !note.isRead);
   const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';

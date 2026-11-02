@@ -330,6 +330,72 @@ assert.equal(notificationSubjects([{
   reasonSubject: 'at://did:x/app.bsky.feed.post/1',
   record: { text: 'just words' },
 }]).includes('at://did:d/app.bsky.feed.post/plain'), false);
+const objectLike = notificationsHtml([{
+  reason: 'like',
+  author: { did: 'did:c', handle: 'c.bsky.social', displayName: 'Cara' },
+  reasonSubject: { uri: 'at://did:x/app.bsky.feed.post/new', cid: 'bafy' },
+  record: { subject: { uri: 'at://did:x/app.bsky.feed.post/new', cid: 'bafy' } },
+  indexedAt: '2026-11-02T00:00:00.000Z',
+  isRead: true,
+}], new Map([['at://did:x/app.bsky.feed.post/new', {
+  uri: 'at://did:x/app.bsky.feed.post/new',
+  author: { handle: 'me.bsky.social' },
+  record: { text: 'fresh post' },
+}]]));
+assert.match(objectLike, /fresh post/);
+assert.match(objectLike, /data-subject="at:\/\/did:x\/app\.bsky\.feed\.post\/new"/);
+assert.ok(notificationSubjects([{
+  reason: 'like',
+  reasonSubject: { uri: 'at://did:x/app.bsky.feed.post/new' },
+}]).includes('at://did:x/app.bsky.feed.post/new'));
+const nestedLike = notificationsHtml([{
+  reason: 'like',
+  author: { did: 'did:c', handle: 'c.bsky.social', displayName: 'Cara' },
+  record: { subject: { uri: 'at://did:x/app.bsky.feed.post/nested' } },
+  indexedAt: '2026-11-02T00:00:00.000Z',
+  isRead: true,
+}], new Map([['at://did:x/app.bsky.feed.post/nested', {
+  uri: 'at://did:x/app.bsky.feed.post/nested',
+  author: { handle: 'me.bsky.social' },
+  record: { text: 'from record' },
+}]]));
+assert.match(nestedLike, /from record/);
+const picOnly = notificationsHtml([{
+  reason: 'like',
+  author: { did: 'did:c', handle: 'c.bsky.social', displayName: 'Cara' },
+  reasonSubject: 'at://did:x/app.bsky.feed.post/pic-only',
+  indexedAt: '2026-11-02T00:00:00.000Z',
+  isRead: true,
+}], new Map([['at://did:x/app.bsky.feed.post/pic-only', {
+  uri: 'at://did:x/app.bsky.feed.post/pic-only',
+  author: { did: 'did:x', handle: 'me.bsky.social' },
+  record: { text: '' },
+  embed: {
+    $type: 'app.bsky.embed.images#view',
+    images: [{ thumb: 'https://cdn.example/only.jpg', fullsize: 'https://cdn.example/only-full.jpg', alt: 'Only a photo' }],
+  },
+}]]));
+assert.match(picOnly, /note-shot/);
+assert.match(picOnly, /Only a photo/);
+assert.doesNotMatch(picOnly, /class="snip"/);
+const rawAttach = notificationsHtml([{
+  reason: 'reply',
+  uri: 'at://did:d/app.bsky.feed.post/pic-reply',
+  author: { did: 'did:d', handle: 'd.bsky.social', displayName: 'Dee' },
+  reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+  record: {
+    text: '',
+    embed: {
+      $type: 'app.bsky.embed.images',
+      images: [{ alt: 'A photo', image: { ref: { $link: 'bafypic' }, mimeType: 'image/jpeg' } }],
+    },
+  },
+  indexedAt: '2026-11-02T00:00:00.000Z',
+  isRead: true,
+}], new Map());
+assert.match(rawAttach, /note-shot/);
+assert.match(rawAttach, /cdn\.bsky\.app\/img\/feed_thumbnail\/plain\/did:d\/bafypic@jpeg/);
+assert.match(rawAttach, /Sent an attachment/);
 
 const mine = messageHtml({ text: 'hello @jay.bsky.social', sender: { did: 'did:me' } }, 'did:me');
 assert.match(mine, /class="bubble mine"/);

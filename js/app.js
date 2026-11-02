@@ -1708,17 +1708,9 @@ function warmNotifications(force = false) {
       repostCursor: have?.repostCursor || '',
       at: Date.now(),
     });
-    const want = notificationSubjects(notes.slice(0, 16)).filter((uri) => !latest.subjects.has(uri));
+    const want = notificationSubjects(notes.slice(0, 20)).filter((uri) => !latest.subjects.has(uri) && !latest.missing.has(uri));
     if (!want.length) return;
-    try {
-      const fetched = await api.getPosts(want);
-      if (myDid() !== did) return;
-      (fetched.posts || []).forEach((post) => {
-        if (post?.uri) latest.subjects.set(post.uri, post);
-      });
-    } catch {
-      /* the list still opens */
-    }
+    await fillSubjectUris(want, latest.subjects, latest.missing);
   }).catch(() => {}).finally(() => {
     noteWarm = null;
   });
@@ -1729,19 +1721,53 @@ function stopSubjectWatch() {
   subjectWatch = null;
 }
 
-async function readSubjectBatch(uris, subjects, missing) {
+function rememberSubject(subjects, uri, post) {
+  if (!post?.uri) return;
+  subjects.set(post.uri, post);
+  if (uri && uri !== post.uri) subjects.set(uri, post);
+}
+
+function isPostUri(uri) {
+  return /\/app\.bsky\.feed\.post\//.test(String(uri || ''));
+}
+
+async function readSubjectBatch(uris, subjects) {
   try {
     const fetched = await api.getPosts(uris);
-    const found = new Set();
-    (fetched.posts || []).forEach((post) => {
-      if (!post?.uri) return;
-      subjects.set(post.uri, post);
-      found.add(post.uri);
-    });
-    uris.forEach((uri) => { if (!found.has(uri)) missing.add(uri); });
+    (fetched.posts || []).forEach((post) => rememberSubject(subjects, post?.uri, post));
     return true;
   } catch {
     return false;
+  }
+}
+
+async function readOneSubject(uri, subjects, missing) {
+  if (!uri || subjects.has(uri) || missing.has(uri)) return;
+  if (!isPostUri(uri)) {
+    missing.add(uri);
+    return;
+  }
+  try {
+    const one = await api.getPosts([uri]);
+    const post = one.posts?.[0];
+    if (post?.uri) {
+      rememberSubject(subjects, uri, post);
+      return;
+    }
+  } catch {
+    /* try the thread for this one post */
+  }
+  try {
+    const thread = await api.getPostThread(uri);
+    const post = thread?.thread?.post;
+    if (post?.uri) {
+      rememberSubject(subjects, uri, post);
+      return;
+    }
+    const type = String(thread?.thread?.$type || '');
+    if (thread?.thread?.notFound || type.includes('NotFound') || type.includes('Blocked')) missing.add(uri);
+  } catch {
+    /* a later pass can try again */
   }
 }
 
@@ -1761,13 +1787,29 @@ async function fillSubjectUris(uris, subjects, missing) {
     const job = (async () => {
       for (let index = 0; index < pending.length; index += 25) {
         const batch = pending.slice(index, index + 25);
-        const ok = await readSubjectBatch(batch, subjects, missing);
-        if (ok) continue;
-        const mid = Math.ceil(batch.length / 2);
-        const halves = [batch.slice(0, mid), batch.slice(mid)].filter((half) => half.length);
+        const ok = await readSubjectBatch(batch, subjects);
+        const leftover = batch.filter((uri) => !subjects.has(uri) && !missing.has(uri));
+        if (!leftover.length) continue;
+        if (ok) {
+          for (const uri of leftover) await readOneSubject(uri, subjects, missing);
+          leftover.forEach((uri) => { if (!subjects.has(uri)) missing.add(uri); });
+          continue;
+        }
+        if (leftover.length === 1) {
+          await readOneSubject(leftover[0], subjects, missing);
+          continue;
+        }
+        const mid = Math.ceil(leftover.length / 2);
+        const halves = [leftover.slice(0, mid), leftover.slice(mid)];
         for (const half of halves) {
-          const halfOk = await readSubjectBatch(half, subjects, missing);
-          if (!halfOk) half.forEach((uri) => missing.add(uri));
+          const halfOk = await readSubjectBatch(half, subjects);
+          const remain = half.filter((uri) => !subjects.has(uri) && !missing.has(uri));
+          if (halfOk) {
+            for (const uri of remain) await readOneSubject(uri, subjects, missing);
+            remain.forEach((uri) => { if (!subjects.has(uri)) missing.add(uri); });
+            continue;
+          }
+          for (const uri of remain) await readOneSubject(uri, subjects, missing);
         }
       }
     })().finally(() => {
@@ -2009,18 +2051,25 @@ async function showNotifications(filter) {
     api.updateSeen().then(refreshBadge).catch(() => {});
   };
 
-  function pendingSubjectUris(limitNodes) {
-    const list = $('note-list');
-    if (!list) return [];
-    const uris = [];
-    const nodes = [...list.querySelectorAll('article.note')];
-    (limitNodes ? nodes.slice(0, limitNodes) : nodes).forEach((node) => {
-      (node.dataset.subject || '').split(' ').forEach((uri) => {
-        if (!uri || uris.length >= 25 || uris.includes(uri)) return;
-        if (state.subjects.has(uri) || state.missing.has(uri)) return;
-        uris.push(uri);
-      });
+  function collectNoteUris(node, uris) {
+    (node?.dataset.subject || '').split(/\s+/).forEach((uri) => {
+      if (!uri || uris.includes(uri)) return;
+      if (state.subjects.has(uri) || state.missing.has(uri)) return;
+      uris.push(uri);
     });
+  }
+
+  function pendingSubjectUris(limitNodes) {
+    const uris = [];
+    notificationSubjects((limitNodes ? all.slice(0, limitNodes) : all)).forEach((uri) => {
+      if (!uri || uris.includes(uri)) return;
+      if (state.subjects.has(uri) || state.missing.has(uri)) return;
+      uris.push(uri);
+    });
+    const list = $('note-list');
+    if (!list) return uris;
+    const nodes = [...list.querySelectorAll('article.note')];
+    (limitNodes ? nodes.slice(0, limitNodes) : nodes).forEach((node) => collectNoteUris(node, uris));
     return uris;
   }
 
@@ -2030,20 +2079,18 @@ async function showNotifications(filter) {
     const list = $('note-list');
     if (!list) return;
     const pending = [...list.querySelectorAll('article.note')].filter((node) => (
-      (node.dataset.subject || '').split(' ').some((uri) => uri && !state.subjects.has(uri) && !state.missing.has(uri))
+      (node.dataset.subject || '').split(/\s+/).some((uri) => uri && !state.subjects.has(uri) && !state.missing.has(uri))
     ));
     if (!pending.length) return;
     subjectWatch = new IntersectionObserver((entries) => {
       if (token !== generation) return stopSubjectWatch();
-      if (!entries.some((entry) => entry.isIntersecting)) return;
+      const visible = entries.filter((entry) => entry.isIntersecting).map((entry) => entry.target);
+      if (!visible.length) return;
       const uris = [];
-      pending.slice(0, 12).forEach((node) => {
-        (node.dataset.subject || '').split(' ').forEach((uri) => {
-          if (!uri || uris.length >= 25 || uris.includes(uri)) return;
-          if (state.subjects.has(uri) || state.missing.has(uri)) return;
-          uris.push(uri);
-        });
-      });
+      visible.forEach((node) => collectNoteUris(node, uris));
+      if (!uris.length) {
+        pending.slice(0, 12).forEach((node) => collectNoteUris(node, uris));
+      }
       stopSubjectWatch();
       if (!uris.length) return;
       fillSubjectUris(uris, state.subjects, state.missing).then(() => {
@@ -2054,13 +2101,13 @@ async function showNotifications(filter) {
         if (token !== generation) return;
         armSubjectWatch();
       });
-    }, { rootMargin: '700px' });
-    subjectWatch.observe(pending[0]);
+    }, { rootMargin: '900px' });
+    pending.slice(0, 20).forEach((node) => subjectWatch.observe(node));
   }
 
   function kickSubjects() {
     if (token !== generation) return;
-    const uris = pendingSubjectUris(10);
+    const uris = pendingSubjectUris(20);
     const job = uris.length ? fillSubjectUris(uris, state.subjects, state.missing) : Promise.resolve();
     armSubjectWatch();
     job.then(() => {
