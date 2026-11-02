@@ -629,7 +629,10 @@ function notificationGroupHtml(group, subjects) {
   const media = noteMediaHtml(mediaPost);
   const unread = group.some((note) => !note.isRead);
   const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';
-  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${spoken ? media : ''}${snippet}${spoken ? '' : media}</span></article>`;
+  const wanted = notificationSubjects(group);
+  const subjectMark = wanted.length ? ` data-subject="${attr(wanted.join(' '))}"` : '';
+  const noteKey = attr(`${reason}:${first.uri || first.indexedAt || subjectUri || group.length}`);
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open} data-note="${noteKey}"${subjectMark}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${spoken ? media : ''}${snippet}${spoken ? '' : media}</span></article>`;
 }
 
 export function speechText(post) {
