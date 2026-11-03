@@ -1,11 +1,11 @@
 <p align="center">
-  <a href="https://thewhitewitchtm.github.io/LibreSky/">
+  <a href="https://libresky.sociallydead.me/">
     <img src="assets/banner.png" alt="LibreSky. Highlighted features: Edit, AI, Voice, Video, and Chat." width="920">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://thewhitewitchtm.github.io/LibreSky/"><img alt="Open LibreSky" src="https://img.shields.io/badge/open-LibreSky-0085ff?style=for-the-badge"></a>
+  <a href="https://libresky.sociallydead.me/"><img alt="Open LibreSky" src="https://img.shields.io/badge/open-LibreSky-0085ff?style=for-the-badge"></a>
   &nbsp;
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0b2548?style=for-the-badge"></a>
   &nbsp;
@@ -19,9 +19,9 @@
 LibreSky is a Bluesky client you open and stay in. Home is waiting. Discover is one click over. Search starts on what people are talking about right now. Chat, notifications, bookmarks, and your profile sit in the sidebar. A voice or video call starts from Calls or from someone else’s profile.
 
 <p align="center">
-  <a href="https://thewhitewitchtm.github.io/LibreSky/"><strong>Open LibreSky</strong></a>
+  <a href="https://libresky.sociallydead.me/"><strong>Open LibreSky</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://thewhitewitchtm.github.io/LibreSky/#/downloads"><strong>Download</strong></a>
+  <a href="https://libresky.sociallydead.me/#/downloads"><strong>Download</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="CHANGES.md"><strong>Changes</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
@@ -44,7 +44,7 @@ The first screen is sign-in. Make an account there if you need one. Bluesky’s 
 
 You can browse before you sign in, or sign in with an app password. This browser holds up to eight accounts and switches between them.
 
-**[Open LibreSky](https://thewhitewitchtm.github.io/LibreSky/)**
+**[Open LibreSky](https://libresky.sociallydead.me/)**
 
 ## Everything in reach
 
@@ -78,7 +78,7 @@ Type `@ai` or `@si`. Both tags ask the account you saved. Bluesky has no account
 
 Settings can hold a Grok, Gemini, OpenAI, Claude, DeepSeek, Groq, OpenRouter, Mistral, Together, Cerebras, Pollinations, or other account. Each row links to the site that issues a key. The key is saved on your Bluesky account, in the private preferences that follow this login. Anyone can read the public profile, so the key stays in those private preferences. The key is sent only to the provider you pick, and only when you ask, including a rewrite from the post box.
 
-AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The spark on the post box rewrites the draft that is already there. Use this keeps the rewrite. Dismiss leaves your words. The [AI page](https://thewhitewitchtm.github.io/LibreSky/#/ai) is the chat. Free, a remote AI, or Local is the button under the box. A key, an address, and a local model are set under Settings, on the AI tab. Without a key it uses a free public model so the page still answers.
+AI Assist also has its own page, an ask field on Home, and a check on profiles and posts. The spark on the post box rewrites the draft that is already there. Use this keeps the rewrite. Dismiss leaves your words. The [AI page](https://libresky.sociallydead.me/#/ai) is the chat. Free, a remote AI, or Local is the button under the box. A key, an address, and a local model are set under Settings, on the AI tab. Without a key it uses a free public model so the page still answers.
 
 ## A desk you can tune
 
@@ -112,7 +112,7 @@ The speaker on a post reads the text and the image description. New posts on Hom
 
 ## A desk of your own
 
-Linux, Windows, and Mac builds are on the [download page](https://thewhitewitchtm.github.io/LibreSky/#/downloads). Unzip and run. Sign-in still uses your Bluesky account.
+Linux, Windows, and Mac builds are on the [download page](https://libresky.sociallydead.me/#/downloads). Unzip and run. Sign-in still uses your Bluesky account.
 
 | System | File | First run |
 | --- | --- | --- |
@@ -130,7 +130,7 @@ The pages and scripts are about 1.5 MB. A service worker stores that shell, so t
 
 MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this beta is in [Changes](CHANGES.md).
 
-LibreSky is free. [Support development](https://thewhitewitchtm.github.io/LibreSky/#/support) keeps the browser client, the desktop apps, and what comes next moving.
+LibreSky is free. [Support development](https://libresky.sociallydead.me/#/support) keeps the browser client, the desktop apps, and what comes next moving.
 
 Mira builds LibreSky.
 

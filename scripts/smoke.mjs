@@ -671,9 +671,9 @@ assert.equal(emojiHash[0].index.byteStart, new TextEncoder().encode('😀').leng
 assert.equal((await facetsFor('#1a'))[0].features[0].tag, '1a');
 const homeHtml = `<title>The White Witch™</title>
 <img src="/assets/images/banner.jpg" alt="The White Witch banner">
-<img src="https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg" alt="" width="1200" height="630">
+<img src="https://thewhitewitchtm.sociallydead.me/assets/images/og.jpg" alt="" width="1200" height="630">
 <img src="https://thewhitewitchtm.github.io/emojigames/assets/images/preview.jpg" alt="" width="1200" height="630">`;
-assert.equal(pageSummary(homeHtml, 'https://thewhitewitchtm.github.io/').image, 'https://thewhitewitchtm.github.io/whitewitch/assets/images/og.jpg');
+assert.equal(pageSummary(homeHtml, 'https://thewhitewitchtm.github.io/').image, 'https://thewhitewitchtm.sociallydead.me/assets/images/og.jpg');
 assert.equal(pageSummary('<meta property="og:image" content="/cover.jpg"><img src="https://cdn.example/other.jpg" width="1200" height="630">', 'https://example.com/posts/1').image, 'https://example.com/cover.jpg');
 
 const cleanupNow = Date.parse('2026-10-21T12:00:00Z');
@@ -901,7 +901,7 @@ assert.match(linkPreviewHtml(homeCard), /<img [^>]*og\.jpg|banner\.jpg/);
 
 const metadata = JSON.parse(await readFile(path.join(root, 'client-metadata.json'), 'utf8'));
 assert.equal(metadata.client_name, 'LibreSky');
-assert.equal(metadata.client_id, 'https://thewhitewitchtm.github.io/LibreSky/client-metadata.json');
+assert.equal(metadata.client_id, 'https://libresky.sociallydead.me/client-metadata.json');
 assert.equal(metadata.dpop_bound_access_tokens, true);
 assert.match(metadata.scope, /atproto/);
 assert.match(metadata.scope, /transition:generic/);
@@ -1169,7 +1169,7 @@ assert.deepEqual(defaults[1], { kind: 'posts', id: 'ukraine' });
 assert.equal(defaults.at(-1).kind, 'link');
 assert.equal(defaults.at(-1).id, 'sociallydead');
 assert.equal(SEARCH_POSTS.find((item) => item.id === 'ukraine').q, 'Ukraine OR Україна');
-assert.equal(SEARCH_LINKS.find((item) => item.id === 'sociallydead').href, 'https://thewhitewitchtm.github.io/sociallydead/');
+assert.equal(SEARCH_LINKS.find((item) => item.id === 'sociallydead').href, 'https://sociallydead.me/');
 const migrated = settleSearchTabs({ tabs: [{ kind: 'topic', id: 'news' }] });
 assert.equal(migrated.rev, 2);
 assert.equal(migrated.tabs[1].id, 'ukraine');
@@ -1371,7 +1371,7 @@ assert.equal(postInLanguages({ record: { langs: ['en-US'] } }, ['en']), true);
 assert.equal(postInLanguages({ record: { langs: ['ja'] } }, ['en']), false);
 assert.equal(postInLanguages({ record: {} }, ['en']), false);
 assert.equal(postInLanguages({ record: { langs: ['ja'] } }, []), true);
-const callText = parseCallMessage('Started a voice call https://thewhitewitchtm.github.io/LibreSky/#/c/2222222222222');
+const callText = parseCallMessage('Started a voice call https://libresky.sociallydead.me/#/c/2222222222222');
 assert.equal(callText.kind, 'offer');
 assert.equal(callText.media, 'audio');
 assert.equal(callText.rkey, '2222222222222');
@@ -1388,14 +1388,14 @@ assert.equal(assembleCallSdp([
 assert.equal(assembleCallSdp([
   { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:other'), '');
-const shareOffer = parseShareMessage('Wants to send a file photo.jpg 2048 https://thewhitewitchtm.github.io/LibreSky/#/f/2222222222222');
+const shareOffer = parseShareMessage('Wants to send a file photo.jpg 2048 https://libresky.sociallydead.me/#/f/2222222222222');
 assert.equal(shareOffer.kind, 'offer');
 assert.equal(shareOffer.name, 'photo.jpg');
 assert.equal(shareOffer.size, 2048);
 assert.equal(shareOffer.rkey, '2222222222222');
 assert.equal(parseShareMessage('Declined the file https://example.com/#/f/2222222222222').kind, 'decline');
 assert.equal(parseShareMessage('hello'), null);
-const sessionOffer = parseShareMessage('Wants a direct session https://thewhitewitchtm.github.io/LibreSky/#/f/3333333333333');
+const sessionOffer = parseShareMessage('Wants a direct session https://libresky.sociallydead.me/#/f/3333333333333');
 assert.equal(sessionOffer.kind, 'offer');
 assert.equal(sessionOffer.name, '');
 assert.equal(sessionOffer.rkey, '3333333333333');

@@ -5719,7 +5719,7 @@ async function startCallToHandle(media) {
   }
 }
 
-const PUBLISHED = 'https://thewhitewitchtm.github.io/LibreSky/';
+const PUBLISHED = 'https://libresky.sociallydead.me/';
 const DOWNLOADS = [
   ['LibreSky-linux-x64.zip', 'Linux', 'LibreSky-Linux.zip', 'Unzip the folder and run the LibreSky file.'],
   ['LibreSky-windows-x64.zip', 'Windows', 'LibreSky-Windows.zip', 'Unzip the folder and run LibreSky.exe.'],

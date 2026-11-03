@@ -8,7 +8,7 @@ LibreSky Corporate is the custom edition. You host it. The services run on hardw
 
 ## A sky on your own shelf
 
-The public app is a Bluesky client you open in the browser: [LibreSky](https://thewhitewitchtm.github.io/LibreSky/). Corporate is the build for a place that wants the services on a machine it owns. The client you would serve is about 1.6 MB of pages and scripts. A small Pi, on a desk or in a quiet corner of the network, can host it.
+The public app is a Bluesky client you open in the browser: [LibreSky](https://libresky.sociallydead.me/). Corporate is the build for a place that wants the services on a machine it owns. The client you would serve is about 1.6 MB of pages and scripts. A small Pi, on a desk or in a quiet corner of the network, can host it.
 
 ## What is on the way
 

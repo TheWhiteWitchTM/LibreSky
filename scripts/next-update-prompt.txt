@@ -12,7 +12,7 @@ Run npm run smoke. Fix failures you caused. If smoke still fails, do not commit 
 
 Commit only the files you changed for this update. Do not commit secrets or files you did not mean to change. Push to the existing branch.
 
-Post once, only after the smoke test and the push succeed. Use scripts/post-update.py. The text starts with the siren emoji, stays under 300 characters, says what changed in plain language, and includes https://thewhitewitchtm.github.io/LibreSky/ . The script attaches the repo banner. Never print BSKY_PASSWORD or the contents of ~/.config/thewhitewitch/bsky.env. Do not say that anyone could not sleep. That line was only for the first note.
+Post once, only after the smoke test and the push succeed. Use scripts/post-update.py. The text starts with the siren emoji, stays under 300 characters, says what changed in plain language, and includes https://libresky.sociallydead.me/ . The script attaches the repo banner. Never print BSKY_PASSWORD or the contents of ~/.config/thewhitewitch/bsky.env. Do not say that anyone could not sleep. That line was only for the first note.
 
 After the post succeeds, run scripts/mark-release-seen.py with the exact new CHANGES.md heading, so the morning release note does not post the same update again.
 

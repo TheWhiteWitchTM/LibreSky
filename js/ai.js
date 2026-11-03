@@ -942,7 +942,7 @@ export async function askAi(config, messages, signal, note = '') {
       url = `${account.base}/chat/completions`;
       if (key) headers.Authorization = `Bearer ${key}`;
       if (account.provider === 'openrouter') {
-        headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://thewhitewitchtm.github.io/LibreSky';
+        headers['HTTP-Referer'] = typeof location !== 'undefined' ? location.origin : 'https://libresky.sociallydead.me';
         headers['X-Title'] = 'LibreSky';
       }
       body = {

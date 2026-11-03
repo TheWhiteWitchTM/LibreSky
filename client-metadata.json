@@ -1,11 +1,11 @@
 {
-  "client_id": "https://thewhitewitchtm.github.io/LibreSky/client-metadata.json",
+  "client_id": "https://libresky.sociallydead.me/client-metadata.json",
   "client_name": "LibreSky",
-  "client_uri": "https://thewhitewitchtm.github.io/LibreSky/",
-  "logo_uri": "https://thewhitewitchtm.github.io/LibreSky/assets/icon.png",
+  "client_uri": "https://libresky.sociallydead.me/",
+  "logo_uri": "https://libresky.sociallydead.me/assets/icon.png",
   "redirect_uris": [
-    "https://thewhitewitchtm.github.io/LibreSky/",
-    "https://thewhitewitchtm.github.io/LibreSky/index.html"
+    "https://libresky.sociallydead.me/",
+    "https://libresky.sociallydead.me/index.html"
   ],
   "scope": "atproto transition:generic transition:chat.bsky",
   "grant_types": ["authorization_code", "refresh_token"],

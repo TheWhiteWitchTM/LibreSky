@@ -46,7 +46,7 @@ export const SEARCH_POSTS = [
   { id: 'ukraine', label: 'Ukraine', q: 'Ukraine OR Україна' },
 ];
 export const SEARCH_LINKS = [
-  { id: 'sociallydead', label: 'SociallyDead', href: 'https://thewhitewitchtm.github.io/sociallydead/' },
+  { id: 'sociallydead', label: 'SociallyDead', href: 'https://sociallydead.me/' },
 ];
 const SEARCH_TOPIC_IDS = new Set(SEARCH_TOPICS.map((item) => item.id));
 const SEARCH_POST_IDS = new Set(SEARCH_POSTS.map((item) => item.id));

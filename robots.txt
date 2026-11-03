@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 
-# https://thewhitewitchtm.github.io/LibreSky/llms.txt
-Sitemap: https://thewhitewitchtm.github.io/LibreSky/sitemap.xml
+# https://libresky.sociallydead.me/llms.txt
+Sitemap: https://libresky.sociallydead.me/sitemap.xml

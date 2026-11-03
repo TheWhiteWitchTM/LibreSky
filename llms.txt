@@ -19,7 +19,7 @@ LibreSky is open source under the MIT license. Sign in with a Bluesky account. T
 
 ## Links
 
-- [Open the app](https://thewhitewitchtm.github.io/LibreSky/)
+- [Open the app](https://libresky.sociallydead.me/)
 - [Source](https://github.com/TheWhiteWitchTM/LibreSky)
 - [LibreSky Corporate, coming soon](https://thewhitewitchtm.github.io/corporate/)
 - [Home on the web](https://thewhitewitchtm.github.io/)

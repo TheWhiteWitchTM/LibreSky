@@ -1,6 +1,6 @@
 # Changes
 
-This is the record of the beta you can [open today](https://thewhitewitchtm.github.io/LibreSky/).
+This is the record of the beta you can [open today](https://libresky.sociallydead.me/).
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
@@ -125,6 +125,6 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 20 October 2026
 
-- The browser client is published on GitHub Pages: <https://thewhitewitchtm.github.io/LibreSky/>
+- The browser client is published on GitHub Pages: <https://libresky.sociallydead.me/>
 - Desktop builds are stored in pieces small enough for GitHub. The download page assembles each zip in the browser.
 - Sign-in uses Bluesky. The password is entered on Bluesky’s page. An app-password session, when you choose that path, stays in this browser until you sign out.
