@@ -3254,6 +3254,10 @@ body.ringing { padding-bottom: 120px; }
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--blue) 30%, transparent), var(--shadow); }
 }
 body.ringing .incoming-call:not([hidden]) { animation: ring-pulse 1.6s ease-in-out infinite; }
+body.ringing [data-nav="calls"] {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+}
 .incoming-call .avatar { width: 40px; height: 40px; }
 .incoming-call.video { border-color: var(--video); }
 .incoming-call-copy { flex: 1; min-width: 0; }

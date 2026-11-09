@@ -354,6 +354,7 @@ export function normalizeSentMessage(sent, text, did) {
 export function convoUnread(convo, me) {
   const count = Number(convo?.unreadCount) || 0;
   if (count < 1 || convo?.muted) return 0;
+  if (parseCallMessage(convo?.lastMessage?.text)) return 0;
   const sender = messageSender(convo?.lastMessage);
   if (sender && me && sender === me) return 0;
   return count;

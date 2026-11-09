@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-11-09-call-signal';
+const CACHE = 'libresky-2026-11-09-call-ring';
 
 const SHELL = [
   './',

@@ -410,7 +410,7 @@ export function noteFollowBack(owner, count = 1, now = new Date()) {
 export function callMayRing({ allow = 'all', followed = false, accepted = false } = {}) {
   if (allow === 'none') return false;
   if (allow === 'following') return Boolean(followed);
-  return Boolean(followed || accepted);
+  return Boolean(followed || accepted || allow === 'all');
 }
 
 export function callIsRequest({ allow = 'all', followed = false, accepted = false } = {}) {

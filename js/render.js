@@ -744,7 +744,7 @@ function messagePreview(message) {
   if (!message) return 'No messages yet';
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
-  if (parseCallMessage(message.text)) return 'Call';
+  if (parseCallMessage(message.text)) return '';
   const share = parseShareMessage(message.text);
   if (share) return share.kind === 'data' || share.name ? 'File' : 'Direct session';
   if (message.text) return message.text;

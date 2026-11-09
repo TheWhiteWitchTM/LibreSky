@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261102a">
+  <link rel="stylesheet" href="./css/app.css?v=20261109a">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -182,7 +182,7 @@
       <a class="nav-link" data-nav="search" href="#/search" aria-label="Search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.5 3a7.5 7.5 0 1 1 4.64 13.36l4.25 4.25-1.42 1.42-4.25-4.25A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg><span class="label">Search</span></a>
       <a class="nav-link" data-nav="notifications" href="#/notifications" aria-label="Notifications"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.4 2.4 0 0 0 2.35-2h-4.7A2.4 2.4 0 0 0 12 22zm7-5.2V11a7 7 0 0 0-5.2-6.75V3.5a1.8 1.8 0 1 0-3.6 0v.75A7 7 0 0 0 5 11v5.8L3.4 18.6A1 1 0 0 0 4.2 20.2h15.6a1 1 0 0 0 .8-1.6L19 16.8z"/></svg><span class="label">Notifications</span><span class="badge" id="notif-badge" data-badge="notif" hidden>0</span></a>
       <a class="nav-link" data-nav="messages" href="#/messages" aria-label="Chat"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5h14A2.5 2.5 0 0 1 21.5 6v9a2.5 2.5 0 0 1-2.5 2.5H9.2L4.5 21.2V6A2.5 2.5 0 0 1 5 3.5z"/></svg><span class="label">Chat</span><span class="badge" id="chat-badge" data-badge="chat" hidden>0</span></a>
-      <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span></a>
+      <a class="nav-link" data-nav="calls" href="#/calls" aria-label="Calls"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg><span class="label">Calls</span><span class="badge" id="calls-badge" data-badge="calls" hidden>0</span></a>
       <a class="nav-link" data-nav="bookmarks" href="#/bookmarks" aria-label="Bookmarks"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 3h11A1.5 1.5 0 0 1 19 4.5V21l-7-3.4L5 21V4.5A1.5 1.5 0 0 1 6.5 3z"/></svg><span class="label">Bookmarks</span></a>
       <a class="nav-link" data-nav="profile" data-no-hover href="#/" aria-label="Profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12.2a4.2 4.2 0 1 0-4.2-4.2 4.2 4.2 0 0 0 4.2 4.2zM4.8 20.2a7.2 7.2 0 0 1 14.4 0 .8.8 0 0 1-.8.8H5.6a.8.8 0 0 1-.8-.8z"/></svg><span class="label">Profile</span></a>
       <a class="nav-link" data-nav="ai" href="#/ai" aria-label="AI Assist">
@@ -716,6 +716,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261102b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261109a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

@@ -1249,6 +1249,7 @@ assert.match(kept, /class="facet mention"/);
 assert.equal(convoUnread({ unreadCount: '1', lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), 0);
 assert.equal(convoUnread({ unreadCount: '2', muted: true, lastMessage: { sender: { did: 'did:them' } } }, 'did:me'), 0);
 assert.equal(convoUnread({ unreadCount: '2', lastMessage: { sender: 'did:them' } }, 'did:me'), 2);
+assert.equal(convoUnread({ unreadCount: 4, lastMessage: { text: '!ls call offer audio 2222222222222', sender: { did: 'did:them' } } }, 'did:me'), 0);
 assert.equal(ownUnread({ unreadCount: '1', lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), true);
 assert.equal(ownUnread({ unreadCount: '1', muted: true, lastMessage: { sender: { did: 'did:me' } } }, 'did:me'), false);
 assert.equal(ownUnread({ unreadCount: 3, lastMessage: { sender: { did: 'did:them' } } }, 'did:me'), false);
@@ -1259,6 +1260,14 @@ const ownChat = convoHtml({
   lastMessage: { text: 'hello from me', sender: { did: 'did:me' } },
 }, 'did:me');
 assert.doesNotMatch(ownChat, /class="pill"/);
+const signalChat = convoHtml({
+  id: 'ring',
+  unreadCount: 3,
+  members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:them', handle: 'them.bsky.social', displayName: 'Them' }],
+  lastMessage: { text: '!ls call offer audio 2222222222222', sender: { did: 'did:them' } },
+}, 'did:me');
+assert.doesNotMatch(signalChat, /!ls call|>Call</);
+assert.doesNotMatch(signalChat, /class="pill"/);
 const requestChat = convoHtml({
   id: 'req',
   status: 'request',
@@ -1329,7 +1338,7 @@ assert.equal(callMayRing({ allow: 'none', followed: true, accepted: true }), fal
 assert.equal(callMayRing({ allow: 'following', followed: true }), true);
 assert.equal(callMayRing({ allow: 'following', followed: false, accepted: true }), false);
 assert.equal(callMayRing({ allow: 'all', followed: false, accepted: true }), true);
-assert.equal(callMayRing({ allow: 'all', followed: false, accepted: false }), false);
+assert.equal(callMayRing({ allow: 'all', followed: false, accepted: false }), true);
 assert.equal(callIsRequest({ allow: 'all', followed: false, accepted: false }), true);
 assert.equal(callIsRequest({ allow: 'all', followed: true, accepted: false }), false);
 assert.equal(callIsRequest({ allow: 'following', followed: false, accepted: false }), false);
@@ -1501,8 +1510,15 @@ const routed = incomingCall([
 assert.equal(routed?.kind, 'offer');
 assert.equal(routed?.media, 'video');
 assert.equal(routed?.rkey, '2222222222222');
+const sdpOnly = incomingCall([
+  { text: `!ls call sdp video 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' }, sentAt: callNow },
+], 'did:me', 'did:them');
+assert.equal(sdpOnly?.kind, 'offer');
+assert.equal(sdpOnly?.media, 'video');
+assert.equal(sdpOnly?.rkey, '2222222222222');
 assert.equal(incomingCall([
   { text: `!ls call sdp video 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' }, sentAt: callNow },
+  { text: '!ls call decline 2222222222222', sender: { did: 'did:me' }, sentAt: new Date(Date.now() + 1000).toISOString() },
 ], 'did:me', 'did:them'), null);
 assert.equal(incomingCall([
   { text: '!ls call offer audio 2222222222222', sender: { did: 'did:them' }, sentAt: callNow },
@@ -1516,6 +1532,10 @@ assert.match(callBar, /data-convo="room"/);
 assert.match(callRequestHtml({ rkey: '2222222222222', media: 'audio', name: 'Ada', convoId: 'room', peerDid: 'did:them', ringing: true }), /Incoming voice call/);
 assert.match(appSource, /function paintIncomingCall/);
 assert.match(appSource, /function startRingtone/);
+assert.match(appSource, /function surfaceIncomingCall/);
+assert.match(appSource, /messagesForCall/);
+assert.match(index, /data-badge="calls"/);
+assert.match(appSource, /title: 'Voice and video'/);
 assert.match(appSource, /function openSendToChat/);
 assert.match(appSource, /a === 'c' && b/);
 assert.doesNotMatch(appSource, /window\.prompt\('Send this post/);

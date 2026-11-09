@@ -34,11 +34,13 @@ export function incomingCall(messages, me, peer) {
     const sentAt = row.message.sentAt || '';
     if (sender !== me && sender !== peer) continue;
     if (parsed.kind === 'offer' && sender === peer && parsed.rkey) {
-      offer = { ...parsed, sentAt };
+      offer = { kind: 'offer', media: parsed.media === 'video' ? 'video' : 'audio', rkey: parsed.rkey, sentAt };
       continue;
     }
     if (parsed.kind === 'data' && sender === peer && parsed.rkey) {
-      if (!offer && parsed.bare) offer = { kind: 'offer', media: 'audio', rkey: parsed.rkey, sentAt };
+      const media = parsed.media === 'video' ? 'video' : 'audio';
+      if (!offer || offer.rkey !== parsed.rkey) offer = { kind: 'offer', media, rkey: parsed.rkey, sentAt };
+      else offer = { ...offer, media: parsed.media ? media : offer.media, sentAt: sentAt || offer.sentAt };
       continue;
     }
     if (!offer) continue;
@@ -249,6 +251,19 @@ function chunkSdp(rkey, sdp, media) {
   });
 }
 
+function latestSignalTime(messages, rkey, peerDid) {
+  let latest = '';
+  for (const message of messages || []) {
+    if (peerDid && messageSender(message) !== peerDid) continue;
+    const parsed = parseCallMessage(message?.text);
+    if (!parsed || parsed.rkey !== rkey) continue;
+    if (parsed.kind !== 'offer' && parsed.kind !== 'data') continue;
+    const sent = String(message?.sentAt || '');
+    if (sent > latest) latest = sent;
+  }
+  return latest;
+}
+
 async function readSdp(peerDid, rkey, convoId, messages) {
   try {
     const record = await api.getPublicRecord(peerDid, COLLECTION, rkey);
@@ -410,14 +425,21 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     } catch {
       sdp = '';
     }
-    if (!sdp) {
-      const data = await api.getConvo(convoId);
-      sdp = assembleCallSdp(data.messages, rkey, peerDid);
-      const offer = (data.messages || []).find((message) => {
-        const parsed = parseCallMessage(message?.text);
-        return parsed?.kind === 'offer' && parsed.rkey === rkey && messageSender(message) === peerDid;
-      });
-      createdAt = offer?.sentAt || '';
+    if (!sdp || !createdAt) {
+      let messages = [];
+      try {
+        const data = await api.getConvo(convoId);
+        messages = data?.messages || [];
+      } catch {
+        messages = [];
+      }
+      if (!messages.length) {
+        const view = await api.getConvoView(convoId).catch(() => null);
+        const last = view?.convo?.lastMessage;
+        if (last) messages = [last];
+      }
+      if (!sdp) sdp = assembleCallSdp(messages, rkey, peerDid);
+      if (!createdAt) createdAt = latestSignalTime(messages, rkey, peerDid);
     }
     if (!sdp) throw new Error('That call is missing its details.');
     const age = Date.now() - new Date(createdAt).getTime();

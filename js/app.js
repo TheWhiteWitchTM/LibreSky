@@ -692,6 +692,10 @@ function startRingtone() {
   ringLoop = setInterval(playRingBurst, 2200);
 }
 
+document.addEventListener('pointerdown', () => {
+  if (document.body.classList.contains('ringing')) playRingBurst();
+}, true);
+
 const followCache = new Map();
 
 async function rememberFollows(dids) {
@@ -724,23 +728,48 @@ function callFacts(convo, member) {
   };
 }
 
+function callSignalConvo(convo) {
+  return Boolean(parseCallMessage(convo?.lastMessage?.text));
+}
+
+async function messagesForCall(convo, mine) {
+  const last = convo?.lastMessage;
+  if (!last) return [];
+  const parsed = parseCallMessage(last.text);
+  const sender = messageSender(last);
+  const sent = new Date(last.sentAt || 0).getTime();
+  const stale = Number.isFinite(sent) && Date.now() - sent > 10 * 60 * 1000;
+  if (!parsed || stale || parsed.kind === 'decline' || parsed.kind === 'end' || (sender && sender === mine)) return [last];
+  try {
+    const data = await api.getConvo(convo.id);
+    const list = messagesForConvo(data, convo);
+    if (list.length) return list;
+  } catch {
+    /* the last line still counts */
+  }
+  return [last];
+}
+
 async function classifyCalls(convos) {
   const mine = myDid();
-  const rows = [];
   const need = [];
-  (convos || []).forEach((convo) => {
+  const prepared = await Promise.all((convos || []).map(async (convo) => {
     const other = (convo.members || []).find((member) => member?.did && member.did !== mine);
-    if (!other?.did || !convo.id) return;
-    const offer = incomingCall(convo.lastMessage ? [convo.lastMessage] : [], mine, other.did);
-    if (!offer?.rkey) return;
+    if (!other?.did || !convo.id) return null;
+    const offer = incomingCall(await messagesForCall(convo, mine), mine, other.did);
+    if (!offer?.rkey) return null;
     const key = `${convo.id}:${offer.rkey}`;
-    if (ignoredRings.has(key)) return;
+    if (ignoredRings.has(key)) return null;
+    return { convo, other, offer, key };
+  }));
+  const rows = prepared.filter(Boolean);
+  rows.forEach(({ other }) => {
     const known = other.viewer && Object.prototype.hasOwnProperty.call(other.viewer, 'following');
-    if (!known && !followCache.has(other.did) && callAllow() !== 'none') need.push(other.did);
-    rows.push({ convo, other, offer, key });
+    if (!known && !followCache.has(other.did) && callAllow() === 'following') need.push(other.did);
   });
   if (need.length) await rememberFollows(need);
   let ring = null;
+  const ringing = [];
   const requests = [];
   rows.forEach(({ convo, other, offer, key }) => {
     const facts = callFacts(convo, other);
@@ -750,15 +779,17 @@ async function classifyCalls(convos) {
       peerDid: other.did,
       name: other.displayName || (other.handle ? `@${other.handle}` : 'Someone'),
       avatar: other.avatar || '',
+      requested: convo?.status === 'request',
       key,
     };
     if (callMayRing(facts)) {
+      ringing.push(row);
       if (!ring) ring = row;
       return;
     }
     if (callIsRequest(facts)) requests.push(row);
   });
-  return { ring, requests };
+  return { ring, ringing, requests };
 }
 
 async function listRequestItems() {
@@ -861,6 +892,7 @@ function paintIncomingBar(offer) {
   document.body.classList.toggle('ringing', show);
   if (!show) {
     stopRingtone();
+    paintBadge('calls-badge', 0);
     bar.hidden = true;
     if (!offer) bar.dataset.key = '';
     return;
@@ -875,7 +907,9 @@ function paintIncomingBar(offer) {
   bar.hidden = false;
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
-  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span></span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  const request = offer.requested ? ' data-request="1"' : '';
+  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span></span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  paintBadge('calls-badge', 1);
   startRingtone();
 }
 
@@ -914,16 +948,23 @@ async function refreshBadge() {
     const { main, requests, reported } = await loadConvoPages();
     const convos = [...main, ...requests];
     const mine = myDid();
+    const callRequests = requests.filter((convo) => callSignalConvo(convo)).length;
     const requestUnread = requests.reduce((sum, convo) => sum + convoUnread(convo, mine), 0);
-    const count = main.reduce((sum, convo) => sum + convoUnread(convo, mine), 0) + Math.max(requestUnread, Number(reported) || 0);
+    const reportedChat = Math.max(0, (Number(reported) || 0) - callRequests);
+    const count = main.reduce((sum, convo) => sum + convoUnread(convo, mine), 0) + Math.max(requestUnread, reportedChat);
     paintBadge('chat-badge', count);
     const { ring: offer } = await classifyCalls(convos);
-    paintIncomingBar(offer);
-    const ring = offer?.key || '';
-    if (ring && ring !== badgeMemory.ring) playSound('call');
-    else if (badgeMemory.chat !== null && count > badgeMemory.chat) playSound('chat');
+    if (offer && !isInCall()) {
+      const fresh = offer.key !== badgeMemory.ring;
+      const here = parseHash()[0] === 'calls';
+      surfaceIncomingCall(offer);
+      if (fresh && here) showCalls();
+    } else {
+      paintIncomingBar(null);
+      if (!offer) badgeMemory.ring = '';
+    }
+    if (!offer && badgeMemory.chat !== null && count > badgeMemory.chat) playSound('chat');
     badgeMemory.chat = count;
-    badgeMemory.ring = ring;
     main.forEach((convo) => {
       if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
     });
@@ -2418,17 +2459,33 @@ function chatPeerInfo(peerDid) {
   };
 }
 
+function clearCallRow(button) {
+  const row = button?.closest('.call-row');
+  const label = row?.previousElementSibling;
+  row?.remove();
+  if (label?.classList?.contains('section-label') && !label.nextElementSibling?.classList?.contains('call-row')) label.remove();
+  $('view')?.querySelector('.call-banner')?.remove();
+  button?.closest('.call-actions')?.remove();
+}
+
 function surfaceIncomingCall(offer) {
   if (!offer?.rkey || isInCall()) return;
   const key = offer.key || `${offer.convoId}:${offer.rkey}`;
   if (ignoredRings.has(key)) return;
   const peer = chatPeerInfo(offer.peerDid);
-  paintIncomingBar({
+  const painted = {
     ...offer,
     key,
     name: offer.name || peer.name,
     avatar: offer.avatar || peer.avatar,
-  });
+  };
+  const fresh = key !== badgeMemory.ring;
+  if (fresh) badgeMemory.ring = key;
+  paintIncomingBar(painted);
+  if (!fresh) return;
+  playSound('call');
+  if (offer.convoId) api.markConvoRead(offer.convoId).catch(() => {});
+  if (parseHash()[0] !== 'calls') location.hash = '#/calls';
 }
 
 function paintIncomingCall(messages, peerDid, convoId) {
@@ -2591,15 +2648,18 @@ async function showMessages(convoId) {
       const { main, requests, joins, reported } = await loadConvoPages();
       if (token !== generation) return;
       const mine = myDid();
-      const people = requestPeople(requests, joins, mine);
-      const waiting = requests.length + (joins || []).length;
+      const chatRequests = requests.filter((convo) => !callSignalConvo(convo));
+      const callRequests = requests.length - chatRequests.length;
+      const reportedChat = Math.max(0, (Number(reported) || 0) - callRequests);
+      const people = requestPeople(chatRequests, joins, mine);
+      const waiting = chatRequests.length + (joins || []).length;
       if (convoId === 'requests') {
         setChrome({ title: 'Message requests', nav: 'messages', back: true });
         const rows = [
-          ...requests.map((convo) => convoHtml(convo, mine, { request: true })),
+          ...chatRequests.map((convo) => convoHtml(convo, mine, { request: true })),
           ...(joins || []).map((item) => joinRequestHtml(item)),
         ].join('');
-        const missed = !rows && reported > 0;
+        const missed = !rows && reportedChat > 0;
         $('view').innerHTML = rows || emptyHtml(
           missed ? 'Message requests did not load' : 'No message requests',
           missed ? 'Bluesky still counts a request. Open this page again in a moment.' : 'When someone you have not accepted messages you, it shows up here.',
@@ -2611,7 +2671,7 @@ async function showMessages(convoId) {
         if (ownUnread(convo, mine)) api.markConvoRead(convo.id).catch(() => {});
       });
       const rows = main.map((convo) => convoHtml(convo, mine)).join('');
-      const entry = requestEntryHtml(waiting || reported, people);
+      const entry = requestEntryHtml(waiting || reportedChat, people);
       $('view').innerHTML = `<div class="toolbar"><form id="new-chat" class="new-chat"><input id="new-chat-handle" placeholder="Enter a handle" aria-label="Handle" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="253"><button class="primary small" type="submit">New chat</button></form><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Enter a handle, then press New chat.')}`;
       refreshBadge();
       return;
@@ -4307,7 +4367,7 @@ function callsPageHtml() {
   const controls = signedIn()
     ? `<div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>`
     : '<p class="dim">Sign in to choose who can call you.</p>';
-  return `<p class="dim">Page scoped. Everyone lets other people send a call request. People you follow can call straight through. No one blocks new calls. This choice is saved with your LibreSky settings.</p>${controls}`;
+  return `<p class="dim">Page scoped. Everyone rings for a new call, and you accept or decline it here. People you follow rings only for them. No one blocks new calls. This choice is saved with your LibreSky settings.</p>${controls}`;
 }
 
 function notificationPageHtml() {
@@ -4659,7 +4719,7 @@ function showSettings() {
     <div id="app-pass-reveal" hidden></div>
     <div id="app-pass-list"><p class="dim">Loading app passwords…</p></div>
     <h2>Messages and calls</h2>
-    <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
+    <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. A call rings on Calls, where you can accept or decline it, and it does not show up as a chat. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
     ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
     ${profileSettingsHtml()}`)}
     ${settingsPanel('notifications', notificationSettingsHtml())}
@@ -5767,8 +5827,8 @@ async function showCallLink(rkey) {
   }
   try {
     const { main, requests } = await loadConvoPages();
-    const { ring, requests: waiting } = await classifyCalls([...requests, ...main]);
-    const match = [ring, ...waiting].filter(Boolean).find((row) => row.rkey === rkey);
+    const { ring, ringing, requests: waiting } = await classifyCalls([...requests, ...main]);
+    const match = [...(ringing || []), ring, ...waiting].filter(Boolean).find((row) => row.rkey === rkey);
     if (match) surfaceIncomingCall(match);
   } catch {
     /* the Calls page still opens */
@@ -5778,7 +5838,7 @@ async function showCallLink(rkey) {
 
 async function showCalls() {
   const token = ++generation;
-  setChrome({ title: 'Calls', nav: 'calls' });
+  setChrome({ title: 'Voice and video', nav: 'calls' });
   const ready = canCall();
   const note = ready
     ? 'Voice and video connect two LibreSky windows. Mute and the camera stay on your side, and the time shows once you are connected. Enter a handle to call someone new, or pick someone you already chat with. An incoming call can be accepted or declined.'
@@ -5791,10 +5851,11 @@ async function showCalls() {
   try {
     const { main, requests } = await loadConvoPages();
     if (token !== generation) return;
-    const { ring, requests: waiting } = await classifyCalls([...requests, ...main]);
+    const { ring, ringing, requests: waiting } = await classifyCalls([...requests, ...main]);
     if (token !== generation) return;
     if (ring) surfaceIncomingCall(ring);
-    const incomingBlock = ring ? `<h2 class="section-label">Incoming</h2>${callRequestHtml({ ...ring, ringing: true })}` : '';
+    const incomingRows = ringing?.length ? ringing : [];
+    const incomingBlock = incomingRows.length ? `<h2 class="section-label">Incoming</h2>${incomingRows.map((offer) => callRequestHtml({ ...offer, ringing: true })).join('')}` : '';
     const requestRows = waiting.map((offer) => callRequestHtml(offer)).join('');
     const requestBlock = requestRows ? `<h2 class="section-label">Call requests</h2>${requestRows}` : '';
     const rows = main.map((convo) => callConvoHtml(convo, myDid())).join('');
@@ -9422,10 +9483,9 @@ async function handleChromeAct(act, event) {
     const [page, id] = parseHash();
     const convoId = button?.dataset.convo || (page === 'messages' ? id : '');
     const rkey = button?.dataset.rkey || '';
+    const requested = $('view')?.dataset.convoStatus === 'request' || button?.dataset.request === '1' || Boolean(button?.closest('.request-row'));
     silenceRing(convoId, rkey);
-    $('view')?.querySelector('.call-banner')?.remove();
-    button?.closest('.call-actions')?.remove();
-    const requested = $('view')?.dataset.convoStatus === 'request' || Boolean(button?.closest('.request-row'));
+    clearCallRow(button);
     if (requested && convoId) {
       api.acceptConvo(convoId).then(() => {
         if ($('view')) {
@@ -9455,8 +9515,7 @@ async function handleChromeAct(act, event) {
     silenceRing(convoId, rkey);
     declineCall(convoId, rkey).then((ok) => {
       if (!ok && convoId && rkey) ignoredRings.delete(`${convoId}:${rkey}`);
-      $('view')?.querySelector('.call-banner')?.remove();
-      button?.closest('.call-actions')?.remove();
+      clearCallRow(button);
     });
     return true;
   }
@@ -12611,7 +12670,7 @@ async function boot() {
       if (signedIn() && followDeskPrefs().auto) runFollowBack(false);
     }
   });
-  setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 15000);
+  setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 4000);
   window.addEventListener('resize', placeOpenLayers);
   window.addEventListener('scroll', placeOpenLayers, true);
   window.visualViewport?.addEventListener('resize', placeOpenLayers);
