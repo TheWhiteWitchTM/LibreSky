@@ -21,6 +21,7 @@ import {
   feedHtml,
   linkPreviewHtml,
   assistantHtml,
+  callBannerHtml,
   messageHtml,
   shareBannerHtml,
   shareFileHtml,
@@ -66,7 +67,7 @@ import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequ
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
-import { emojiGroups, flagEmoji } from './emoji.js';
+import { emojiGroups, flagEmoji, POPULAR_EMOJI } from './emoji.js';
 import {
   a11yPrefs,
   callAllow,
@@ -647,6 +648,50 @@ function playSound(kind, options = {}) {
 }
 playSound.at = {};
 
+let ringLoop = 0;
+
+function stopRingtone() {
+  if (ringLoop) clearInterval(ringLoop);
+  ringLoop = 0;
+}
+
+function playRingBurst() {
+  if (!soundsEnabled('call')) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!playSound.ctx) playSound.ctx = new Ctx();
+    const ctx = playSound.ctx;
+    ctx.resume?.().catch(() => {});
+    const startAt = ctx.currentTime;
+    const level = soundLevel('call');
+    if (level <= 0) return;
+    [[440, 0, 0.38], [554, 0, 0.38], [440, 0.48, 0.38], [554, 0.48, 0.38]].forEach(([freq, delay, duration]) => {
+      const osc = ctx.createOscillator();
+      const amp = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const start = startAt + delay;
+      const peak = Math.max(0.0008, 0.06 * level);
+      amp.gain.setValueAtTime(0.0001, start);
+      amp.gain.exponentialRampToValueAtTime(peak, start + 0.03);
+      amp.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(amp);
+      amp.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.04);
+    });
+  } catch {
+    /* this browser stayed quiet */
+  }
+}
+
+function startRingtone() {
+  if (ringLoop) return;
+  playRingBurst();
+  ringLoop = setInterval(playRingBurst, 2200);
+}
+
 const followCache = new Map();
 
 async function rememberFollows(dids) {
@@ -815,17 +860,23 @@ function paintIncomingBar(offer) {
   const show = Boolean(offer) && !isInCall();
   document.body.classList.toggle('ringing', show);
   if (!show) {
+    stopRingtone();
     bar.hidden = true;
     if (!offer) bar.dataset.key = '';
     return;
   }
-  if (bar.dataset.key === offer.key && !bar.hidden) return;
+  if (bar.dataset.key === offer.key && !bar.hidden) {
+    startRingtone();
+    return;
+  }
   const video = offer.media === 'video';
   bar.dataset.key = offer.key;
   bar.classList.toggle('video', video);
   bar.hidden = false;
   const title = video ? 'Incoming video call' : 'Incoming voice call';
-  bar.innerHTML = `<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span></span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  const face = avatar(offer.avatar, offer.name || 'Someone');
+  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span></span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  startRingtone();
 }
 
 function silenceRing(convoId, rkey) {
@@ -833,6 +884,7 @@ function silenceRing(convoId, rkey) {
   const bar = $('incoming-call');
   if (bar) bar.hidden = true;
   document.body.classList.remove('ringing');
+  stopRingtone();
 }
 
 async function refreshBadge() {
@@ -2357,6 +2409,50 @@ async function ensureChatAccepted() {
   }
 }
 
+function chatPeerInfo(peerDid) {
+  const convo = [...convoById.values()].find((row) => (row.members || []).some((member) => member?.did === peerDid));
+  const other = (convo?.members || []).find((member) => member?.did === peerDid);
+  return {
+    name: other?.displayName || (other?.handle ? `@${other.handle}` : 'Someone'),
+    avatar: other?.avatar || '',
+  };
+}
+
+function surfaceIncomingCall(offer) {
+  if (!offer?.rkey || isInCall()) return;
+  const key = offer.key || `${offer.convoId}:${offer.rkey}`;
+  if (ignoredRings.has(key)) return;
+  const peer = chatPeerInfo(offer.peerDid);
+  paintIncomingBar({
+    ...offer,
+    key,
+    name: offer.name || peer.name,
+    avatar: offer.avatar || peer.avatar,
+  });
+}
+
+function paintIncomingCall(messages, peerDid, convoId) {
+  const thread = $('view')?.querySelector('.chat-thread');
+  if (!thread) return;
+  thread.querySelectorAll('.call-banner').forEach((node) => node.remove());
+  if (isInCall()) return;
+  const offer = incomingCall(messages, myDid(), peerDid);
+  if (!offer?.rkey) return;
+  const key = `${convoId}:${offer.rkey}`;
+  if (ignoredRings.has(key)) return;
+  const facts = {
+    allow: callAllow(),
+    followed: Boolean(followCache.get(peerDid)),
+    accepted: $('view')?.dataset.convoStatus !== 'request',
+  };
+  if (!callMayRing(facts) && !callIsRequest(facts)) return;
+  const reply = thread.querySelector('.reply-bar');
+  const html = callBannerHtml(offer, { convoId, peerDid });
+  if (reply) reply.insertAdjacentHTML('beforebegin', html);
+  else thread.insertAdjacentHTML('beforeend', html);
+  if (callMayRing(facts)) surfaceIncomingCall({ ...offer, convoId, peerDid, key });
+}
+
 function paintIncomingShare(messages, peerDid, convoId) {
   const thread = $('view')?.querySelector('.chat-thread');
   if (!thread) return;
@@ -2435,7 +2531,8 @@ function watchOpenChat(convoId, peerDid, token) {
           added = true;
           if (!mine) {
             fromThem = true;
-            if (parseCallMessage(message.text)?.kind === 'offer') incomingOffer = true;
+            const callKind = parseCallMessage(message.text)?.kind;
+            if (callKind === 'offer' || callKind === 'data') incomingOffer = true;
             if (parseShareMessage(message.text)?.kind === 'offer') incomingOffer = true;
           }
         });
@@ -2446,12 +2543,12 @@ function watchOpenChat(convoId, peerDid, token) {
             followed: Boolean(followCache.get(peerDid)),
             accepted: $('view')?.dataset.convoStatus !== 'request',
           };
-          if (callMayRing(facts)) playSound('call');
+          if (callMayRing(facts)) startRingtone();
         } else if (fromThem) playSound('chat');
         if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
       }
-      clearChatCallChrome();
       paintIncomingShare(messages, peerDid, convoId);
+      paintIncomingCall(messages, peerDid, convoId);
     } catch {
       /* the open chat stays as it is */
     }
@@ -2558,8 +2655,8 @@ async function showMessages(convoId) {
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
     $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form" data-peer="${escapeHtml(peerDid)}" data-convo="${escapeHtml(convoId)}">${chatPlus}<div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
-    clearChatCallChrome();
     paintIncomingShare(messages, peerDid, convoId);
+    paintIncomingCall(messages, peerDid, convoId);
     if (isSharing()) paintShareLive(shareLabel(), shareProgress());
     paintChatLock();
     const area = $('chat-text');
@@ -5661,6 +5758,22 @@ async function askOnPage(text) {
   }
 }
 
+async function showCallLink(rkey) {
+  if (!signedIn()) {
+    showCalls();
+    return requireSignIn();
+  }
+  try {
+    const { main, requests } = await loadConvoPages();
+    const { ring, requests: waiting } = await classifyCalls([...requests, ...main]);
+    const match = [ring, ...waiting].filter(Boolean).find((row) => row.rkey === rkey);
+    if (match) surfaceIncomingCall(match);
+  } catch {
+    /* the Calls page still opens */
+  }
+  return showCalls();
+}
+
 async function showCalls() {
   const token = ++generation;
   setChrome({ title: 'Calls', nav: 'calls' });
@@ -5676,12 +5789,14 @@ async function showCalls() {
   try {
     const { main, requests } = await loadConvoPages();
     if (token !== generation) return;
-    const { requests: waiting } = await classifyCalls([...requests, ...main]);
+    const { ring, requests: waiting } = await classifyCalls([...requests, ...main]);
     if (token !== generation) return;
+    if (ring) surfaceIncomingCall(ring);
+    const incomingBlock = ring ? `<h2 class="section-label">Incoming</h2>${callRequestHtml({ ...ring, ringing: true })}` : '';
     const requestRows = waiting.map((offer) => callRequestHtml(offer)).join('');
     const requestBlock = requestRows ? `<h2 class="section-label">Call requests</h2>${requestRows}` : '';
     const rows = main.map((convo) => callConvoHtml(convo, myDid())).join('');
-    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${requestBlock}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
+    $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${incomingBlock}${requestBlock}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
   }
@@ -6251,6 +6366,7 @@ function fallbackBack() {
   const [a, b, c] = parseHash();
   if (!a || a === 'discover' || a === 'lane' || a === 'tour') return '#/';
   if (a === 'messages' && b) return '#/messages';
+  if (a === 'c') return '#/calls';
   if (a === 'notifications' && b) return '#/notifications';
   if (a === 'profile' && b && c) return `#/profile/${encodeURIComponent(b)}`;
   if (a === 'feed' && b) return '#/feeds';
@@ -6297,6 +6413,7 @@ function route() {
   if ((a === 'likes' || a === 'reposts') && b) return showEngagement(a, b);
   if (a === 'messages') return showMessages(b || '');
   if (a === 'ai') return showAi();
+  if (a === 'c' && b) return showCallLink(b);
   if (a === 'calls') return showCalls();
   if (a === 'bookmarks') return showBookmarks();
   if (a === 'feeds') return showFeeds();
@@ -6800,6 +6917,8 @@ function paintFieldHighlight(area, pre, options = {}) {
     ? `${richText(value.slice(0, start), null, opts)}<mark class="field-selection">${richText(value.slice(start, end), null, opts)}</mark>${richText(value.slice(end), null, opts)}`
     : richText(value, null, opts);
   pre.innerHTML = `${body}\n`;
+  const overflowY = area.style.overflowY || getComputedStyle(area).overflowY;
+  if (overflowY) pre.style.overflowY = overflowY;
   pre.scrollTop = area.scrollTop;
   if (area.id !== 'compose-text') return;
   if (options.settled) paintComposeWarn(typos);
@@ -8039,13 +8158,16 @@ function paintEmojiList(query) {
   emojiGroups(query).forEach(([name, list]) => groups.push([name, list]));
   const searching = Boolean(needle);
   const hasRecent = groups[0]?.[0] === 'Recent';
+  const quick = !needle
+    ? `<div class="emoji-quick" aria-label="Popular">${emojiButtons(POPULAR_EMOJI)}</div>`
+    : '';
   box.innerHTML = groups.length
-    ? groups.map(([name, list], index) => {
+    ? `${quick}${groups.map(([name, list], index) => {
       const open = emojiGroupOpen(name, searching, index, hasRecent);
       const body = open ? emojiButtons(list) : '';
       return `<details class="emoji-group" data-emoji-group="${escapeHtml(name)}"${open ? ' open' : ''}><summary>${escapeHtml(name)}</summary>${body}</details>`;
-    }).join('')
-    : '<p class="picker-note">No emoji matched.</p>';
+    }).join('')}`
+    : (quick || '<p class="picker-note">No emoji matched.</p>');
 }
 
 function pickerShell(title, { search = '', body = '', tall = false } = {}) {
@@ -8583,7 +8705,10 @@ function fitChatInput(box) {
   const next = Math.min(Math.max(full, floor), cap);
   box.style.height = `${next}px`;
   box.style.overflowY = full > cap ? 'auto' : 'hidden';
-  if (pre) pre.scrollTop = box.scrollTop;
+  if (pre) {
+    pre.style.overflowY = box.style.overflowY;
+    pre.scrollTop = box.scrollTop;
+  }
 }
 
 function chatLines() {
@@ -9282,6 +9407,14 @@ async function handleChromeAct(act, event) {
       toast(error.message);
     }
     return true;
+  }
+  if (act === 'send-chat-to') {
+    event.preventDefault();
+    return deliverPostToChat(button?.dataset.convo || '', sendChatPost), true;
+  }
+  if (act === 'send-chat-handle') {
+    event.preventDefault();
+    return sendPostToChatHandle(button?.dataset.handle || ''), true;
   }
   if (act === 'call-accept') {
     event.preventDefault();
@@ -10270,7 +10403,7 @@ async function onMenu(event) {
   if (!['copy', 'copy-text', 'share', 'quote'].includes(id) && !signedIn()) return requireSignIn();
   if (id === 'quote') return openComposer({ quote: found.post });
   if (id === 'unbookmark') return toggleBookmark(found);
-  if (id === 'send-chat') return sendPostToChat(found);
+  if (id === 'send-chat') return openSendToChat(found);
   if (id === 'share') return sharePost(found);
   if (id === 'copy' || id === 'copy-text') {
     const value = id === 'copy' ? postLink(found) : (found.post.record?.text || '');
@@ -10437,27 +10570,94 @@ async function toggleBookmark(found) {
   } catch (error) { toast(error.message); }
 }
 
-async function sendPostToChat(found) {
+let sendChatPost = null;
+
+function sendChatPeople(query) {
+  const needle = String(query || '').trim().replace(/^@/, '').toLowerCase();
+  const mine = myDid();
+  const rows = [];
+  const seen = new Set();
+  convoById.forEach((convo) => {
+    if (!convo?.id || convoIsRequest(convo) || seen.has(convo.id)) return;
+    const other = (convo.members || []).find((member) => member?.did && member.did !== mine);
+    if (!other?.did) return;
+    const name = other.displayName || other.handle || '';
+    const handle = String(other.handle || '').replace(/^@/, '');
+    if (needle && !name.toLowerCase().includes(needle) && !handle.toLowerCase().includes(needle)) return;
+    seen.add(convo.id);
+    rows.push({ convo, other, name: name || handle || 'Chat', handle });
+  });
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return rows;
+}
+
+function paintSendChatList() {
+  const list = $('send-chat-list');
+  if (!list) return;
+  const query = $('send-chat-find')?.value || '';
+  const people = sendChatPeople(query);
+  const handle = String(query || '').trim().replace(/^@/, '');
+  const extra = handle && !people.some((row) => row.handle.toLowerCase() === handle.toLowerCase())
+    ? `<button type="button" class="person send-chat-row" data-act="send-chat-handle" data-handle="${escapeHtml(handle)}">${avatar('', handle)}<span class="person-link"><strong>@${escapeHtml(handle)}</strong><span class="handle">Send to this handle</span></span></button>`
+    : '';
+  const rows = people.map((row) => `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link"><strong>${escapeHtml(row.name)}</strong><span class="handle">${row.handle ? `@${escapeHtml(row.handle)}` : 'Chat'}</span></span></button>`).join('');
+  list.innerHTML = extra + rows || '<p class="dim">No chats yet. Enter a handle above.</p>';
+}
+
+async function openSendToChat(found) {
   if (!signedIn()) return requireSignIn();
-  const handle = window.prompt('Send this post to which handle?');
-  if (!handle) return;
+  sendChatPost = found;
+  const dialog = $('send-chat');
+  const list = $('send-chat-list');
+  const find = $('send-chat-find');
+  if (find) find.value = '';
+  if (list) list.innerHTML = '<p class="dim">Loading chats…</p>';
+  if (dialog && !dialog.open) dialog.showModal();
+  find?.focus();
+  try {
+    await loadConvoPages();
+    if (sendChatPost !== found) return;
+    paintSendChatList();
+  } catch (error) {
+    if (list && sendChatPost === found) {
+      list.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load chats.')}</p>`;
+    }
+  }
+}
+
+async function deliverPostToChat(convoId, found) {
+  if (!convoId || !found?.post) return;
   const url = postLink(found);
   const embed = {
     $type: 'app.bsky.embed.record',
     record: { uri: found.post.uri, cid: found.post.cid },
   };
   try {
-    const did = await api.resolveHandle(handle.trim().replace(/^@/, ''));
-    const data = await api.convoForMember(did);
-    const id = data.convo?.id;
-    if (!id) throw new Error('Could not open that conversation.');
     try {
-      await api.sendMessage(id, { text: '', embed });
+      await api.sendMessage(convoId, { text: '', embed });
     } catch {
-      await api.sendMessage(id, { text: url, embed });
+      await api.sendMessage(convoId, { text: url, embed });
     }
+    $('send-chat')?.close();
+    sendChatPost = null;
     toast('Sent in chat');
-    location.hash = `#/messages/${encodeURIComponent(id)}`;
+    location.hash = `#/messages/${encodeURIComponent(convoId)}`;
+  } catch (error) { toast(error.message); }
+}
+
+async function sendPostToChatHandle(handle) {
+  const found = sendChatPost;
+  if (!found) return;
+  const who = String(handle || '').trim().replace(/^@/, '');
+  if (!who) {
+    toast('Enter a handle.');
+    $('send-chat-find')?.focus();
+    return;
+  }
+  try {
+    const did = await api.resolveHandle(who);
+    const id = await convoIdFor(did);
+    await deliverPostToChat(id, found);
   } catch (error) { toast(error.message); }
 }
 
@@ -11323,6 +11523,13 @@ function bind() {
     if (send) send.textContent = 'Post';
     paintAttach();
   });
+  $('send-chat-cancel')?.addEventListener('click', () => $('send-chat')?.close());
+  $('send-chat')?.addEventListener('close', () => { sendChatPost = null; });
+  $('send-chat-find')?.addEventListener('input', () => paintSendChatList());
+  $('send-chat-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    sendPostToChatHandle($('send-chat-find')?.value || '');
+  });
   $('attach-cancel')?.addEventListener('click', () => $('attach')?.close());
   $('attach-form')?.addEventListener('submit', (event) => event.preventDefault());
   $('attach')?.addEventListener('click', (event) => {
@@ -11720,6 +11927,10 @@ function bind() {
     dialog.addEventListener('click', (event) => {
       if (event.target !== dialog) return;
       if (dialog.id === 'call') return;
+      if (dialog.id === 'send-chat') {
+        dialog.close();
+        return;
+      }
       if (dialog.id === 'compose') {
         requestCloseComposer();
         return;

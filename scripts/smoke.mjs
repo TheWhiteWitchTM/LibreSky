@@ -3,14 +3,14 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
-import { emojiGroups, flagEmoji } from '../js/emoji.js';
+import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
 import { callIsRequest, callMayRing, defaultSearchTabs, goldFeedGate, homeAllows, normalizeSearchTabs, SEARCH_LINKS, SEARCH_POSTS, searchAllows, settleSearchTabs, sortThreadReplies } from '../js/prefs.js';
 import { activeDid, forgetAccount, getPasswordBook, listAccounts, loadDraft, saveAccount, saveDraft, setActiveDid, setPassword, setSoundPrefs, soundPrefs } from '../js/session.js';
-import { formatCallClock, setKindEnabled } from '../js/call.js';
+import { formatCallClock, incomingCall, setKindEnabled } from '../js/call.js';
 import { sdpFacts, stunServers, turnServers } from '../js/ice.js';
 import { incomingShare, prettySize } from '../js/share.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
@@ -145,6 +145,12 @@ assert.equal(flagEmoji('no-such-flag').length, 0);
 assert.ok(emojiGroups().some(([, list]) => list.some(([char]) => char === '🫠')));
 assert.ok(emojiGroups().some(([, list]) => list.some(([char]) => char === '😺')));
 assert.ok(emojiGroups('cat').some(([, list]) => list.some(([char]) => char === '😺')));
+assert.ok(emojiGroups('alert').some(([, list]) => list.some(([char]) => char === '🚨')));
+assert.ok(emojiGroups('siren').some(([, list]) => list.some(([char]) => char === '🚨')));
+assert.ok(emojiGroups('speaker').some(([, list]) => list.some(([char]) => char === '🔊')));
+assert.ok(emojiGroups('speaker').some(([, list]) => list.some(([char]) => char === '📢')));
+assert.equal(POPULAR_EMOJI.length, 10);
+assert.ok(POPULAR_EMOJI.every((row) => typeof row[0] === 'string' && row[0]));
 assert.ok(cloudProviders().every((item) => !item.local));
 assert.ok(AI_PROVIDERS.some((item) => item.local));
 assert.equal(rewriteLocalUrl('http://127.0.0.1:11434/v1/models'), 'http://127.0.0.1:11434/v1/models');
@@ -940,6 +946,9 @@ assert.match(index, /name="twitter:card" content="summary_large_image"/);
 assert.match(index, /name="twitter:site" content="@TheWhiteWitchTM"/);
 assert.match(index, /rel="canonical"/);
 assert.match(index, /G-13S6Z9KCX9/);
+assert.match(index, /id="send-chat"/);
+assert.match(index, /id="send-chat-list"/);
+assert.match(index, /id="incoming-call"/);
 assert.match(index, /assets\/banner.png/);
 assert.match(index, /id="incoming-call"/);
 assert.match(index, /id="call-title"/);
@@ -1377,6 +1386,17 @@ assert.equal(callText.media, 'audio');
 assert.equal(callText.rkey, '2222222222222');
 assert.equal(parseCallMessage('Declined the call').kind, 'decline');
 assert.equal(parseCallMessage('hello'), null);
+const callNow = new Date().toISOString();
+const ringingOffer = incomingCall([
+  { text: 'Started a voice call https://libresky.sociallydead.me/#/c/2222222222222', sender: { did: 'did:them' }, sentAt: callNow },
+], 'did:me', 'did:them');
+assert.equal(ringingOffer?.kind, 'offer');
+assert.equal(ringingOffer?.rkey, '2222222222222');
+assert.equal(ringingOffer?.media, 'audio');
+assert.equal(incomingCall([
+  { text: 'Started a voice call https://libresky.sociallydead.me/#/c/2222222222222', sender: { did: 'did:them' }, sentAt: callNow },
+  { text: 'Declined the call https://libresky.sociallydead.me/#/c/2222222222222', sender: { did: 'did:me' }, sentAt: new Date(Date.now() + 1000).toISOString() },
+], 'did:me', 'did:them'), null);
 const sdp = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n';
 const sdpBytes = new TextEncoder().encode(sdp);
 let sdpBinary = '';
@@ -1446,6 +1466,22 @@ const started = messageHtml({ id: 'm1', text: 'Started a voice call https://exam
 assert.match(started, /hidden/);
 assert.match(started, /data-id="m1"/);
 assert.doesNotMatch(started, /msg-header|Started a voice call|Voice|Video|class="bubble|data-act="call-accept"|example\.com/);
+const fromData = incomingCall([
+  { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' }, sentAt: new Date().toISOString() },
+], 'did:me', 'did:them');
+assert.equal(fromData?.kind, 'offer');
+assert.equal(fromData?.rkey, '2222222222222');
+const callBar = callBannerHtml({ rkey: '2222222222222', media: 'video' }, { convoId: 'room', peerDid: 'did:them' });
+assert.match(callBar, /Incoming video call/);
+assert.match(callBar, /data-act="call-accept"/);
+assert.match(callBar, /data-act="call-decline"/);
+assert.match(callBar, /data-convo="room"/);
+assert.match(callRequestHtml({ rkey: '2222222222222', media: 'audio', name: 'Ada', convoId: 'room', peerDid: 'did:them', ringing: true }), /Incoming voice call/);
+assert.match(appSource, /function paintIncomingCall/);
+assert.match(appSource, /function startRingtone/);
+assert.match(appSource, /function openSendToChat/);
+assert.match(appSource, /a === 'c' && b/);
+assert.doesNotMatch(appSource, /window\.prompt\('Send this post/);
 const incoming = messageHtml({ id: 'm9', text: 'new from them', sender: { did: 'did:them' } }, 'did:me', { fresh: true });
 assert.match(incoming, /class="bubble fresh"/);
 assert.doesNotMatch(incoming, /bubble mine/);

@@ -674,7 +674,19 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
     </div>
   </dialog>
 
-  <div id="incoming-call" class="incoming-call" hidden role="status"></div>
+  <dialog id="send-chat">
+    <form id="send-chat-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="send-chat-cancel">Cancel</button>
+        <strong>Send in chat</strong>
+      </div>
+      <p class="dim">Pick someone you already chat with, or enter a handle.</p>
+      <input id="send-chat-find" placeholder="Search chats or enter a handle" autocomplete="off" spellcheck="false" autocapitalize="off">
+      <div id="send-chat-list" class="send-chat-list"></div>
+    </form>
+  </dialog>
+
+  <div id="incoming-call" class="incoming-call" hidden role="status" aria-live="assertive"></div>
 
   <div id="suggest" class="suggest" popover="manual"></div>
   <div id="type-ghost" class="type-ghost" popover="manual" hidden></div>

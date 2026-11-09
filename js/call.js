@@ -31,11 +31,17 @@ export function incomingCall(messages, me, peer) {
   for (const row of rows) {
     const parsed = row.parsed;
     const sender = messageSender(row.message);
+    const sentAt = row.message.sentAt || '';
+    if (sender !== me && sender !== peer) continue;
     if (parsed.kind === 'offer' && sender === peer && parsed.rkey) {
-      offer = { ...parsed, sentAt: row.message.sentAt || '' };
+      offer = { ...parsed, sentAt };
       continue;
     }
-    if (!offer || sender === me) continue;
+    if (parsed.kind === 'data' && sender === peer && parsed.rkey) {
+      if (!offer) offer = { kind: 'offer', media: 'audio', rkey: parsed.rkey, sentAt };
+      continue;
+    }
+    if (!offer) continue;
     const sameCall = !parsed.rkey || parsed.rkey === offer.rkey;
     if (parsed.kind === 'answer' || (sameCall && (parsed.kind === 'decline' || parsed.kind === 'end'))) offer = null;
   }

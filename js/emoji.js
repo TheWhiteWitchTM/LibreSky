@@ -1654,7 +1654,7 @@ export const EMOJI = {
     ["🛢️", "oil drum"],
     ["⛽", "fuel pump"],
     ["🛞", "wheel"],
-    ["🚨", "police car light"],
+    ["🚨", "police car light alert siren emergency"],
     ["🚥", "horizontal traffic light"],
     ["🚦", "vertical traffic light"],
     ["🛑", "stop sign"],
@@ -1899,12 +1899,12 @@ export const EMOJI = {
     ["💄", "lipstick"],
     ["💍", "ring"],
     ["💎", "gem stone diamond"],
-    ["🔇", "muted speaker"],
+    ["🔇", "muted speaker quiet"],
     ["🔈", "speaker low volume"],
     ["🔉", "speaker medium volume"],
     ["🔊", "speaker high volume loud"],
-    ["📢", "loudspeaker"],
-    ["📣", "megaphone"],
+    ["📢", "loudspeaker speaker announcement alert"],
+    ["📣", "megaphone speaker cheer"],
     ["📯", "postal horn"],
     ["🔔", "bell"],
     ["🔕", "bell with slash muted"],
@@ -2135,7 +2135,7 @@ export const EMOJI = {
     ["🛃", "customs"],
     ["🛄", "baggage claim"],
     ["🛅", "left luggage"],
-    ["⚠️", "warning"],
+    ["⚠️", "warning alert caution"],
     ["🚸", "children crossing"],
     ["⛔", "no entry"],
     ["🚫", "prohibited"],
@@ -2620,6 +2620,19 @@ export const EMOJI = {
     ["🏴󠁧󠁢󠁷󠁬󠁳󠁿", "flag: wales"],
   ],
 };
+
+export const POPULAR_EMOJI = [
+  ["😂", "face with tears of joy laugh"],
+  ["❤️", "red heart love"],
+  ["🔥", "fire lit"],
+  ["👍", "thumbs up yes"],
+  ["😭", "loudly crying face sob cry"],
+  ["🙏", "folded hands please thanks pray"],
+  ["😍", "smiling face with heart-eyes heart eyes love"],
+  ["🥰", "smiling face with hearts love smile"],
+  ["🤣", "rolling on the floor laughing rofl laugh"],
+  ["✨", "sparkles"],
+];
 
 export function emojiGroups(query) {
   const needle = String(query || '').trim().toLowerCase();

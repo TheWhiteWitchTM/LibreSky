@@ -4,6 +4,13 @@ This is the record of the beta you can [open today](https://libresky.sociallydea
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 9 November 2026
+
+- Pasting a link in the post box keeps the caret lined up with the highlighted text. Links, hashtags, and @names still light up.
+- The emoji picker has a row of ten popular emoji at the top. Searching alert, siren, or speaker finds those glyphs.
+- Send in chat opens a list of people you already talk to. You can still type a handle.
+- An incoming voice or video call shows a banner you can accept or decline, on Calls and in that chat. The call link opens Calls. A ringing sound plays while it waits.
+
 ## 27 October 2026
 
 - The lock on the left of a chat opens a direct session. It starts open. Click it and it closes. Once both people have locked it, that same control sends photos and files, and the session stays open for the next one. Public STUN servers on ports 80 and 443, and public TURN relays on those ports, are tried when a direct path is blocked. Opening LibreSky does not start that session. A connection starts only when a chat message locks it or accepts one.

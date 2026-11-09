@@ -925,7 +925,9 @@ export function packHtml(pack) {
 export function callRequestHtml(offer) {
   const video = offer?.media === 'video';
   const name = offer?.name || 'Someone';
-  const label = video ? 'Video call request' : 'Voice call request';
+  const label = offer?.ringing
+    ? (video ? 'Incoming video call' : 'Incoming voice call')
+    : (video ? 'Video call request' : 'Voice call request');
   return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 

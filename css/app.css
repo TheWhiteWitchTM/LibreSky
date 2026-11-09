@@ -2092,9 +2092,11 @@ body:has(.chat-thread) { overflow: hidden; }
   font-size: 16px;
   line-height: 1.45;
   letter-spacing: 0;
+  tab-size: 8;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  scrollbar-gutter: stable;
 }
 .chat-field .field-highlight {
   position: absolute;
@@ -2192,7 +2194,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #login h2 { margin: 8px 0; font-size: 24px; }
 #login label, .mute-form { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin: 12px 0; }
-#login input, .mute-form input, #compose-previews input, .add-row input, #attach-q, .call-start input, .link-add input {
+#login input, .mute-form input, #compose-previews input, .add-row input, #attach-q, #send-chat-find, .call-start input, .link-add input {
   border: 1px solid var(--border);
   background: var(--search);
   border-radius: 999px;
@@ -2366,7 +2368,11 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   font-kerning: none;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 8;
   white-space: pre-wrap;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -2377,7 +2383,8 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   pointer-events: none;
   color: var(--text);
   -webkit-text-fill-color: var(--text);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: transparent;
 }
 #compose-highlight, .field-highlight {
@@ -2386,11 +2393,14 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 #compose-highlight { padding: 0; }
 #compose-highlight .facet,
 .field-highlight .facet {
+  display: inline;
   color: var(--blue);
   -webkit-text-fill-color: var(--blue);
+  font: inherit;
   font-weight: inherit;
   font-style: inherit;
   letter-spacing: inherit;
+  line-height: inherit;
   padding: 0;
   margin: 0;
   border: 0;
@@ -2398,8 +2408,10 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   box-shadow: inset 0 -2px 0 var(--blue);
   border-radius: 0;
   white-space: inherit;
-  overflow-wrap: inherit;
-  word-break: inherit;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 #compose-highlight .typo,
 .field-highlight .typo {
@@ -2535,7 +2547,8 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   height: auto;
   min-height: 0;
   resize: none;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 #compose-text::placeholder, .chat-field textarea::placeholder {
   color: var(--text-2);
@@ -2727,6 +2740,17 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
   padding: 6px 10px;
 }
 .token { font-family: ui-monospace, monospace; word-break: break-all; }
+.emoji-quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.emoji-quick .emoji-grid {
+  display: contents;
+}
 .emoji-grid, .gif-grid { display: grid; gap: 2px; }
 .emoji-grid { grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); }
 .gif-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
@@ -2989,6 +3013,27 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
   color: var(--text);
 }
 .attach-results { max-height: min(420px, 52vh); overflow: auto; margin-top: 8px; }
+#send-chat { width: min(460px, calc(100vw - 24px)); }
+#send-chat form { padding: 8px 16px 16px; }
+#send-chat-find { width: 100%; margin: 8px 0; }
+.send-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(420px, 52vh);
+  overflow: auto;
+  margin-top: 4px;
+}
+.send-chat-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.send-chat-row .handle { color: var(--text-2); font-weight: 500; }
 .attach-results .collection { margin-top: 8px; }
 .attach-kinds { margin: 8px 0 0; }
 [popover] {
@@ -3325,10 +3370,10 @@ body.ringing { padding-bottom: 120px; }
   position: fixed;
   left: 50%;
   bottom: 24px;
-  z-index: 25;
+  z-index: 46;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: min(460px, calc(100vw - 24px));
   padding: 12px;
   border: 2px solid var(--blue);
@@ -3338,6 +3383,12 @@ body.ringing { padding-bottom: 120px; }
   box-shadow: var(--shadow);
   transform: translateX(-50%);
 }
+@keyframes ring-pulse {
+  0%, 100% { box-shadow: var(--shadow); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--blue) 30%, transparent), var(--shadow); }
+}
+body.ringing .incoming-call:not([hidden]) { animation: ring-pulse 1.6s ease-in-out infinite; }
+.incoming-call .avatar { width: 40px; height: 40px; }
 .incoming-call.video { border-color: var(--video); }
 .incoming-call-copy { flex: 1; min-width: 0; }
 .incoming-call strong, .incoming-call-copy span { display: block; }
