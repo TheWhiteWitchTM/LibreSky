@@ -2514,6 +2514,7 @@ function watchOpenChat(convoId, peerDid, token) {
         let added = false;
         let fromThem = false;
         let incomingOffer = false;
+        let callSignal = false;
         messages.forEach((message) => {
           const escapeId = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
           if (!message?.id || list.querySelector(`[data-id="${escapeId(message.id)}"]`)) return;
@@ -2531,8 +2532,9 @@ function watchOpenChat(convoId, peerDid, token) {
           added = true;
           if (!mine) {
             fromThem = true;
-            const callKind = parseCallMessage(message.text)?.kind;
-            if (callKind === 'offer' || callKind === 'data') incomingOffer = true;
+            const call = parseCallMessage(message.text);
+            if (call) callSignal = true;
+            if (call?.kind === 'offer' || (call?.kind === 'data' && call.bare)) incomingOffer = true;
             if (parseShareMessage(message.text)?.kind === 'offer') incomingOffer = true;
           }
         });
@@ -2544,7 +2546,7 @@ function watchOpenChat(convoId, peerDid, token) {
             accepted: $('view')?.dataset.convoStatus !== 'request',
           };
           if (callMayRing(facts)) startRingtone();
-        } else if (fromThem) playSound('chat');
+        } else if (fromThem && !callSignal) playSound('chat');
         if (added) api.markConvoRead(convoId).then(refreshBadge).catch(() => {});
       }
       paintIncomingShare(messages, peerDid, convoId);

@@ -1386,6 +1386,22 @@ assert.equal(callText.media, 'audio');
 assert.equal(callText.rkey, '2222222222222');
 assert.equal(parseCallMessage('Declined the call').kind, 'decline');
 assert.equal(parseCallMessage('hello'), null);
+const callKey = '2222222222222';
+const voiceOffer = parseCallMessage(`!ls call offer audio ${callKey}`);
+assert.equal(voiceOffer.kind, 'offer');
+assert.equal(voiceOffer.media, 'audio');
+assert.equal(voiceOffer.rkey, callKey);
+const videoOffer = parseCallMessage(`!ls call offer video ${callKey}`);
+assert.equal(videoOffer.kind, 'offer');
+assert.equal(videoOffer.media, 'video');
+assert.equal(parseCallMessage(`!ls call answer video ${callKey}`).kind, 'answer');
+assert.equal(parseCallMessage(`!ls call answer video ${callKey}`).media, 'video');
+assert.equal(parseCallMessage(`!ls call decline ${callKey}`).kind, 'decline');
+assert.equal(parseCallMessage('!ls call end').kind, 'end');
+assert.equal(parseCallMessage('!ls call end').rkey, '');
+assert.equal(parseCallMessage('!hello'), null);
+assert.equal(parseCallMessage('!ls call offer video'), null);
+assert.equal(parseCallMessage(`!ls call offer video ${callKey} please`), null);
 const callNow = new Date().toISOString();
 const ringingOffer = incomingCall([
   { text: 'Started a voice call https://libresky.sociallydead.me/#/c/2222222222222', sender: { did: 'did:them' }, sentAt: callNow },
@@ -1408,6 +1424,13 @@ assert.equal(assembleCallSdp([
 assert.equal(assembleCallSdp([
   { text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
 ], '2222222222222', 'did:other'), '');
+assert.equal(assembleCallSdp([
+  { text: `!ls call sdp video 2222222222222 1/1 ${packed}`, sender: { did: 'did:peer' } },
+], '2222222222222', 'did:peer'), sdp);
+const signalLine = `!ls call sdp audio 2222222222222 1/1 ${'A'.repeat(900)}`;
+assert.ok(graphemeLength(signalLine) <= 1000);
+assert.equal(parseCallMessage(signalLine).kind, 'data');
+assert.equal(parseCallMessage(signalLine).media, 'audio');
 const shareOffer = parseShareMessage('Wants to send a file photo.jpg 2048 https://libresky.sociallydead.me/#/f/2222222222222');
 assert.equal(shareOffer.kind, 'offer');
 assert.equal(shareOffer.name, 'photo.jpg');
@@ -1471,6 +1494,20 @@ const fromData = incomingCall([
 ], 'did:me', 'did:them');
 assert.equal(fromData?.kind, 'offer');
 assert.equal(fromData?.rkey, '2222222222222');
+const routed = incomingCall([
+  { text: `!ls call sdp video 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' }, sentAt: callNow },
+  { text: '!ls call offer video 2222222222222', sender: { did: 'did:them' }, sentAt: new Date(Date.now() + 1000).toISOString() },
+], 'did:me', 'did:them');
+assert.equal(routed?.kind, 'offer');
+assert.equal(routed?.media, 'video');
+assert.equal(routed?.rkey, '2222222222222');
+assert.equal(incomingCall([
+  { text: `!ls call sdp video 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' }, sentAt: callNow },
+], 'did:me', 'did:them'), null);
+assert.equal(incomingCall([
+  { text: '!ls call offer audio 2222222222222', sender: { did: 'did:them' }, sentAt: callNow },
+  { text: '!ls call decline 2222222222222', sender: { did: 'did:me' }, sentAt: new Date(Date.now() + 1000).toISOString() },
+], 'did:me', 'did:them'), null);
 const callBar = callBannerHtml({ rkey: '2222222222222', media: 'video' }, { convoId: 'room', peerDid: 'did:them' });
 assert.match(callBar, /Incoming video call/);
 assert.match(callBar, /data-act="call-accept"/);
@@ -1510,6 +1547,15 @@ assert.doesNotMatch(callStartHtml(), /class="primary/);
 const chunk = messageHtml({ id: 'm2', text: `Call data 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' } }, 'did:me');
 assert.match(chunk, /hidden/);
 assert.doesNotMatch(chunk, /Call data/);
+const signal = messageHtml({ id: 'm3', text: '!ls call offer video 2222222222222', sender: { did: 'did:them' } }, 'did:me');
+assert.match(signal, /hidden/);
+assert.doesNotMatch(signal, /!ls|class="bubble|Video|example\.com/);
+const signalChunk = messageHtml({ id: 'm4', text: `!ls call sdp audio 2222222222222 1/1 ${packed}`, sender: { did: 'did:them' } }, 'did:me');
+assert.match(signalChunk, /hidden/);
+assert.doesNotMatch(signalChunk, /!ls|class="bubble/);
+const callSource = await readFile(path.join(root, 'js/call.js'), 'utf8');
+assert.match(callSource, /!ls call /);
+assert.doesNotMatch(callSource, /Started a voice call|Started a video call|Call data /);
 const pinnedPost = postHtml({
   post: {
     uri: 'at://did:example/app.bsky.feed.post/abc',

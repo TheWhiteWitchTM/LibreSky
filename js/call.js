@@ -38,7 +38,7 @@ export function incomingCall(messages, me, peer) {
       continue;
     }
     if (parsed.kind === 'data' && sender === peer && parsed.rkey) {
-      if (!offer) offer = { kind: 'offer', media: 'audio', rkey: parsed.rkey, sentAt };
+      if (!offer && parsed.bare) offer = { kind: 'offer', media: 'audio', rkey: parsed.rkey, sentAt };
       continue;
     }
     if (!offer) continue;
@@ -59,16 +59,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function callLink(rkey) {
-  return `${location.origin}${location.pathname}#/c/${rkey}`;
-}
-
 function sentence(kind, media, rkey) {
-  const link = callLink(rkey);
-  if (kind === 'offer') return `Started a ${media === 'video' ? 'video' : 'voice'} call ${link}`;
-  if (kind === 'answer') return `Joined the ${media === 'video' ? 'video' : 'voice'} call ${link}`;
-  if (kind === 'decline') return `Declined the call ${link}`;
-  return `Call ended ${link}`;
+  const key = RKEY.test(String(rkey || '')) ? ` ${rkey}` : '';
+  if (kind === 'offer' || kind === 'answer') {
+    const mode = media === 'video' ? 'video' : 'audio';
+    return `!ls call ${kind} ${mode}${key}`;
+  }
+  if (kind === 'decline') return `!ls call decline${key}`;
+  return `!ls call end${key}`;
 }
 
 function setStatus(text) {
@@ -238,12 +236,17 @@ function encodeSdp(sdp) {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function chunkSdp(rkey, sdp) {
+function chunkSdp(rkey, sdp, media) {
+  const mode = media === 'video' ? 'video' : 'audio';
   const packed = encodeSdp(sdp);
   const parts = [];
   for (let index = 0; index < packed.length; index += CHUNK) parts.push(packed.slice(index, index + CHUNK));
-  if (parts.length > 24) throw new Error('The call details are too large for this chat.');
-  return parts.map((part, index) => `Call data ${rkey} ${index + 1}/${parts.length} ${part}`);
+  if (parts.length > 30) throw new Error('The call details are too large for this chat.');
+  return parts.map((part, index) => {
+    const line = `!ls call sdp ${mode} ${rkey} ${index + 1}/${parts.length} ${part}`;
+    if (line.length > 1000) throw new Error('The call details are too large for this chat.');
+    return line;
+  });
 }
 
 async function readSdp(peerDid, rkey, convoId, messages) {
@@ -289,9 +292,8 @@ async function announce(convoId, kind, media, sdp) {
     uri = '';
   }
   try {
-    if (!uri) {
-      for (const line of chunkSdp(rkey, sdp)) await api.sendMessage(convoId, line);
-    }
+    const lines = chunkSdp(rkey, sdp, media);
+    for (const line of lines) await api.sendMessage(convoId, line);
     await api.sendMessage(convoId, sentence(kind === 'offer' ? 'offer' : 'answer', media, rkey));
   } catch (error) {
     if (uri) api.deleteRecord(uri).catch(() => {});
@@ -458,7 +460,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
 export async function declineCall(convoId, rkey) {
   if (!convoId) return false;
   try {
-    const text = RKEY.test(rkey || '') ? sentence('decline', '', rkey) : 'Declined the call';
+    const text = sentence('decline', '', rkey);
     await api.sendMessage(convoId, text);
     api.markConvoRead(convoId).catch(() => {});
     return true;
@@ -488,7 +490,7 @@ export async function hangUp(tell = true) {
   const dialog = $('call');
   if (dialog?.open) dialog.close();
   if (tell && current?.announced && current.convoId) {
-    const text = RKEY.test(current.rkey || '') ? sentence('end', current.media, current.rkey) : 'Call ended';
+    const text = sentence('end', current.media, current.rkey);
     api.sendMessage(current.convoId, text).catch(() => {});
     api.markConvoRead(current.convoId).catch(() => {});
   }

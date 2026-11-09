@@ -521,8 +521,32 @@ export function assembleShareSdp(messages, rkey, sender) {
   }
 }
 
+// Plain chat text, on purpose. "!ls" is not how a person starts a message, and
+// it has no link, so another app shows the line and does not open or crash on it.
+// LibreSky hides it and uses it to open the voice or video session.
+const CALL_OFFER = /^!ls call (offer|answer) (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13})$/;
+const CALL_STOP = /^!ls call (decline|end)(?: ([234567abcdefghijklmnopqrstuvwxyz]{13}))?$/;
+const CALL_SDP = /^!ls call sdp (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13}) (\d+)\/(\d+) ([A-Za-z0-9_-]+)$/;
+
 export function parseCallMessage(text) {
   const raw = String(text || '').trim();
+  const modern = raw.match(CALL_OFFER);
+  if (modern) {
+    return { kind: modern[1], media: modern[2] === 'video' ? 'video' : 'audio', rkey: modern[3] };
+  }
+  const stop = raw.match(CALL_STOP);
+  if (stop) return { kind: stop[1], media: '', rkey: stop[2] || '' };
+  const sdp = raw.match(CALL_SDP);
+  if (sdp) {
+    return {
+      kind: 'data',
+      media: sdp[1] === 'video' ? 'video' : 'audio',
+      rkey: sdp[2],
+      index: Number(sdp[3]),
+      total: Number(sdp[4]),
+      chunk: sdp[5],
+    };
+  }
   let kind = '';
   let media = '';
   if (/^Started a voice call\b/.test(raw)) { kind = 'offer'; media = 'audio'; }
@@ -541,6 +565,7 @@ export function parseCallMessage(text) {
       index: Number(data[2]),
       total: Number(data[3]),
       chunk: data[4],
+      bare: true,
     };
   }
   const link = raw.match(/https?:\/\/\S+/)?.[0] || '';
