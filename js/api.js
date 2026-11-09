@@ -23,9 +23,18 @@ import {
   isMissingRecord as missingRecord,
   readXrpcResponse,
   xrpcPath,
-} from '../lib/dist/index.js';
+} from '../lib/libbluesky/dist/index.js';
+import { LibreSkyData } from '../lib/liblibresky/dist/index.js';
 
-export { applySavedFeeds, savedFeedItems } from '../lib/dist/index.js';
+export { applySavedFeeds, savedFeedItems } from '../lib/libbluesky/dist/index.js';
+export {
+  LINK_KINDS,
+  LINK_LABEL,
+  articleExcerpt,
+  normalizeLink,
+  presentLink,
+  profileTabIds,
+} from '../lib/liblibresky/dist/index.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -809,14 +818,119 @@ export function createShareSignal(record) {
   });
 }
 
+const repoEndpoints = new Map();
+
+async function repoEndpoint(repo) {
+  const key = String(repo || '');
+  if (repoEndpoints.has(key)) return repoEndpoints.get(key);
+  const found = await resolvePds(key);
+  repoEndpoints.set(key, found);
+  repoEndpoints.set(found.did, found);
+  return found;
+}
+
 export async function getPublicRecord(repo, collection, rkey) {
-  const found = await resolvePds(repo);
+  const found = await repoEndpoint(repo);
   const url = new URL('/xrpc/com.atproto.repo.getRecord', found.pds);
-  url.searchParams.set('repo', repo);
+  url.searchParams.set('repo', found.did);
   url.searchParams.set('collection', collection);
   url.searchParams.set('rkey', rkey);
   const res = await fetch(url);
   return readXrpcResponse(res);
+}
+
+export async function listPublicRecords(repo, collection, cursor) {
+  const found = await repoEndpoint(repo);
+  const url = new URL('/xrpc/com.atproto.repo.listRecords', found.pds);
+  url.searchParams.set('repo', found.did);
+  url.searchParams.set('collection', collection);
+  url.searchParams.set('limit', '100');
+  if (cursor) url.searchParams.set('cursor', cursor);
+  const res = await fetch(url);
+  return readXrpcResponse(res);
+}
+
+function librePort() {
+  return {
+    did: () => currentDid(),
+    async getRecord(repo, collection, rkey) {
+      try {
+        return await getPublicRecord(repo, collection, rkey);
+      } catch (error) {
+        if (missingRecord(error)) return null;
+        throw error;
+      }
+    },
+    async listRecords(repo, collection, cursor) {
+      const data = await listPublicRecords(repo, collection, cursor);
+      return { records: data?.records || [], cursor: data?.cursor || '' };
+    },
+    async putRecord(collection, rkey, record) {
+      return xrpc('com.atproto.repo.putRecord', {
+        body: {
+          repo: currentDid(),
+          collection,
+          rkey,
+          record,
+          validate: false,
+        },
+        auth: 'required',
+      });
+    },
+    async createRecord(collection, record) {
+      return xrpc('com.atproto.repo.createRecord', {
+        body: {
+          repo: currentDid(),
+          collection,
+          record,
+          validate: false,
+        },
+        auth: 'required',
+      });
+    },
+    deleteRecord(uri) {
+      return deleteRecord(uri);
+    },
+  };
+}
+
+let libreData = null;
+
+function libre() {
+  libreData ??= new LibreSkyData(librePort());
+  return libreData;
+}
+
+export function readShelf(did) {
+  return libre().readShelf(did);
+}
+
+export function readArticle(did, rkey) {
+  return libre().readArticle(did, rkey);
+}
+
+export function writeSocialLinks(links) {
+  return libre().writeLinks(links);
+}
+
+export function addHighlight(uri, cid) {
+  return libre().addHighlight({ uri, cid });
+}
+
+export function removeHighlightPost(uri) {
+  return libre().removeHighlightPost(uri);
+}
+
+export function removeHighlight(uri) {
+  return libre().removeHighlight(uri);
+}
+
+export function saveArticle(input) {
+  return libre().saveArticle(input);
+}
+
+export function deleteArticle(uri) {
+  return libre().deleteArticle(uri);
 }
 
 export function deleteRecord(uri) {

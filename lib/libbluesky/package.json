@@ -1,8 +1,8 @@
 {
-  "name": "@libresky/protocol",
+  "name": "@libresky/bluesky",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed AT Protocol and Bluesky client library used by LibreSky.",
+  "description": "Typed AT Protocol and Bluesky client. One of the LibreSky libraries.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

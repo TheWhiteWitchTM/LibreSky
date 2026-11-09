@@ -30,6 +30,9 @@ import {
   packHtml,
   postHtml,
   profileHtml,
+  articleCardHtml,
+  articlePageHtml,
+  imageUrl,
   collectionKind,
   resetPosts,
   skeletons,
@@ -169,6 +172,8 @@ let shownProfile = null;
 let profileLinkViews = [];
 let profileFeatured = new Set();
 let profileTab = { actor: '', tab: 'posts' };
+let profileShelf = { links: [], highlights: [], articles: [] };
+let myHighlights = null;
 const navStack = [];
 let dictateRec = null;
 let dictateTargetId = '';
@@ -3051,10 +3056,28 @@ const PROFILE_FILTERS = {
   likes: ['likes', 'Likes'],
 };
 
+const PROFILE_LABELS = {
+  posts: 'Posts',
+  replies: 'Replies',
+  highlights: 'Highlights',
+  articles: 'Articles',
+  media: 'Media',
+  likes: 'Likes',
+};
+
+function emptyShelf() {
+  return { links: [], highlights: [], articles: [] };
+}
+
 function profileTabs(actor, current, links = []) {
-  const tabs = Object.entries(PROFILE_FILTERS).map(([id, [, label]]) => ({
+  const ids = api.profileTabIds({
+    highlights: profileShelf.highlights.length,
+    articles: profileShelf.articles.length,
+    current,
+  });
+  const tabs = ids.map((id) => ({
     href: id === 'posts' ? `#/profile/${encodeURIComponent(actor)}` : `#/profile/${encodeURIComponent(actor)}/${id}`,
-    label,
+    label: PROFILE_LABELS[id] || id,
     on: id === current,
   }));
   links.forEach((link) => {
@@ -3107,21 +3130,91 @@ function paintProfileTabs() {
   watchStrips(host);
 }
 
+function rememberMyHighlights(shelf) {
+  myHighlights = new Map((shelf?.highlights || []).map((item) => [item.subjectUri, item.uri]));
+}
+
+function profileHead(profile) {
+  const links = (profileShelf.links || []).map((link) => api.presentLink(link));
+  return `${profileHtml(profile, { links })}<div id="profile-tabs"></div>`;
+}
+
+function finishProfile(profile, token, html, action) {
+  forgetStrips($('view'));
+  $('view').innerHTML = html;
+  revealProfileBanner();
+  paintProfileTabs();
+  $('profile-action').innerHTML = action;
+  remember();
+  document.documentElement.dataset.ready = '1';
+  loadProfileShelf(profile, token);
+}
+
+function articlesBody(profile) {
+  const own = signedIn() && profile.did === myDid();
+  const bar = own ? '<div class="toolbar"><button type="button" class="text-btn" data-act="new-article">New article</button></div>' : '';
+  const cards = (profileShelf.articles || []).map((article) => articleCardHtml(article, { did: profile.did, actor: profile.handle })).join('');
+  const blank = cards ? '' : emptyHtml('No articles', own ? 'Write one with New article. Other LibreSky profiles can read it.' : 'Nothing in this tab yet.');
+  return `${bar}${cards}${blank}`;
+}
+
+async function highlightsBody(profile, token) {
+  const own = signedIn() && profile.did === myDid();
+  const items = profileShelf.highlights || [];
+  const data = items.length ? await api.getPosts(items.map((item) => item.subjectUri)) : { posts: [] };
+  if (token !== generation) return '';
+  const byUri = new Map((data.posts || []).map((post) => [post.uri, post]));
+  const posts = [];
+  const gone = [];
+  items.forEach((item) => {
+    const post = byUri.get(item.subjectUri);
+    if (post) posts.push({ post });
+    else gone.push(item);
+  });
+  const goneHtml = own
+    ? gone.map((item) => `<div class="lane-row"><span>A highlighted post is gone.</span><button type="button" class="danger mini" data-act="unhighlight" data-uri="${escapeHtml(item.uri)}">Remove</button></div>`).join('')
+    : '';
+  const feed = feedHtml(posts);
+  const blank = feed || goneHtml ? '' : emptyHtml('No highlights', own ? 'Open one of your posts and choose Add to Highlights.' : 'Nothing in this tab yet.');
+  return `${goneHtml}${feed}${blank}`;
+}
+
 async function showProfile(actor, tab) {
   const token = ++generation;
-  const current = PROFILE_FILTERS[tab] ? tab : 'posts';
+  const current = PROFILE_LABELS[tab] ? tab : 'posts';
   shownProfile = null;
   profileLinkViews = [];
   profileFeatured = new Set();
+  profileShelf = emptyShelf();
   profileTab = { actor, tab: current };
   setChrome({ title: 'Profile', nav: 'profile', back: true });
   showSkeletons();
   try {
     const profile = await api.getProfile(actor);
     if (token !== generation) return;
+    shownProfile = profile;
+    try {
+      profileShelf = await api.readShelf(profile.did);
+    } catch {
+      profileShelf = emptyShelf();
+    }
+    if (token !== generation) return;
+    if (profile.did === myDid()) rememberMyHighlights(profileShelf);
     $('title').textContent = profile.displayName || profile.handle;
     document.title = `${$('title').textContent} — LibreSky`;
     const action = profileAction(profile);
+    const head = profileHead(profile);
+    if (current === 'highlights') {
+      resetPosts();
+      const body = await highlightsBody(profile, token);
+      if (token !== generation) return;
+      finishProfile(profile, token, `${head}${body}`, action);
+      return;
+    }
+    if (current === 'articles') {
+      finishProfile(profile, token, `${head}${articlesBody(profile)}`, action);
+      return;
+    }
     let feed;
     if (current === 'likes') feed = await api.getActorLikes(profile.handle);
     else feed = await api.getAuthorFeed(profile.handle, PROFILE_FILTERS[current][0]);
@@ -3136,14 +3229,7 @@ async function showProfile(actor, tab) {
     const blank = pinHtml || postsHtml
       ? postsHtml
       : (feed.cursor ? '<p class="dim lang-wait">Loading posts…</p>' : emptyHtml('No posts', 'Nothing in this tab yet.'));
-    shownProfile = profile;
-    forgetStrips($('view'));
-    $('view').innerHTML = `${profileHtml(profile)}<div id="profile-tabs"></div>${pinHtml}${blank}`;
-    revealProfileBanner();
-    paintProfileTabs();
-    $('profile-action').innerHTML = action;
-    remember();
-    document.documentElement.dataset.ready = '1';
+    finishProfile(profile, token, `${head}${pinHtml}${blank}`, action);
     const more = async (cursor) => {
       const page = current === 'likes'
         ? await api.getActorLikes(profile.handle, cursor)
@@ -3159,9 +3245,32 @@ async function showProfile(actor, tab) {
       pagerFor(page.cursor, more);
     };
     pagerFor(feed.cursor, more);
-    loadProfileShelf(profile, token);
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Profile unavailable', error.message);
+  }
+}
+
+async function showArticle(actor, rkey) {
+  const token = ++generation;
+  setChrome({ title: 'Article', nav: 'profile', back: true });
+  showSkeletons();
+  try {
+    const profile = await api.getProfile(actor);
+    if (token !== generation) return;
+    const article = await api.readArticle(profile.did, rkey);
+    if (token !== generation) return;
+    if (!article) {
+      $('view').innerHTML = emptyHtml('Article unavailable', 'This article is not on the profile.');
+      return;
+    }
+    shownProfile = profile;
+    const own = signedIn() && profile.did === myDid();
+    $('title').textContent = article.title;
+    document.title = `${article.title} — LibreSky`;
+    $('view').innerHTML = articlePageHtml(article, { did: profile.did, actor: profile.handle, own });
+    document.documentElement.dataset.ready = '1';
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Article unavailable', error.message);
   }
 }
 
@@ -3702,6 +3811,8 @@ function openProfileMenu(anchor) {
   const items = [];
   if (mine) {
     items.push({ id: 'edit-profile', label: 'Edit profile' });
+    items.push({ id: 'social-links', label: 'Social links' });
+    items.push({ id: 'new-article', label: 'New article' });
     items.push({ id: 'edit-links', label: 'Edit links' });
   }
   if (!mine && signedIn() && !blocking) {
@@ -6488,6 +6599,7 @@ function route() {
   if (a === 'ukraine') return showUkraine();
   if (a === 'settings') return showSettings();
   if (a === 'profile' && b && c === 'post' && d) return showThread(b, d);
+  if (a === 'profile' && b && c === 'article' && d) return showArticle(b, d);
   if (a === 'profile' && b && (c === 'followers' || c === 'following')) return showPeople(b, c);
   if (a === 'profile' && b) return showProfile(b, c || 'posts');
   return showHome({ kind: 'following' });
@@ -10089,6 +10201,27 @@ async function onClick(event) {
     unpinFeatured(event.target.closest('[data-uri]')?.dataset.uri || '');
     return;
   }
+  if (act === 'social-remove') {
+    const dialog = $('social-links');
+    const index = Number(event.target.closest('[data-index]')?.dataset.index);
+    if (dialog?._links && Number.isInteger(index)) dialog._links.splice(index, 1);
+    paintSocialDraft();
+    return;
+  }
+  if (act === 'social-add') return addSocialDraft();
+  if (act === 'new-article') return openArticleEditor();
+  if (act === 'edit-article') return openArticleEditor(event.target.closest('[data-uri]')?.dataset.uri || '');
+  if (act === 'delete-article') return removeArticle(event.target.closest('[data-uri]')?.dataset.uri || '');
+  if (act === 'unhighlight' && !postFrom(event.target)?.post) {
+    const uri = event.target.closest('[data-uri]')?.dataset.uri || '';
+    if (!uri) return;
+    try {
+      await api.removeHighlight(uri);
+      toast('Removed from Highlights');
+      route();
+    } catch (error) { toast(error.message); }
+    return;
+  }
   if (act === 'shelf-more') {
     event.preventDefault();
     const more = event.target.nextElementSibling;
@@ -10222,9 +10355,12 @@ function repostMenu(anchor, found) {
   $('menu')._post = found;
 }
 
-function moreMenu(anchor, found) {
+async function moreMenu(anchor, found) {
   const author = found.post.author || {};
   const own = author.did && author.did === myDid();
+  if (own && !myHighlights) {
+    try { rememberMyHighlights(await api.readShelf(myDid())); } catch { myHighlights = new Map(); }
+  }
   const pinnedUri = me.profile?.pinnedPost?.uri || me.profile?.pinnedPost?.post?.uri || '';
   const items = [
     { id: 'share', label: 'Share' },
@@ -10235,6 +10371,8 @@ function moreMenu(anchor, found) {
   items.push({ id: 'send-chat', label: 'Send in chat' });
   if (found.article.dataset.bookmarked === '1') items.push({ id: 'unbookmark', label: 'Remove bookmark', danger: true });
   if (own) {
+    const marked = myHighlights?.has(found.post.uri);
+    items.push({ id: marked ? 'unhighlight' : 'highlight', label: marked ? 'Remove from Highlights' : 'Add to Highlights' });
     items.push({ id: 'edit-post', label: 'Edit' });
     items.push({ id: pinnedUri === found.post.uri ? 'unpin' : 'pin', label: pinnedUri === found.post.uri ? 'Unpin from profile' : 'Pin to profile' });
     items.push({ id: 'delete', label: 'Delete', danger: true });
@@ -10306,6 +10444,188 @@ function openProfileEditor() {
     preview.removeAttribute('src');
   }
   if (!$('profile-edit').open) $('profile-edit').showModal();
+}
+
+function socialKindOptions() {
+  const select = $('social-kind');
+  if (!select || select.dataset.ready) return;
+  const kinds = [['', 'Match the link'], ...api.LINK_KINDS.map((kind) => [kind, api.LINK_LABEL[kind] || kind])];
+  select.innerHTML = kinds.map(([id, label]) => `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`).join('');
+  select.dataset.ready = '1';
+}
+
+function paintSocialDraft() {
+  const dialog = $('social-links');
+  const host = $('social-current');
+  if (!dialog || !host) return;
+  const rows = (dialog._links || []).map((link, index) => {
+    const shown = api.presentLink(link);
+    return `<div class="lane-row"><span><strong>${escapeHtml(shown.label)}</strong><span class="handle">${escapeHtml(shown.url)}</span></span><button type="button" class="danger mini" data-act="social-remove" data-index="${index}">Remove</button></div>`;
+  }).join('');
+  host.innerHTML = rows || '<p class="dim">No social links yet.</p>';
+}
+
+async function openSocialLinks() {
+  if (!signedIn()) return requireSignIn();
+  const dialog = $('social-links');
+  if (!dialog) return;
+  socialKindOptions();
+  let links = shownProfile?.did === myDid() ? profileShelf.links : [];
+  if (shownProfile?.did !== myDid()) {
+    try { links = (await api.readShelf(myDid())).links || []; } catch { links = []; }
+  }
+  dialog._links = (links || []).map((link) => ({ ...link }));
+  if ($('social-url')) $('social-url').value = '';
+  if ($('social-label')) $('social-label').value = '';
+  if ($('social-kind')) $('social-kind').value = '';
+  paintSocialDraft();
+  if (!dialog.open) dialog.showModal();
+}
+
+function addSocialDraft() {
+  const dialog = $('social-links');
+  if (!dialog) return;
+  if ((dialog._links || []).length >= 8) {
+    toast('A profile can show 8 social links.');
+    return;
+  }
+  try {
+    dialog._links.push(api.normalizeLink({
+      url: $('social-url')?.value || '',
+      label: $('social-label')?.value || '',
+      kind: $('social-kind')?.value || '',
+    }));
+    if ($('social-url')) $('social-url').value = '';
+    if ($('social-label')) $('social-label').value = '';
+    if ($('social-kind')) $('social-kind').value = '';
+    paintSocialDraft();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveSocialLinks(event) {
+  event.preventDefault();
+  const button = event.target.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await api.writeSocialLinks($('social-links')?._links || []);
+    $('social-links')?.close();
+    toast('Social links saved');
+    if (parseHash()[0] === 'profile') route();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function resetArticleCover(dialog, cover, did) {
+  dialog._cover = cover || null;
+  dialog._clearCover = false;
+  if ($('article-cover')) $('article-cover').value = '';
+  const preview = $('article-cover-preview');
+  const src = cover && did ? imageUrl(did, cover) : '';
+  if (!preview) return;
+  if (src) {
+    preview.src = src;
+    preview.hidden = false;
+  } else {
+    preview.hidden = true;
+    preview.removeAttribute('src');
+  }
+}
+
+async function openArticleEditor(uri) {
+  if (!signedIn()) return requireSignIn();
+  const dialog = $('article-edit');
+  if (!dialog) return;
+  dialog._uri = '';
+  dialog._createdAt = '';
+  resetArticleCover(dialog, null, '');
+  $('article-title').value = '';
+  $('article-summary').value = '';
+  $('article-text').value = '';
+  $('article-heading').textContent = 'New article';
+  const submit = dialog.querySelector('button[type="submit"]');
+  if (submit) submit.textContent = 'Publish';
+  if (uri) {
+    const article = await api.readArticle(myDid(), String(uri).split('/').pop());
+    if (!article) {
+      toast('That article is gone.');
+      return;
+    }
+    dialog._uri = article.uri;
+    dialog._createdAt = article.createdAt;
+    $('article-title').value = article.title;
+    $('article-summary').value = article.summary || '';
+    $('article-text').value = article.text;
+    $('article-heading').textContent = 'Edit article';
+    if (submit) submit.textContent = 'Save';
+    resetArticleCover(dialog, article.cover, myDid());
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+async function saveArticle(event) {
+  event.preventDefault();
+  const dialog = $('article-edit');
+  const button = event.target.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    let cover = dialog._clearCover ? null : dialog._cover;
+    const file = $('article-cover')?.files?.[0];
+    if (file) cover = await api.uploadBlob(await compress(file));
+    const saved = await api.saveArticle({
+      uri: dialog._uri || undefined,
+      title: $('article-title').value,
+      summary: $('article-summary').value,
+      text: $('article-text').value,
+      cover,
+      createdAt: dialog._createdAt || undefined,
+    });
+    const actor = shownProfile?.handle || myDid();
+    const next = `#/profile/${encodeURIComponent(actor)}/article/${encodeURIComponent(saved.rkey)}`;
+    dialog.close();
+    toast(dialog._uri ? 'Article saved' : 'Article published');
+    if (location.hash === next) route();
+    else location.hash = next;
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function removeArticle(uri) {
+  if (!uri || !window.confirm('Delete this article?')) return;
+  try {
+    await api.deleteArticle(uri);
+    toast('Article deleted');
+    const actor = shownProfile?.handle || parseHash()[1] || myDid();
+    const next = `#/profile/${encodeURIComponent(actor)}/articles`;
+    if (location.hash === next) route();
+    else location.hash = next;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function toggleHighlight(found, remove) {
+  if (!signedIn()) return requireSignIn();
+  if (!found?.post?.uri) return;
+  try {
+    if (remove) await api.removeHighlightPost(found.post.uri);
+    else await api.addHighlight(found.post.uri, found.post.cid);
+    if (!myHighlights) myHighlights = new Map();
+    if (remove) myHighlights.delete(found.post.uri);
+    else myHighlights.set(found.post.uri, '1');
+    toast(remove ? 'Removed from Highlights' : 'Added to Highlights');
+    const [page, , tab] = parseHash();
+    if (page === 'profile' && tab !== 'post' && tab !== 'article' && (tab === 'highlights' || shownProfile?.did === myDid())) route();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 async function saveProfile(event) {
@@ -10384,7 +10704,10 @@ async function onMenu(event) {
     return;
   }
   if (id === 'edit-profile') return openProfileEditor();
+  if (id === 'social-links') return openSocialLinks();
+  if (id === 'new-article') return openArticleEditor();
   if (id === 'edit-links') return openAttachPicker('profile');
+  if (id === 'highlight' || id === 'unhighlight') return toggleHighlight(found, id === 'unhighlight');
   if (id === 'message-profile') {
     if (!signedIn()) return requireSignIn();
     try {
@@ -11484,6 +11807,27 @@ function bind() {
   $('report-cancel').addEventListener('click', () => $('report').close());
   $('profile-form').addEventListener('submit', saveProfile);
   $('profile-cancel').addEventListener('click', () => $('profile-edit').close());
+  $('social-form')?.addEventListener('submit', saveSocialLinks);
+  $('social-cancel')?.addEventListener('click', () => $('social-links')?.close());
+  $('article-form')?.addEventListener('submit', saveArticle);
+  $('article-cancel')?.addEventListener('click', () => $('article-edit')?.close());
+  $('article-cover')?.addEventListener('change', () => {
+    const file = $('article-cover').files?.[0];
+    if (!file) return;
+    $('article-edit')._clearCover = false;
+    $('article-cover-preview').src = URL.createObjectURL(file);
+    $('article-cover-preview').hidden = false;
+  });
+  $('article-cover-clear')?.addEventListener('click', () => {
+    const dialog = $('article-edit');
+    if (dialog) {
+      dialog._clearCover = true;
+      dialog._cover = null;
+    }
+    if ($('article-cover')) $('article-cover').value = '';
+    $('article-cover-preview').hidden = true;
+    $('article-cover-preview').removeAttribute('src');
+  });
   $('profile-banner')?.addEventListener('change', () => {
     const file = $('profile-banner').files?.[0];
     if (!file) return;

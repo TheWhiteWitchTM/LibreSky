@@ -58,6 +58,8 @@ You can browse before you sign in, or sign in with an app password. This browser
 
 Posts come from your Bluesky account. The whole client is this site.
 
+Open a profile and the tabs follow what that account published. Highlights and Articles show on the row when the account has them. Social links sit under the name as a short toolbar. LibreSky writes those with its own lexicons, in the account’s public records, so another LibreSky window can read them.
+
 ## Write it
 
 The composer takes images, a video, a link, a GIF, emoji, and a feed, list, or starter pack. Bold, italic, strikethrough, and monospace sit on the bar. The mic types what you say, in a post or a chat, in Chrome and Edge. Tab finishes a word, an `@` name, or a `#` tag.

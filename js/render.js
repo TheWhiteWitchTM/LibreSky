@@ -395,7 +395,33 @@ function joinedLine(iso) {
   return `<p class="joined">Joined ${escapeHtml(label)}</p>`;
 }
 
-export function profileHtml(profile) {
+const SOCIAL_ICON = {
+  website: 'globe',
+  x: 'x',
+  instagram: 'instagram',
+  youtube: 'youtube',
+  github: 'github',
+  mastodon: 'mastodon',
+  tiktok: 'tiktok',
+  facebook: 'facebook',
+  linkedin: 'linkedin',
+  threads: 'threads',
+  bluesky: 'bluesky',
+  other: 'link',
+};
+
+function socialToolbarHtml(links) {
+  const items = (links || []).filter((link) => safeUrl(link?.url));
+  if (!items.length) return '';
+  const buttons = items.map((link) => {
+    const href = safeUrl(link.url);
+    const glyph = SOCIAL_ICON[link.kind] || 'link';
+    return `<a href="${attr(href)}" target="_blank" rel="noopener noreferrer">${icon(glyph)}<span>${escapeHtml(link.label || 'Link')}</span></a>`;
+  }).join('');
+  return `<nav class="social-toolbar" aria-label="Social links">${buttons}</nav>`;
+}
+
+export function profileHtml(profile, options = {}) {
   const banner = safeUrl(profile.banner || '');
   const name = profile.displayName || profile.handle;
   return `<header class="profile">
@@ -409,7 +435,39 @@ export function profileHtml(profile) {
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     ${joinedLine(profile.createdAt)}
     <p class="counts"><a href="#/profile/${encodeURIComponent(profile.handle)}/following"><strong>${fullCount(profile.followsCount)}</strong> following</a><a href="#/profile/${encodeURIComponent(profile.handle)}/followers"><strong>${fullCount(profile.followersCount)}</strong> followers</a><span><strong>${fullCount(profile.postsCount)}</strong> posts</span></p>
+    ${socialToolbarHtml(options.links)}
   </header>`;
+}
+
+function articleWhen(iso) {
+  const date = new Date(iso || '');
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function articleBlurb(article) {
+  const source = String(article?.summary || article?.text || '').replace(/\s+/g, ' ').trim();
+  if (source.length <= 180) return source;
+  return `${source.slice(0, 179).trimEnd()}…`;
+}
+
+export function articleCardHtml(article, { did = '', actor = '' } = {}) {
+  const who = actor || did;
+  const href = `#/profile/${encodeURIComponent(who)}/article/${encodeURIComponent(article?.rkey || '')}`;
+  const cover = blobImage(did, article?.cover, 'feed_thumbnail');
+  const when = articleWhen(article?.createdAt);
+  return `<a class="article-card${cover ? '' : ' no-cover'}" href="${attr(href)}">${cover ? `<img src="${attr(cover)}" alt="">` : ''}<span><strong>${escapeHtml(article?.title || 'Article')}</strong>${when ? `<span class="handle">${escapeHtml(when)}</span>` : ''}<span class="snip">${escapeHtml(articleBlurb(article))}</span></span></a>`;
+}
+
+export function articlePageHtml(article, { did = '', actor = '', own = false } = {}) {
+  const who = actor || did;
+  const back = `#/profile/${encodeURIComponent(who)}/articles`;
+  const cover = blobImage(did, article?.cover, 'feed_fullsize');
+  const when = articleWhen(article?.createdAt);
+  const actions = own
+    ? `<div class="toolbar"><button type="button" class="text-btn" data-act="edit-article" data-uri="${attr(article?.uri)}">Edit</button><button type="button" class="danger mini" data-act="delete-article" data-uri="${attr(article?.uri)}">Delete</button></div>`
+    : '';
+  return `<article class="article-page">${actions}<p class="dim"><a href="${attr(back)}">Articles</a></p>${cover ? `<img class="article-cover" src="${attr(cover)}" alt="">` : ''}<h2>${escapeHtml(article?.title || 'Article')}</h2>${when ? `<p class="joined">${escapeHtml(when)}</p>` : ''}<div class="article-body">${richText(article?.text || '')}</div></article>`;
 }
 
 export function actorHtml(actor, options = {}) {
@@ -463,11 +521,19 @@ function blobCid(blob) {
   return blob.ref?.$link || blob.cid || '';
 }
 
-function blobCdn(did, blob) {
+function blobImage(did, blob, preset) {
   const cid = blobCid(blob);
   const actor = String(did || '').trim();
   if (!cid || !actor.startsWith('did:')) return '';
-  return `https://cdn.bsky.app/img/feed_thumbnail/plain/${actor}/${cid}@jpeg`;
+  return `https://cdn.bsky.app/img/${preset}/plain/${actor}/${cid}@jpeg`;
+}
+
+function blobCdn(did, blob) {
+  return blobImage(did, blob, 'feed_thumbnail');
+}
+
+export function imageUrl(did, blob, preset = 'feed_thumbnail') {
+  return blobImage(did, blob, preset);
 }
 
 function postHrefFromUri(uri) {

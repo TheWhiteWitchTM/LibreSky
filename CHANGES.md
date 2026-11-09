@@ -6,6 +6,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 9 November 2026
 
+- A profile can show Highlights and Articles on the tab row, and a toolbar of social links under the name. Those records are public on the account. Another LibreSky window reads them.
 - The Ukraine flag and its door are gone from the top bar. Ukraine stays on the Search row.
 - Pasting a link in the post box keeps the caret lined up with the highlighted text. Links, hashtags, and @names still light up.
 - The emoji picker has a row of ten popular emoji at the top. Searching alert, siren, or speaker finds those glyphs.

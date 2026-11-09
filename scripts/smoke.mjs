@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
@@ -599,6 +599,26 @@ const headed = profileHtml({
 });
 assert.match(headed, /class="banner"/);
 assert.match(headed, /src="https:\/\/cdn.example\/banner.jpg"/);
+assert.doesNotMatch(headed, /social-toolbar/);
+const linked = profileHtml({
+  handle: 'me.bsky.social',
+  displayName: 'Me',
+  did: 'did:plc:me',
+}, {
+  links: [{ url: 'https://x.com/me', label: 'X', kind: 'x' }],
+});
+assert.match(linked, /class="social-toolbar"/);
+assert.match(linked, /href="https:\/\/x.com\/me"/);
+assert.match(linked, />X</);
+const articleCard = articleCardHtml({
+  title: 'Hello sky',
+  text: 'Body',
+  summary: 'Short',
+  rkey: 'abc',
+  createdAt: '2026-11-01T00:00:00.000Z',
+}, { did: 'did:plc:me', actor: 'me.bsky.social' });
+assert.match(articleCard, /Hello sky/);
+assert.match(articleCard, /#\/profile\/me\.bsky\.social\/article\/abc/);
 assert.equal(bskyPostParts('https://bsky.app/profile/jay.bsky.team/post/abc123')?.rkey, 'abc123');
 assert.equal(xStatusParts('https://x.com/jack/status/20')?.id, '20');
 assert.equal(trimLink('https://example.com/a.'), 'https://example.com/a');

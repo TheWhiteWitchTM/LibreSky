@@ -1,0 +1,16 @@
+{
+  "name": "@libresky/libresky",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LibreSky profile records: highlights, articles, and social links. Uses the Bluesky library and stores public lexicons in the account repo.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false
+}

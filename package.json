@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build:auth": "esbuild src/oauth-entry.js --bundle --format=esm --platform=browser --target=es2022 --outfile=js/vendor/auth.js --legal-comments=none",
-    "build:lib": "node lib/scripts/generate.mjs && tsc -p lib/tsconfig.json && node lib/scripts/bundle.mjs",
-    "test:lib": "node --test --test-isolation=process lib/test/*.test.mjs",
+    "build:lib": "node lib/libbluesky/scripts/generate.mjs && tsc -p lib/libbluesky/tsconfig.json && node lib/libbluesky/scripts/bundle.mjs && node lib/liblibresky/scripts/generate.mjs && tsc -p lib/liblibresky/tsconfig.json && node lib/liblibresky/scripts/bundle.mjs",
+    "test:lib": "node --test --test-isolation=process lib/libbluesky/test/*.test.mjs lib/liblibresky/test/*.test.mjs",
     "smoke": "node scripts/smoke.mjs",
     "desktop": "node scripts/pack-desktop.mjs"
   },

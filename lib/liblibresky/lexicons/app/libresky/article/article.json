@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "app.libresky.article.article",
+  "description": "A long article LibreSky shows on the profile Articles tab. The record is public in the account repo.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One article.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["title", "text", "createdAt"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 3000, "maxGraphemes": 300 },
+          "text": { "type": "string", "maxLength": 100000, "maxGraphemes": 25000 },
+          "summary": { "type": "string", "maxLength": 4000, "maxGraphemes": 400 },
+          "cover": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg"],
+            "maxSize": 1000000
+          },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "updatedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

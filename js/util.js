@@ -1,4 +1,4 @@
-import { AtUri } from '../lib/dist/index.js';
+import { AtUri } from '../lib/libbluesky/dist/index.js';
 
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
