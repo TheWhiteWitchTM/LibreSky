@@ -6192,7 +6192,6 @@ function openTour(index = 0) {
   closeAppMenu();
   closeMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   const steps = tourStepList();
   tourIndex = Math.max(0, Math.min(index, steps.length - 1));
   overlay.hidden = false;
@@ -6395,7 +6394,6 @@ function route() {
   closeMenu();
   closeAppMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   if (designOn()) paintDesignReadout();
   hideSuggest();
   closeHover();
@@ -7616,7 +7614,6 @@ function toggleAppMenu() {
   }
   closeMenu();
   closeAlphaMenu();
-  closeUkraineMenu();
   hideTip();
   showLayer(menu);
   button.setAttribute('aria-expanded', 'true');
@@ -11149,11 +11146,6 @@ function onKey(event) {
       closeAlphaMenu(true);
       return;
     }
-    if (document.querySelector('.ua-wrap.is-open')) {
-      event.preventDefault();
-      closeUkraineMenu(true);
-      return;
-    }
     const menu = $('menu');
     if (layerOpen(menu)) {
       event.preventDefault();
@@ -11310,7 +11302,6 @@ function bind() {
       closeMenu();
       closeAppMenu();
       closeAlphaMenu();
-      closeUkraineMenu();
     }
     placeFresh();
     syncToTop();
@@ -11323,7 +11314,6 @@ function bind() {
     if (performance.now() - layerOpenedAt >= 450) {
       closeMenu();
       closeAppMenu();
-      closeUkraineMenu();
     } else {
       placeOpenLayers();
     }
@@ -11341,7 +11331,6 @@ function bind() {
   });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.alpha-wrap')) closeAlphaMenu();
-    if (!event.target.closest('.ua-wrap')) closeUkraineMenu();
     if (!event.target.closest('#app-menu, #app-menu-btn')) closeAppMenu();
     if (!event.target.closest('#menu, [data-act="more"], [data-act="nav-more"], [data-act="tab-menu"], [data-act="search-menu"], [data-act="profile-menu"], [data-act="repost"], #account-btn, #more-btn')) closeMenu();
     if (!event.target.closest('#suggest, #compose-text, #chat-text, #ai-text, #new-chat-handle')) hideSuggest();
@@ -12415,13 +12404,6 @@ function closeAlphaMenu(focus) {
   if (focus) document.getElementById('alpha-mark')?.focus();
 }
 
-function closeUkraineMenu(focus) {
-  const wrap = document.querySelector('.ua-wrap');
-  if (!wrap?.classList.contains('is-open')) return;
-  setDoor(wrap, $('ua-mark'), $('ua-menu'), false);
-  if (focus) $('ua-mark')?.focus();
-}
-
 function bindSwing(markId, closeOthers, sound) {
   const mark = document.getElementById(markId);
   const menuId = mark?.getAttribute('aria-controls') || '';
@@ -12437,14 +12419,10 @@ function bindSwing(markId, closeOthers, sound) {
     last = now;
     try { playAlphaDoor(); } catch { /* this browser kept the chime */ }
   };
-  const shut = (focus) => {
-    if (markId === 'ua-mark') closeUkraineMenu(focus);
-    else closeAlphaMenu(focus);
-  };
   mark.addEventListener('click', (event) => {
     event.stopPropagation();
     if (wrap.classList.contains('is-open')) {
-      shut();
+      closeAlphaMenu();
       return;
     }
     closeOthers();
@@ -12452,7 +12430,7 @@ function bindSwing(markId, closeOthers, sound) {
     play();
   });
   menu.addEventListener('click', (event) => {
-    if (event.target.closest('a')) shut();
+    if (event.target.closest('a')) closeAlphaMenu();
   });
 }
 
@@ -12460,13 +12438,7 @@ function bindAlphaDoor() {
   bindSwing('alpha-mark', () => {
     closeAppMenu();
     closeMenu();
-    closeUkraineMenu();
   }, true);
-  bindSwing('ua-mark', () => {
-    closeAppMenu();
-    closeMenu();
-    closeAlphaMenu();
-  }, false);
   document.addEventListener('pointerdown', () => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
