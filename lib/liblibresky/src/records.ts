@@ -14,6 +14,13 @@ export const LINK_KINDS = [
   'linkedin',
   'threads',
   'bluesky',
+  'discord',
+  'twitch',
+  'reddit',
+  'spotify',
+  'telegram',
+  'patreon',
+  'paypal',
   'other',
 ] as const;
 
@@ -31,6 +38,13 @@ export const LINK_LABEL: Record<LinkKind, string> = {
   linkedin: 'LinkedIn',
   threads: 'Threads',
   bluesky: 'Bluesky',
+  discord: 'Discord',
+  twitch: 'Twitch',
+  reddit: 'Reddit',
+  spotify: 'Spotify',
+  telegram: 'Telegram',
+  patreon: 'Patreon',
+  paypal: 'PayPal',
   other: 'Link',
 };
 
@@ -49,6 +63,17 @@ const HOST_KIND: readonly (readonly [string, LinkKind])[] = [
   ['linkedin.com', 'linkedin'],
   ['threads.net', 'threads'],
   ['bsky.app', 'bluesky'],
+  ['discord.com', 'discord'],
+  ['discord.gg', 'discord'],
+  ['twitch.tv', 'twitch'],
+  ['reddit.com', 'reddit'],
+  ['spotify.com', 'spotify'],
+  ['t.me', 'telegram'],
+  ['telegram.me', 'telegram'],
+  ['telegram.org', 'telegram'],
+  ['patreon.com', 'patreon'],
+  ['paypal.com', 'paypal'],
+  ['paypal.me', 'paypal'],
 ];
 
 export interface SocialLink {

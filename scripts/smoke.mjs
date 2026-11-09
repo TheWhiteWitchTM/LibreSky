@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
@@ -619,6 +619,41 @@ const articleCard = articleCardHtml({
 }, { did: 'did:plc:me', actor: 'me.bsky.social' });
 assert.match(articleCard, /Hello sky/);
 assert.match(articleCard, /#\/profile\/me\.bsky\.social\/article\/abc/);
+const siteProfile = profileHtml({
+  handle: 'me.bsky.social',
+  displayName: 'Me',
+}, {
+  links: [
+    { url: 'https://example.com/about', label: 'example.com', kind: 'website' },
+    { url: 'https://github.com/me', label: 'GitHub', kind: 'github' },
+    { url: 'https://paypal.me/me', label: 'PayPal', kind: 'paypal' },
+  ],
+});
+assert.match(siteProfile, /class="profile-site"/);
+assert.match(siteProfile, /example\.com/);
+const siteToolbar = siteProfile.slice(siteProfile.indexOf('social-toolbar'));
+assert.match(siteToolbar, /github\.com/);
+assert.match(siteToolbar, /paypal\.me/);
+assert.doesNotMatch(siteToolbar, /example\.com/);
+const articlePage = articlePageHtml({
+  title: 'Hello sky',
+  text: 'A **bold** line\n\n- one\n\n> quoted',
+  summary: 'Short',
+  rkey: 'abc',
+  createdAt: '2026-11-01T00:00:00.000Z',
+  uri: 'at://did:plc:me/app.libresky.article.article/abc',
+}, { did: 'did:plc:me', actor: 'me.bsky.social', profile: { displayName: 'Me', handle: 'me.bsky.social', avatar: '' } });
+assert.match(articlePage, /<strong>bold<\/strong>/);
+assert.match(articlePage, /<li>one<\/li>/);
+assert.match(articlePage, /<blockquote>/);
+assert.doesNotMatch(articlePage, /\*\*bold\*\*/);
+assert.match(articlePage, /class="article-by"/);
+assert.doesNotMatch(articlePageHtml({
+  title: 'Nope',
+  text: '[click](javascript:alert(1))\n\n<img src="x" onerror="alert(1)">',
+  rkey: 'nope',
+  createdAt: '2026-11-01T00:00:00.000Z',
+}, { did: 'did:plc:me', actor: 'me.bsky.social' }), /javascript:|<img/i);
 assert.equal(bskyPostParts('https://bsky.app/profile/jay.bsky.team/post/abc123')?.rkey, 'abc123');
 assert.equal(xStatusParts('https://x.com/jack/status/20')?.id, '20');
 assert.equal(trimLink('https://example.com/a.'), 'https://example.com/a');

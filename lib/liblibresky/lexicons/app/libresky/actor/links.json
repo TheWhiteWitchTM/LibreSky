@@ -27,7 +27,7 @@
         "label": { "type": "string", "maxLength": 80, "maxGraphemes": 40 },
         "kind": {
           "type": "string",
-          "knownValues": ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "other"],
+          "knownValues": ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "discord", "twitch", "reddit", "spotify", "telegram", "patreon", "paypal", "other"],
           "maxLength": 32
         }
       }

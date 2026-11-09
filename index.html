@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261109b">
+  <link rel="stylesheet" href="./css/app.css?v=20261109d">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -454,46 +454,43 @@
     <form id="profile-form">
       <div class="compose-bar">
         <button type="button" class="text-btn" id="profile-cancel">Cancel</button>
+        <strong>Edit profile</strong>
         <button type="submit" class="primary small">Save</button>
       </div>
-      <div class="banner-field">
-        <img id="profile-banner-preview" alt="" hidden>
-        <label>Banner
-          <input id="profile-banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <div class="edit-hero">
+        <div class="edit-banner">
+          <img id="profile-banner-preview" alt="" hidden>
+          <button type="button" class="photo-btn" id="profile-banner-pick" tabindex="-1" aria-hidden="true">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M4 8.5h3.2l1.3-2h7l1.3 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="14" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          </button>
+          <button type="button" class="photo-btn photo-x" id="profile-banner-clear" aria-label="Remove banner" hidden>×</button>
+          <input id="profile-banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Edit banner">
+        </div>
+        <div class="edit-avatar">
+          <div id="profile-avatar-face"></div>
+          <button type="button" class="photo-btn" id="profile-avatar-pick" tabindex="-1" aria-hidden="true">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M4 8.5h3.2l1.3-2h7l1.3 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="14" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          </button>
+          <input id="profile-avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Edit avatar">
+        </div>
+      </div>
+      <div class="edit-fields">
+        <label>Name
+          <input id="profile-name" maxlength="64" autocomplete="nickname">
         </label>
-        <button type="button" class="danger" id="profile-banner-clear">Remove banner</button>
+        <label>Bio
+          <textarea id="profile-bio" maxlength="256" rows="3"></textarea>
+        </label>
+        <label>Website
+          <span class="site-input"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M10.2 13.4a3.6 3.6 0 0 0 5.1.2l1.8-1.8a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M13.8 10.6a3.6 3.6 0 0 0-5.1-.2l-1.8 1.8a3.6 3.6 0 0 0 5.1 5.1l1-1"/></svg><input id="profile-website" type="text" inputmode="url" autocomplete="url" placeholder="yoursite.com" maxlength="2000"></span>
+        </label>
+        <div class="social-block">
+          <div class="social-label-row"><strong>Social</strong><span class="dim">Eight links, counting the website.</span></div>
+          <div class="kind-row" id="social-kinds"></div>
+          <div id="social-current"></div>
+          <button type="button" class="text-btn" data-act="social-custom">Add another link</button>
+        </div>
       </div>
-      <label>Display name
-        <input id="profile-name" maxlength="64" autocomplete="nickname">
-      </label>
-      <label>Bio
-        <textarea id="profile-bio" maxlength="256" rows="4"></textarea>
-      </label>
-      <label>Avatar
-        <input id="profile-avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
-      </label>
-    </form>
-  </dialog>
-
-  <dialog id="social-links">
-    <form id="social-form">
-      <div class="compose-bar">
-        <button type="button" class="text-btn" id="social-cancel">Cancel</button>
-        <strong>Social links</strong>
-        <button type="submit" class="primary small">Save</button>
-      </div>
-      <p class="dim">These sit under your name. They are public on your account, and another LibreSky profile shows them.</p>
-      <div id="social-current"></div>
-      <label>Link
-        <input id="social-url" type="url" placeholder="https://" inputmode="url" autocomplete="url">
-      </label>
-      <label>Label
-        <input id="social-label" maxlength="40" placeholder="Optional">
-      </label>
-      <label>Icon
-        <select id="social-kind"></select>
-      </label>
-      <button type="button" class="text-btn" data-act="social-add">Add link</button>
     </form>
   </dialog>
 
@@ -504,21 +501,43 @@
         <strong id="article-heading">New article</strong>
         <button type="submit" class="primary small">Publish</button>
       </div>
-      <p class="dim">Articles are public on your account. Another LibreSky profile shows them on your Articles tab.</p>
-      <label>Title
-        <input id="article-title" maxlength="300" required>
-      </label>
-      <label>Summary
-        <input id="article-summary" maxlength="400" placeholder="Optional">
-      </label>
-      <label>Article
-        <textarea id="article-text" maxlength="25000" rows="12" required></textarea>
-      </label>
-      <label>Cover
-        <input id="article-cover" type="file" accept="image/png,image/jpeg,image/webp">
-      </label>
-      <img id="article-cover-preview" alt="" hidden>
-      <button type="button" class="danger" id="article-cover-clear">Remove cover</button>
+      <div class="edit-banner article-banner-field">
+        <img id="article-cover-preview" alt="" hidden>
+        <button type="button" class="photo-btn" id="article-cover-pick" tabindex="-1" aria-hidden="true">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M4 8.5h3.2l1.3-2h7l1.3 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="14" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button type="button" class="photo-btn photo-x" id="article-cover-clear" aria-label="Remove banner" hidden>×</button>
+        <input id="article-cover" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Edit banner">
+      </div>
+      <div class="edit-fields">
+        <label class="article-title-label">Title
+          <input id="article-title" maxlength="300" required placeholder="Title">
+        </label>
+        <label>Description
+          <input id="article-summary" maxlength="400" placeholder="The short line on the card and in the post">
+        </label>
+        <div class="md-bar" role="toolbar" aria-label="Markdown">
+          <button type="button" data-md="bold" aria-label="Bold"><b>B</b></button>
+          <button type="button" data-md="italic" aria-label="Italic"><i>I</i></button>
+          <button type="button" data-md="h2" aria-label="Heading">H</button>
+          <button type="button" data-md="link" aria-label="Link">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M10.2 13.4a3.6 3.6 0 0 0 5.1.2l1.8-1.8a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M13.8 10.6a3.6 3.6 0 0 0-5.1-.2l-1.8 1.8a3.6 3.6 0 0 0 5.1 5.1l1-1"/></svg>
+          </button>
+          <button type="button" data-md="list" aria-label="List">•</button>
+          <button type="button" data-md="quote" aria-label="Quote">”</button>
+          <button type="button" data-md="code" aria-label="Code">&lt;/&gt;</button>
+          <span class="md-modes">
+            <button type="button" data-md-mode="write" aria-pressed="true">Write</button>
+            <button type="button" data-md-mode="preview" aria-pressed="false">Preview</button>
+          </span>
+        </div>
+        <textarea id="article-text" maxlength="25000" rows="12" placeholder="Write in Markdown"></textarea>
+        <div id="article-preview" class="article-body" hidden></div>
+        <label class="switch-row article-share">
+          <span><strong>Also share as a post</strong><span class="dim">Bluesky gets a normal post with the banner, the description, and a link that opens the article in LibreSky.</span></span>
+          <input id="article-share" type="checkbox">
+        </label>
+      </div>
     </form>
   </dialog>
 
@@ -577,13 +596,14 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <h3>Home</h3>
       <p>Following is people you follow. Discover is what is happening. Scroll the row for lists and feeds you add. Arrows show when there is more off to the side. The … on that row opens Edit tabs. Remove takes a list or a saved feed off the row.</p>
       <h3>Profile</h3>
-      <p>Posts, Replies, Media, and Likes use that same row as Home. Feeds, lists, and starter packs you attach sit on that row, and Remove takes one off. The … there is the menu for that profile.</p>
+      <p>Posts, Replies, Media, and Likes use that same row as Home. Highlights and Articles sit on that row when the profile has them. Your own Articles tab stays. Feeds, lists, and starter packs you attach sit on that row, and Remove takes one off. The … there is the menu for that profile. Edit profile puts the camera on the banner and on the avatar. Website and the social icons are on that same screen.</p>
       <h3>Search</h3>
       <p>The row under the search box holds For you, Ukraine, the topics you keep, and searches you add. Scroll, and the search box leaves. The row stays. Ukraine shows posts about Ukraine, in English and in Ukrainian. It does not add Latest or Top. Those sit in page config, with the other search settings, for every tab. SociallyDead is on that row with a folder, and opens the directory in a new tab. The … on that row opens Edit tabs. For you stays. Remove takes any of those off the row, and Add puts one back. Add a search term, and give it a name if you want one. Move, then Save, to change the order.</p>
       <h3>Writing</h3>
       <p>The mic beside Post, and the mic beside Send in a chat, types what you say into the box. Tap it again to stop. Chrome and Edge can dictate.</p>
       <p>The spark on the writing bar asks AI Assist to rewrite the draft. Use this keeps the rewrite. Dismiss leaves your words. The draft is sent only to the provider you picked.</p>
       <p>A link on its own as the last line becomes the preview and does not count toward the 300 characters. Delete that line and the preview goes with it. Other links stay in the post and count as a short form.</p>
+      <p>Articles are Markdown. The banner sits across the top. Also share as a post sends a normal post with the banner, the description, and a link to LibreSky, because other Bluesky apps cannot open the article.</p>
       <h3>Top of the page</h3>
       <p>The LibreSky mark sits at the very left. The menu beside it holds Take the tour, Help, Config, About, and Downloads, and Support development sits under a line of its own. Help is for the whole app. Config opens the settings for the page you are on. About lists The White Witch and Mira's World first, each with a picture, then a list that starts with LibreSky on GitHub, and the same ways to get in touch. A red beta sits next to that menu. Click it for Debug, which keeps AI Assist replies and errors, and for Design view, which outlines the page. Click the beta again to close it. Hover does not open it. Then the back arrow, the section symbol, and the page name. Home, Search, and the other sections stay in the left sidebar. Support opens the contribution page. Page config sits just behind the plus and opens the settings for this page, on this page. Home tunes the feed. Search sets Latest or Top, people you follow, replies, languages, and sensitive posts. A thread sets reply order. Chat sets who can message you. Calls sets who can call you. Notifications sets which notices show up. AI Assist sets the model. Your profile sets your name and picture. The plus at the right edge is only a plus, and it starts a post. After the page has scrolled, Up sits in the top bar, in the center of the column, in the same spot as new posts. While new posts are showing, Up stays hidden. Up returns to the top of the page. The symbol matches that section in the sidebar, such as the house for Home or the person for Profile. Every page except Home has a back arrow before the symbol. Back stays inside LibreSky and returns to the page you came from.</p>
       <a class="oss" href="https://github.com/TheWhiteWitchTM/LibreSky" target="_blank" rel="noopener noreferrer">
@@ -662,25 +682,28 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
 
   <dialog id="call">
     <div class="call-stage">
-      <h2 id="call-title">Call</h2>
-      <div id="call-voice" class="call-voice" hidden>
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg>
-        <span>Voice</span>
+      <div class="call-head">
+        <h2 id="call-title">Call</h2>
+        <p class="call-meta"><span id="call-status">Calling…</span><span id="call-clock" class="call-clock" hidden>0:00</span></p>
       </div>
-      <video id="call-remote" autoplay playsinline hidden></video>
-      <video id="call-local" autoplay playsinline muted hidden></video>
+      <div class="call-media">
+        <div id="call-voice" class="call-voice" hidden>
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg>
+        </div>
+        <video id="call-remote" autoplay playsinline hidden></video>
+        <video id="call-local" autoplay playsinline muted hidden></video>
+      </div>
       <audio id="call-audio" autoplay></audio>
-      <p id="call-status">Calling…</p>
-      <p id="call-clock" class="call-clock" hidden>0:00</p>
-      <p class="dim">The other person needs LibreSky open. Mute and the camera stay on your side. Hang up ends the call.</p>
       <div class="call-controls">
         <button type="button" class="icon-btn call-toggle" id="call-mute" aria-pressed="false" aria-label="Mute microphone" data-tip="Mute">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 3.5a2.8 2.8 0 0 1 2.8 2.8V11a2.8 2.8 0 0 1-5.6 0V6.3A2.8 2.8 0 0 1 12 3.5z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 11a5 5 0 0 0 10 0M12 16v3.2"/><path class="slash" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 5l14 14"/></svg>
         </button>
+        <button type="button" class="call-end" id="call-hangup" aria-label="Hang up">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg>
+        </button>
         <button type="button" class="icon-btn call-toggle" id="call-camera" aria-pressed="false" aria-label="Turn camera off" data-tip="Camera" hidden>
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7.2A1.7 1.7 0 0 1 5.7 5.5h8.1A1.7 1.7 0 0 1 15.5 7.2v9.6a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 16.8V7.2zm11.5 2.1 4-2.3v10l-4-2.3v-5.4z"/><path class="slash" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M5 5l14 14"/></svg>
         </button>
-        <button type="button" class="danger" id="call-hangup">Hang up</button>
       </div>
     </div>
   </dialog>
@@ -763,6 +786,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261109b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261109c" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import { activeAi, aiReady } from './ai.js';
 import { icon } from './icons.js';
+import { markdownPlain, renderMarkdown } from './markdown.js';
 import {
   accountGone,
   compact,
@@ -407,11 +408,43 @@ const SOCIAL_ICON = {
   linkedin: 'linkedin',
   threads: 'threads',
   bluesky: 'bluesky',
+  discord: 'discord',
+  twitch: 'twitch',
+  reddit: 'reddit',
+  spotify: 'spotify',
+  telegram: 'telegram',
+  patreon: 'patreon',
+  paypal: 'paypal',
   other: 'link',
 };
 
-function socialToolbarHtml(links) {
+function siteHost(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function splitProfileLinks(links) {
   const items = (links || []).filter((link) => safeUrl(link?.url));
+  const index = items.findIndex((link) => (link.kind || 'website') === 'website');
+  return {
+    website: index >= 0 ? items[index] : null,
+    rest: items.filter((_, item) => item !== index),
+  };
+}
+
+function websiteLine(link) {
+  if (!link) return '';
+  const href = safeUrl(link.url);
+  if (!href) return '';
+  const label = siteHost(href) || link.label || 'Website';
+  return `<p class="profile-site"><a href="${attr(href)}" target="_blank" rel="noopener noreferrer">${icon('link')}<span>${escapeHtml(label)}</span></a></p>`;
+}
+
+function socialToolbarHtml(links) {
+  const items = splitProfileLinks(links).rest;
   if (!items.length) return '';
   const buttons = items.map((link) => {
     const href = safeUrl(link.url);
@@ -433,9 +466,10 @@ export function profileHtml(profile, options = {}) {
     <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
     <div class="handle">@${escapeHtml(profile.handle)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
+    ${websiteLine(splitProfileLinks(options.links).website)}
+    ${socialToolbarHtml(options.links)}
     ${joinedLine(profile.createdAt)}
     <p class="counts"><a href="#/profile/${encodeURIComponent(profile.handle)}/following"><strong>${fullCount(profile.followsCount)}</strong> following</a><a href="#/profile/${encodeURIComponent(profile.handle)}/followers"><strong>${fullCount(profile.followersCount)}</strong> followers</a><span><strong>${fullCount(profile.postsCount)}</strong> posts</span></p>
-    ${socialToolbarHtml(options.links)}
   </header>`;
 }
 
@@ -446,20 +480,22 @@ function articleWhen(iso) {
 }
 
 function articleBlurb(article) {
-  const source = String(article?.summary || article?.text || '').replace(/\s+/g, ' ').trim();
-  if (source.length <= 180) return source;
-  return `${source.slice(0, 179).trimEnd()}…`;
+  const source = String(article?.summary || '').trim() || markdownPlain(article?.text || '');
+  const flat = source.replace(/\s+/g, ' ').trim();
+  if (flat.length <= 180) return flat;
+  return `${flat.slice(0, 179).trimEnd()}…`;
 }
 
 export function articleCardHtml(article, { did = '', actor = '' } = {}) {
   const who = actor || did;
   const href = `#/profile/${encodeURIComponent(who)}/article/${encodeURIComponent(article?.rkey || '')}`;
-  const cover = blobImage(did, article?.cover, 'feed_thumbnail');
+  const cover = blobImage(did, article?.cover, 'feed_fullsize');
   const when = articleWhen(article?.createdAt);
-  return `<a class="article-card${cover ? '' : ' no-cover'}" href="${attr(href)}">${cover ? `<img src="${attr(cover)}" alt="">` : ''}<span><strong>${escapeHtml(article?.title || 'Article')}</strong>${when ? `<span class="handle">${escapeHtml(when)}</span>` : ''}<span class="snip">${escapeHtml(articleBlurb(article))}</span></span></a>`;
+  const blurb = articleBlurb(article);
+  return `<a class="article-card${cover ? '' : ' no-cover'}" href="${attr(href)}">${cover ? `<img src="${attr(cover)}" alt="">` : ''}<span class="article-card-copy"><strong>${escapeHtml(article?.title || 'Article')}</strong>${when ? `<span class="handle">${escapeHtml(when)}</span>` : ''}${blurb ? `<span class="snip">${escapeHtml(blurb)}</span>` : ''}</span></a>`;
 }
 
-export function articlePageHtml(article, { did = '', actor = '', own = false } = {}) {
+export function articlePageHtml(article, { did = '', actor = '', own = false, profile = null } = {}) {
   const who = actor || did;
   const back = `#/profile/${encodeURIComponent(who)}/articles`;
   const cover = blobImage(did, article?.cover, 'feed_fullsize');
@@ -467,7 +503,11 @@ export function articlePageHtml(article, { did = '', actor = '', own = false } =
   const actions = own
     ? `<div class="toolbar"><button type="button" class="text-btn" data-act="edit-article" data-uri="${attr(article?.uri)}">Edit</button><button type="button" class="danger mini" data-act="delete-article" data-uri="${attr(article?.uri)}">Delete</button></div>`
     : '';
-  return `<article class="article-page">${actions}<p class="dim"><a href="${attr(back)}">Articles</a></p>${cover ? `<img class="article-cover" src="${attr(cover)}" alt="">` : ''}<h2>${escapeHtml(article?.title || 'Article')}</h2>${when ? `<p class="joined">${escapeHtml(when)}</p>` : ''}<div class="article-body">${richText(article?.text || '')}</div></article>`;
+  const name = profile?.displayName || profile?.handle || actor || '';
+  const byline = profile
+    ? `<div class="article-by">${avatar(profile.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(profile.handle || actor || '')}</span></span>${when ? `<span class="handle when">${escapeHtml(when)}</span>` : ''}</div>`
+    : (when ? `<p class="joined">${escapeHtml(when)}</p>` : '');
+  return `<article class="article-page">${actions}<p class="dim article-back"><a href="${attr(back)}">Articles</a></p>${cover ? `<img class="article-cover" src="${attr(cover)}" alt="">` : ''}<div class="article-copy"><h2>${escapeHtml(article?.title || 'Article')}</h2>${byline}<div class="article-body">${renderMarkdown(article?.text || '')}</div></div></article>`;
 }
 
 export function actorHtml(actor, options = {}) {

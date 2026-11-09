@@ -38,7 +38,7 @@ export declare const linksDoc: {
                 };
                 readonly kind: {
                     readonly type: "string";
-                    readonly knownValues: readonly ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "other"];
+                    readonly knownValues: readonly ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "discord", "twitch", "reddit", "spotify", "telegram", "patreon", "paypal", "other"];
                     readonly maxLength: 32;
                 };
             };

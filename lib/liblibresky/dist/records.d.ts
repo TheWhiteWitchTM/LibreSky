@@ -1,4 +1,4 @@
-export declare const LINK_KINDS: readonly ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "other"];
+export declare const LINK_KINDS: readonly ["website", "x", "instagram", "youtube", "github", "mastodon", "tiktok", "facebook", "linkedin", "threads", "bluesky", "discord", "twitch", "reddit", "spotify", "telegram", "patreon", "paypal", "other"];
 export type LinkKind = (typeof LINK_KINDS)[number];
 export declare const LINK_LABEL: Record<LinkKind, string>;
 export interface SocialLink {

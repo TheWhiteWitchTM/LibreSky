@@ -70,6 +70,7 @@ import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequ
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
+import { markdownPlain, renderMarkdown } from './markdown.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from './emoji.js';
 import {
   a11yPrefs,
@@ -3070,9 +3071,10 @@ function emptyShelf() {
 }
 
 function profileTabs(actor, current, links = []) {
+  const own = signedIn() && shownProfile?.did === myDid();
   const ids = api.profileTabIds({
     highlights: profileShelf.highlights.length,
-    articles: profileShelf.articles.length,
+    articles: profileShelf.articles.length || (own ? 1 : 0),
     current,
   });
   const tabs = ids.map((id) => ({
@@ -3267,7 +3269,7 @@ async function showArticle(actor, rkey) {
     const own = signedIn() && profile.did === myDid();
     $('title').textContent = article.title;
     document.title = `${article.title} — LibreSky`;
-    $('view').innerHTML = articlePageHtml(article, { did: profile.did, actor: profile.handle, own });
+    $('view').innerHTML = articlePageHtml(article, { did: profile.did, actor: profile.handle, own, profile });
     document.documentElement.dataset.ready = '1';
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Article unavailable', error.message);
@@ -3811,7 +3813,6 @@ function openProfileMenu(anchor) {
   const items = [];
   if (mine) {
     items.push({ id: 'edit-profile', label: 'Edit profile' });
-    items.push({ id: 'social-links', label: 'Social links' });
     items.push({ id: 'new-article', label: 'New article' });
     items.push({ id: 'edit-links', label: 'Edit links' });
   }
@@ -10202,13 +10203,14 @@ async function onClick(event) {
     return;
   }
   if (act === 'social-remove') {
-    const dialog = $('social-links');
+    const dialog = $('profile-edit');
     const index = Number(event.target.closest('[data-index]')?.dataset.index);
     if (dialog?._links && Number.isInteger(index)) dialog._links.splice(index, 1);
     paintSocialDraft();
     return;
   }
-  if (act === 'social-add') return addSocialDraft();
+  if (act === 'social-kind') return toggleSocialKind(event.target.closest('[data-kind]')?.dataset.kind || '');
+  if (act === 'social-custom') return addCustomLink();
   if (act === 'new-article') return openArticleEditor();
   if (act === 'edit-article') return openArticleEditor(event.target.closest('[data-uri]')?.dataset.uri || '');
   if (act === 'delete-article') return removeArticle(event.target.closest('[data-uri]')?.dataset.uri || '');
@@ -10427,113 +10429,277 @@ function openReport(target) {
   if (!$('report').open) $('report').showModal();
 }
 
-function openProfileEditor() {
+const SOCIAL_PICKS = ['x', 'youtube', 'github', 'linkedin', 'instagram', 'tiktok', 'facebook', 'threads', 'mastodon', 'bluesky', 'discord', 'twitch', 'reddit', 'spotify', 'telegram', 'patreon', 'paypal'];
+
+function looseUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function paintBannerSlot(img, clear, src) {
+  if (!img) return;
+  if (src) {
+    img.src = src;
+    img.hidden = false;
+    if (clear) clear.hidden = false;
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+    if (clear) clear.hidden = true;
+  }
+}
+
+function paintAvatarFace(url, name) {
+  const face = $('profile-avatar-face');
+  if (face) face.innerHTML = avatar(url, name || 'You');
+}
+
+function socialRoom() {
+  const dialog = $('profile-edit');
+  const website = String($('profile-website')?.value || '').trim() ? 1 : 0;
+  return 8 - website - (dialog?._links || []).length;
+}
+
+function paintSocialDraft() {
+  const dialog = $('profile-edit');
+  const host = $('social-current');
+  const kinds = $('social-kinds');
+  if (!dialog || !host || !kinds) return;
+  const links = dialog._links || [];
+  kinds.innerHTML = SOCIAL_PICKS.map((kind) => {
+    const on = links.some((link) => link.kind === kind);
+    const label = api.LINK_LABEL[kind] || kind;
+    return `<button type="button" class="kind-chip" data-act="social-kind" data-kind="${escapeHtml(kind)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${icon(kind)}</button>`;
+  }).join('');
+  host.innerHTML = links.map((link, index) => {
+    const label = api.LINK_LABEL[link.kind] || 'Link';
+    const named = link.kind === 'other'
+      ? `<input class="link-label" data-index="${index}" maxlength="40" placeholder="Label" value="${escapeHtml(link.label || '')}" aria-label="Label">`
+      : '';
+    return `<div class="link-row"><span class="link-ico">${icon(link.kind || 'link')}</span>${named}<input class="link-url" data-index="${index}" type="text" inputmode="url" placeholder="https://" value="${escapeHtml(link.url || '')}" aria-label="${escapeHtml(label)}"><button type="button" class="link-x" data-act="social-remove" data-index="${index}" aria-label="Remove ${escapeHtml(label)}">×</button></div>`;
+  }).join('');
+}
+
+function toggleSocialKind(kind) {
+  const dialog = $('profile-edit');
+  if (!dialog || !kind) return;
+  const links = dialog._links || [];
+  const index = links.findIndex((link) => link.kind === kind);
+  if (index >= 0) {
+    if (!String(links[index].url || '').trim()) {
+      links.splice(index, 1);
+      paintSocialDraft();
+    } else {
+      hostFocus(index);
+    }
+    return;
+  }
+  if (socialRoom() < 1) {
+    toast('A profile can show 8 social links.');
+    return;
+  }
+  links.push({ url: '', label: '', kind });
+  dialog._links = links;
+  paintSocialDraft();
+  hostFocus(links.length - 1);
+}
+
+function hostFocus(index) {
+  const input = $('social-current')?.querySelector(`.link-url[data-index="${index}"]`);
+  input?.focus();
+}
+
+function addCustomLink() {
+  const dialog = $('profile-edit');
+  if (!dialog) return;
+  if (socialRoom() < 1) {
+    toast('A profile can show 8 social links.');
+    return;
+  }
+  dialog._links = dialog._links || [];
+  dialog._links.push({ url: '', label: '', kind: 'other' });
+  paintSocialDraft();
+  const row = $('social-current')?.querySelector('.link-row:last-child .link-label, .link-row:last-child .link-url');
+  row?.focus();
+}
+
+function collectSocialLinks() {
+  const website = looseUrl($('profile-website')?.value || '');
+  const rows = ($('profile-edit')?._links || []).filter((link) => String(link.url || '').trim());
+  const links = [];
+  if (website) links.push(api.normalizeLink({ url: website, kind: 'website', label: '' }));
+  rows.forEach((row) => {
+    links.push(api.normalizeLink({
+      url: looseUrl(row.url),
+      kind: row.kind || '',
+      label: row.kind === 'other' ? row.label : '',
+    }));
+  });
+  if (links.length > 8) throw new Error('A profile can show 8 social links.');
+  return links;
+}
+
+async function openProfileEditor() {
   const profile = me.profile;
   if (!profile) return;
+  const dialog = $('profile-edit');
   $('profile-name').value = profile.displayName || '';
   $('profile-bio').value = profile.description || '';
   $('profile-avatar').value = '';
   $('profile-banner').value = '';
-  $('profile-edit').dataset.clearBanner = '';
-  const preview = $('profile-banner-preview');
-  if (profile.banner) {
-    preview.src = profile.banner;
-    preview.hidden = false;
-  } else {
-    preview.hidden = true;
-    preview.removeAttribute('src');
-  }
-  if (!$('profile-edit').open) $('profile-edit').showModal();
-}
-
-function socialKindOptions() {
-  const select = $('social-kind');
-  if (!select || select.dataset.ready) return;
-  const kinds = [['', 'Match the link'], ...api.LINK_KINDS.map((kind) => [kind, api.LINK_LABEL[kind] || kind])];
-  select.innerHTML = kinds.map(([id, label]) => `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`).join('');
-  select.dataset.ready = '1';
-}
-
-function paintSocialDraft() {
-  const dialog = $('social-links');
-  const host = $('social-current');
-  if (!dialog || !host) return;
-  const rows = (dialog._links || []).map((link, index) => {
-    const shown = api.presentLink(link);
-    return `<div class="lane-row"><span><strong>${escapeHtml(shown.label)}</strong><span class="handle">${escapeHtml(shown.url)}</span></span><button type="button" class="danger mini" data-act="social-remove" data-index="${index}">Remove</button></div>`;
-  }).join('');
-  host.innerHTML = rows || '<p class="dim">No social links yet.</p>';
-}
-
-async function openSocialLinks() {
-  if (!signedIn()) return requireSignIn();
-  const dialog = $('social-links');
-  if (!dialog) return;
-  socialKindOptions();
-  let links = shownProfile?.did === myDid() ? profileShelf.links : [];
+  dialog.dataset.clearBanner = '';
+  paintBannerSlot($('profile-banner-preview'), $('profile-banner-clear'), profile.banner || '');
+  paintAvatarFace(profile.avatar, profile.displayName || profile.handle);
+  let links = shownProfile?.did === myDid() ? (profileShelf.links || []) : [];
   if (shownProfile?.did !== myDid()) {
     try { links = (await api.readShelf(myDid())).links || []; } catch { links = []; }
   }
-  dialog._links = (links || []).map((link) => ({ ...link }));
-  if ($('social-url')) $('social-url').value = '';
-  if ($('social-label')) $('social-label').value = '';
-  if ($('social-kind')) $('social-kind').value = '';
+  const copy = (links || []).map((link) => ({ ...link }));
+  const siteAt = copy.findIndex((link) => link.kind === 'website');
+  if ($('profile-website')) $('profile-website').value = siteAt >= 0 ? copy[siteAt].url : '';
+  dialog._links = copy.filter((_, index) => index !== siteAt);
   paintSocialDraft();
   if (!dialog.open) dialog.showModal();
-}
-
-function addSocialDraft() {
-  const dialog = $('social-links');
-  if (!dialog) return;
-  if ((dialog._links || []).length >= 8) {
-    toast('A profile can show 8 social links.');
-    return;
-  }
-  try {
-    dialog._links.push(api.normalizeLink({
-      url: $('social-url')?.value || '',
-      label: $('social-label')?.value || '',
-      kind: $('social-kind')?.value || '',
-    }));
-    if ($('social-url')) $('social-url').value = '';
-    if ($('social-label')) $('social-label').value = '';
-    if ($('social-kind')) $('social-kind').value = '';
-    paintSocialDraft();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function saveSocialLinks(event) {
-  event.preventDefault();
-  const button = event.target.querySelector('button[type="submit"]');
-  button.disabled = true;
-  try {
-    await api.writeSocialLinks($('social-links')?._links || []);
-    $('social-links')?.close();
-    toast('Social links saved');
-    if (parseHash()[0] === 'profile') route();
-  } catch (error) {
-    toast(error.message);
-  } finally {
-    button.disabled = false;
-  }
 }
 
 function resetArticleCover(dialog, cover, did) {
   dialog._cover = cover || null;
   dialog._clearCover = false;
   if ($('article-cover')) $('article-cover').value = '';
-  const preview = $('article-cover-preview');
   const src = cover && did ? imageUrl(did, cover) : '';
-  if (!preview) return;
-  if (src) {
-    preview.src = src;
-    preview.hidden = false;
-  } else {
-    preview.hidden = true;
-    preview.removeAttribute('src');
+  paintBannerSlot($('article-cover-preview'), $('article-cover-clear'), src);
+}
+
+function articleShareOn() {
+  try {
+    const saved = localStorage.getItem('libresky.articleShare');
+    if (saved === '0') return false;
+    if (saved === '1') return true;
+  } catch {
+    /* this browser is not keeping the choice */
   }
+  return true;
+}
+
+function rememberArticleShare(on) {
+  try { localStorage.setItem('libresky.articleShare', on ? '1' : '0'); } catch { /* ignore */ }
+}
+
+function setArticleMode(mode) {
+  const write = mode !== 'preview';
+  const area = $('article-text');
+  const preview = $('article-preview');
+  if (area) area.hidden = !write;
+  if (preview) {
+    preview.hidden = write;
+    if (!write) preview.innerHTML = renderMarkdown(area?.value || '');
+  }
+  document.querySelectorAll('#article-edit [data-md-mode]').forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.mdMode === (write ? 'write' : 'preview') ? 'true' : 'false');
+  });
+}
+
+function articleClientUrl(actor, rkey) {
+  const host = location.hostname;
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  const origin = local ? 'https://libresky.sociallydead.me' : location.origin;
+  return `${origin}/#/profile/${encodeURIComponent(actor)}/article/${encodeURIComponent(rkey)}`;
+}
+
+function fitArticlePost(title, summary, url) {
+  const head = String(title || 'Article').trim() || 'Article';
+  const body = String(summary || '').trim();
+  const link = String(url || '').trim();
+  const text = body && body !== head ? `${head}\n\n${body}` : head;
+  const withLink = link ? `${text}\n\n${link}` : text;
+  if (graphemeLength(withLink) <= 300) return withLink;
+  if (graphemeLength(text) <= 300) return text;
+  const titled = link && graphemeLength(`${head}\n\n${link}`) <= 300 ? `${head}\n\n${link}` : head;
+  if (graphemeLength(titled) <= 300) return titled;
+  return `${[...head].slice(0, 299).join('').trimEnd()}…`;
+}
+
+async function shareArticlePost(article, cover) {
+  const actor = me.profile?.handle || myDid();
+  const url = articleClientUrl(actor, article.rkey);
+  const title = String(article.title || '').trim();
+  const summary = String(article.summary || '').trim() || markdownPlain(article.text || '').slice(0, 280);
+  const description = summary || 'Read this article in LibreSky.';
+  await api.createPost({
+    text: fitArticlePost(title, description, url),
+    link: api.externalEmbed({
+      url,
+      title: title || 'Article',
+      description,
+      ...(cover ? { thumb: cover } : {}),
+    }),
+  });
+}
+
+function replaceSlice(area, start, end, text, selStart, selEnd) {
+  area.value = area.value.slice(0, start) + text + area.value.slice(end);
+  const from = selStart ?? start + text.length;
+  const to = selEnd ?? from;
+  area.setSelectionRange(from, to);
+  area.focus();
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function prefixLines(area, prefix) {
+  const start = area.selectionStart ?? 0;
+  const end = area.selectionEnd ?? start;
+  const value = area.value;
+  const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  const lineEnd = value.indexOf('\n', end);
+  const blockEnd = lineEnd < 0 ? value.length : lineEnd;
+  const rows = value.slice(lineStart, blockEnd).split('\n');
+  const all = rows.length > 0 && rows.every((line) => line.startsWith(prefix));
+  const next = rows.map((line) => (
+    all ? line.slice(prefix.length) : (line.startsWith(prefix) ? line : `${prefix}${line}`)
+  )).join('\n');
+  const delta = next.length - (blockEnd - lineStart);
+  replaceSlice(area, lineStart, blockEnd, next, start + (all ? -prefix.length : prefix.length), end + delta);
+}
+
+function applyMarkdown(area, kind) {
+  if (!area) return;
+  const start = area.selectionStart ?? 0;
+  const end = area.selectionEnd ?? start;
+  const selected = area.value.slice(start, end);
+  if (kind === 'bold' || kind === 'italic' || kind === 'code' || kind === 'link') {
+    if (kind === 'code' && selected.includes('\n')) {
+      const text = `\`\`\`\n${selected}\n\`\`\``;
+      replaceSlice(area, start, end, text, start + 4, start + 4 + selected.length);
+      return;
+    }
+    const wrap = {
+      bold: ['**', '**', 'bold'],
+      italic: ['*', '*', 'italic'],
+      code: ['`', '`', 'code'],
+      link: ['[', '](https://)', 'link text'],
+    }[kind];
+    const inner = selected || wrap[2];
+    const text = `${wrap[0]}${inner}${wrap[1]}`;
+    const from = start + wrap[0].length;
+    const urlAt = kind === 'link' ? from + inner.length + 2 : from;
+    const sel = kind === 'link' ? urlAt : from;
+    const selEnd = kind === 'link' ? urlAt + 'https://'.length : from + inner.length;
+    replaceSlice(area, start, end, text, sel, selEnd);
+    return;
+  }
+  if (kind === 'h2') {
+    const lineStart = area.value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const prefix = '## ';
+    if (area.value.slice(lineStart, lineStart + prefix.length) === prefix) {
+      replaceSlice(area, lineStart, lineStart + prefix.length, '', Math.max(lineStart, start - prefix.length), Math.max(lineStart, end - prefix.length));
+    } else {
+      replaceSlice(area, lineStart, lineStart, prefix, start + prefix.length, end + prefix.length);
+    }
+    return;
+  }
+  prefixLines(area, kind === 'quote' ? '> ' : '- ');
 }
 
 async function openArticleEditor(uri) {
@@ -10542,10 +10708,14 @@ async function openArticleEditor(uri) {
   if (!dialog) return;
   dialog._uri = '';
   dialog._createdAt = '';
+  dialog._shareConfig = !uri;
   resetArticleCover(dialog, null, '');
   $('article-title').value = '';
   $('article-summary').value = '';
   $('article-text').value = '';
+  const share = $('article-share');
+  if (share) share.checked = uri ? false : articleShareOn();
+  setArticleMode('write');
   $('article-heading').textContent = 'New article';
   const submit = dialog.querySelector('button[type="submit"]');
   if (submit) submit.textContent = 'Publish';
@@ -10565,13 +10735,23 @@ async function openArticleEditor(uri) {
     resetArticleCover(dialog, article.cover, myDid());
   }
   if (!dialog.open) dialog.showModal();
+  $('article-title')?.focus();
 }
 
 async function saveArticle(event) {
   event.preventDefault();
   const dialog = $('article-edit');
   const button = event.target.querySelector('button[type="submit"]');
+  if (!$('article-text').value.trim()) {
+    toast('Write the article.');
+    setArticleMode('write');
+    $('article-text')?.focus();
+    return;
+  }
   button.disabled = true;
+  const editing = Boolean(dialog._uri);
+  const share = Boolean($('article-share')?.checked);
+  if (dialog._shareConfig) rememberArticleShare(share);
   try {
     let cover = dialog._clearCover ? null : dialog._cover;
     const file = $('article-cover')?.files?.[0];
@@ -10584,10 +10764,19 @@ async function saveArticle(event) {
       cover,
       createdAt: dialog._createdAt || undefined,
     });
-    const actor = shownProfile?.handle || myDid();
+    let note = editing ? 'Article saved' : 'Article published';
+    if (share) {
+      try {
+        await shareArticlePost(saved, cover);
+        note = editing ? 'Article saved and posted' : 'Article published and posted';
+      } catch (error) {
+        note = `Article saved. The post did not send. ${error.message}`;
+      }
+    }
+    const actor = shownProfile?.handle || me.profile?.handle || myDid();
     const next = `#/profile/${encodeURIComponent(actor)}/article/${encodeURIComponent(saved.rkey)}`;
     dialog.close();
-    toast(dialog._uri ? 'Article saved' : 'Article published');
+    toast(note);
     if (location.hash === next) route();
     else location.hash = next;
   } catch (error) {
@@ -10633,18 +10822,20 @@ async function saveProfile(event) {
   const button = event.target.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
-    let avatar = null;
+    const links = collectSocialLinks();
+    let avatarBlob = null;
     const file = $('profile-avatar').files?.[0];
-    if (file) avatar = await api.uploadBlob(await compress(file));
+    if (file) avatarBlob = await api.uploadBlob(await compress(file));
     const bannerFile = $('profile-banner').files?.[0];
     const changes = {
       displayName: $('profile-name').value.trim(),
       description: $('profile-bio').value.trim(),
-      avatar,
+      avatar: avatarBlob,
     };
     if (bannerFile) changes.banner = await api.uploadBlob(await compress(bannerFile));
     else if ($('profile-edit').dataset.clearBanner === '1') changes.banner = null;
     await api.updateProfile(changes);
+    await api.writeSocialLinks(links);
     $('profile-edit').close();
     toast('Profile saved');
     await loadMe();
@@ -10704,7 +10895,7 @@ async function onMenu(event) {
     return;
   }
   if (id === 'edit-profile') return openProfileEditor();
-  if (id === 'social-links') return openSocialLinks();
+  if (id === 'social-links') return openProfileEditor();
   if (id === 'new-article') return openArticleEditor();
   if (id === 'edit-links') return openAttachPicker('profile');
   if (id === 'highlight' || id === 'unhighlight') return toggleHighlight(found, id === 'unhighlight');
@@ -11807,16 +11998,24 @@ function bind() {
   $('report-cancel').addEventListener('click', () => $('report').close());
   $('profile-form').addEventListener('submit', saveProfile);
   $('profile-cancel').addEventListener('click', () => $('profile-edit').close());
-  $('social-form')?.addEventListener('submit', saveSocialLinks);
-  $('social-cancel')?.addEventListener('click', () => $('social-links')?.close());
+  $('profile-banner-pick')?.addEventListener('click', () => $('profile-banner')?.click());
+  $('profile-avatar-pick')?.addEventListener('click', () => $('profile-avatar')?.click());
+  $('social-current')?.addEventListener('input', (event) => {
+    const input = event.target;
+    const index = Number(input.dataset?.index);
+    const link = $('profile-edit')?._links?.[index];
+    if (!link || !Number.isInteger(index)) return;
+    if (input.classList.contains('link-url')) link.url = input.value;
+    if (input.classList.contains('link-label')) link.label = input.value;
+  });
   $('article-form')?.addEventListener('submit', saveArticle);
   $('article-cancel')?.addEventListener('click', () => $('article-edit')?.close());
+  $('article-cover-pick')?.addEventListener('click', () => $('article-cover')?.click());
   $('article-cover')?.addEventListener('change', () => {
     const file = $('article-cover').files?.[0];
     if (!file) return;
     $('article-edit')._clearCover = false;
-    $('article-cover-preview').src = URL.createObjectURL(file);
-    $('article-cover-preview').hidden = false;
+    paintBannerSlot($('article-cover-preview'), $('article-cover-clear'), URL.createObjectURL(file));
   });
   $('article-cover-clear')?.addEventListener('click', () => {
     const dialog = $('article-edit');
@@ -11825,21 +12024,42 @@ function bind() {
       dialog._cover = null;
     }
     if ($('article-cover')) $('article-cover').value = '';
-    $('article-cover-preview').hidden = true;
-    $('article-cover-preview').removeAttribute('src');
+    paintBannerSlot($('article-cover-preview'), $('article-cover-clear'), '');
+  });
+  $('article-edit')?.addEventListener('click', (event) => {
+    const mode = event.target.closest('[data-md-mode]')?.dataset.mdMode;
+    if (mode) {
+      event.preventDefault();
+      setArticleMode(mode);
+      return;
+    }
+    const kind = event.target.closest('[data-md]')?.dataset.md;
+    if (!kind) return;
+    event.preventDefault();
+    setArticleMode('write');
+    applyMarkdown($('article-text'), kind);
+  });
+  $('article-text')?.addEventListener('input', () => {
+    if (!$('article-preview')?.hidden) $('article-preview').innerHTML = renderMarkdown($('article-text').value);
+  });
+  $('article-share')?.addEventListener('change', () => {
+    if ($('article-edit')?._shareConfig) rememberArticleShare($('article-share').checked);
   });
   $('profile-banner')?.addEventListener('change', () => {
     const file = $('profile-banner').files?.[0];
     if (!file) return;
     $('profile-edit').dataset.clearBanner = '';
-    $('profile-banner-preview').src = URL.createObjectURL(file);
-    $('profile-banner-preview').hidden = false;
+    paintBannerSlot($('profile-banner-preview'), $('profile-banner-clear'), URL.createObjectURL(file));
+  });
+  $('profile-avatar')?.addEventListener('change', () => {
+    const file = $('profile-avatar').files?.[0];
+    if (!file) return;
+    paintAvatarFace(URL.createObjectURL(file), $('profile-name')?.value || me.profile?.displayName || me.profile?.handle);
   });
   $('profile-banner-clear')?.addEventListener('click', () => {
     $('profile-edit').dataset.clearBanner = '1';
     $('profile-banner').value = '';
-    $('profile-banner-preview').hidden = true;
-    $('profile-banner-preview').removeAttribute('src');
+    paintBannerSlot($('profile-banner-preview'), $('profile-banner-clear'), '');
   });
   $('compose-form').addEventListener('submit', publish);
   $('compose-cancel').addEventListener('click', () => requestCloseComposer());
