@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-11-09-call-ring';
+const CACHE = 'libresky-2026-11-09-protocol';
 
 const SHELL = [
   './',
@@ -15,6 +15,7 @@ const SHELL = [
   './js/render.js',
   './js/session.js',
   './js/util.js',
+  './lib/dist/index.js',
   './js/lang.js',
   './js/words.js',
   './js/dict-en.js',

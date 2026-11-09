@@ -1,3 +1,5 @@
+import { AtUri } from '../lib/dist/index.js';
+
 export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;',
@@ -1000,15 +1002,7 @@ export function styleFlags(text, start, end) {
 }
 
 export function splitAtUri(uri) {
-  const raw = String(uri || '').replace(/^at:\/\//, '');
-  const first = raw.indexOf('/');
-  const last = raw.lastIndexOf('/');
-  if (first < 0 || last <= first) return null;
-  return {
-    repo: raw.slice(0, first),
-    collection: raw.slice(first + 1, last),
-    rkey: raw.slice(last + 1),
-  };
+  return AtUri.parts(uri);
 }
 
 const CLEANUP_DAY = 24 * 60 * 60 * 1000;

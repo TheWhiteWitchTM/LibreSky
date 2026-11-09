@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "build:auth": "esbuild src/oauth-entry.js --bundle --format=esm --platform=browser --target=es2022 --outfile=js/vendor/auth.js --legal-comments=none",
+    "build:lib": "node lib/scripts/generate.mjs && tsc -p lib/tsconfig.json && node lib/scripts/bundle.mjs",
+    "test:lib": "node --test --test-isolation=process lib/test/*.test.mjs",
     "smoke": "node scripts/smoke.mjs",
     "desktop": "node scripts/pack-desktop.mjs"
   },
   "devDependencies": {
     "@atproto/oauth-client-browser": "0.5.4",
-    "esbuild": "^0.25.10"
+    "esbuild": "^0.25.10",
+    "typescript": "^5.9.3"
   },
   "license": "MIT"
 }

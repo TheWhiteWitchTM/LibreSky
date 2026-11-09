@@ -1,5 +1,31 @@
 import { currentDid, getOauth, getPassword, setPassword } from './session.js';
 import { applyShortLinks, bskyPostParts, pageCard, plainFacets, splitAtUri, xStatusParts } from './util.js';
+import {
+  BlockRecord,
+  ChatDeclarationRecord,
+  DeleteWrite,
+  DidDocument,
+  ExternalEmbed,
+  FollowRecord,
+  ImagesEmbed,
+  LikeRecord,
+  ListItemRecord,
+  ListRecord,
+  PostRecord,
+  RecordEmbed,
+  RecordWithMediaEmbed,
+  RepoRef,
+  RepostRecord,
+  ThreadgateRecord,
+  TypedStrongRef,
+  VideoEmbed,
+  buildQuery,
+  isMissingRecord as missingRecord,
+  readXrpcResponse,
+  xrpcPath,
+} from '../lib/dist/index.js';
+
+export { applySavedFeeds, savedFeedItems } from '../lib/dist/index.js';
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
@@ -8,32 +34,6 @@ const CHAT_PROXY = 'did:web:api.bsky.chat#bsky_chat';
 const APPVIEW = 'did:web:api.bsky.app#bsky_appview';
 
 let refreshLock = null;
-
-function query(params) {
-  const search = new URLSearchParams();
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value == null || value === '') return;
-    if (Array.isArray(value)) value.forEach((item) => search.append(key, String(item)));
-    else search.set(key, String(value));
-  });
-  const text = search.toString();
-  return text ? `?${text}` : '';
-}
-
-async function read(res) {
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try { data = JSON.parse(text); } catch { data = { message: text.slice(0, 240) }; }
-  }
-  if (!res.ok) {
-    const error = new Error(data?.message || data?.error || `Bluesky request failed (${res.status})`);
-    error.status = res.status;
-    error.data = data;
-    throw error;
-  }
-  return data ?? {};
-}
 
 function accessExpired(token) {
   try {
@@ -67,7 +67,7 @@ async function refreshPassword() {
         setPassword(null);
         return false;
       }
-      const data = await read(res);
+      const data = await readXrpcResponse(res);
       setPassword({
         ...session,
         accessJwt: data.accessJwt,
@@ -83,7 +83,7 @@ async function refreshPassword() {
 
 export async function xrpc(ns, options = {}) {
   const method = options.method || (options.body !== undefined || options.blob ? 'POST' : 'GET');
-  const path = `/xrpc/${ns}${query(options.params)}`;
+  const path = xrpcPath(ns, options.params);
   const headers = new Headers(options.headers || {});
   const oauth = options.auth === 'public' ? null : getOauth();
   const password = options.auth === 'public' ? null : getPassword();
@@ -98,7 +98,7 @@ export async function xrpc(ns, options = {}) {
       body: options.blob || (options.body !== undefined ? JSON.stringify(options.body) : undefined),
       signal: options.signal,
     });
-    return read(res);
+    return readXrpcResponse(res);
   }
 
   const base = password ? password.pds.replace(/\/$/, '') : PUBLIC;
@@ -126,7 +126,7 @@ export async function xrpc(ns, options = {}) {
     const refreshed = await refreshPassword();
     if (refreshed) return xrpc(ns, { ...options, retried: true });
   }
-  return read(res);
+  return readXrpcResponse(res);
 }
 
 async function didDocument(did) {
@@ -151,14 +151,13 @@ export async function resolvePds(identifier) {
     });
     did = resolved.did;
   }
-  const doc = await didDocument(did);
+  const doc = new DidDocument(await didDocument(did));
   if (!handle.startsWith('did:')) {
-    const claimed = (doc.alsoKnownAs || []).some((name) => String(name).toLowerCase() === `at://${handle.toLowerCase()}`);
-    if (!claimed) throw new Error('That handle does not match the account record.');
+    if (!doc.claimsHandle(handle)) throw new Error('That handle does not match the account record.');
   }
-  const service = (doc.service || []).find((item) => item.type === 'AtprotoPersonalDataServer' || item.id === '#atproto_pds');
-  if (!service?.serviceEndpoint) throw new Error('Could not find this account’s server.');
-  return { did, pds: service.serviceEndpoint, handle };
+  const pds = doc.pdsEndpoint();
+  if (!pds) throw new Error('Could not find this account’s server.');
+  return { did, pds, handle };
 }
 
 export async function loginWithPassword(identifier, password) {
@@ -169,7 +168,7 @@ export async function loginWithPassword(identifier, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ identifier: id, password }),
   });
-  const data = await read(res);
+  const data = await readXrpcResponse(res);
   const session = {
     accessJwt: data.accessJwt,
     refreshJwt: data.refreshJwt,
@@ -283,7 +282,7 @@ async function refreshAppPassAdmin(session) {
         try { sessionStorage.removeItem(APP_PASS_ADMIN_KEY); } catch { /* the form can open again */ }
         return false;
       }
-      const data = await read(res);
+      const data = await readXrpcResponse(res);
       storeAppPassAdmin({
         ...session,
         accessJwt: data.accessJwt,
@@ -314,7 +313,7 @@ async function adminFetch(session, ns, options = {}) {
     if (refreshed && appPassAdmin) return adminFetch(appPassAdmin, ns, { ...options, retried: true });
   }
   try {
-    return await read(res);
+    return await readXrpcResponse(res);
   } catch (error) {
     if (error?.status === 401 || error?.status === 403) {
       appPassAdmin = null;
@@ -362,7 +361,7 @@ export async function loginForAppPasswords(identifier, password, authFactorToken
   });
   let data;
   try {
-    data = await read(res);
+    data = await readXrpcResponse(res);
   } catch (error) {
     if (error?.data?.error === 'AuthFactorTokenRequired') {
       const next = new Error('This account uses a sign-in code.');
@@ -586,10 +585,6 @@ export async function patchPreferences(change) {
 
 const CLIENT_SETTINGS = 'app.libresky.settings';
 
-function missingRecord(error) {
-  return error?.status === 400 || error?.status === 404;
-}
-
 export async function readClientSettings() {
   try {
     const data = await xrpc('com.atproto.repo.getRecord', {
@@ -631,64 +626,6 @@ export async function writeClientSettings(record) {
   });
 }
 
-const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
-
-function tid() {
-  let now = BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
-  let out = '';
-  for (let i = 0; i < 13; i += 1) {
-    out = TID_ALPHABET[Number(now % 32n)] + out;
-    now /= 32n;
-  }
-  return out;
-}
-
-export function savedFeedItems(preferences) {
-  const list = preferences || [];
-  const v2 = list.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPrefV2');
-  if (v2) {
-    return (v2.items || [])
-      .filter((item) => item?.type && item?.value)
-      .map((item) => ({
-        id: item.id,
-        type: item.type,
-        value: item.value,
-        pinned: Boolean(item.pinned),
-      }));
-  }
-  const v1 = list.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPref');
-  if (!v1) return [];
-  const pinned = new Set(v1.pinned || []);
-  const uris = [...new Set([...(v1.saved || []), ...(v1.pinned || [])])].filter(Boolean);
-  return uris.map((uri) => ({
-    type: String(uri).includes('/app.bsky.graph.list/') ? 'list' : 'feed',
-    value: uri,
-    pinned: pinned.has(uri),
-  }));
-}
-
-export function applySavedFeeds(preferences, items) {
-  const next = (preferences || []).map((pref) => ({ ...pref }));
-  const v2items = items.map((item) => ({
-    id: item.id || tid(),
-    type: item.type,
-    value: item.value,
-    pinned: Boolean(item.pinned),
-  }));
-  let v2 = next.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPrefV2');
-  if (!v2) {
-    v2 = { $type: 'app.bsky.actor.defs#savedFeedsPrefV2', items: v2items };
-    next.push(v2);
-  } else v2.items = v2items;
-  const v1 = next.find((pref) => pref.$type === 'app.bsky.actor.defs#savedFeedsPref');
-  if (v1) {
-    const rows = v2items.filter((item) => item.type === 'feed' || item.type === 'list');
-    v1.pinned = rows.filter((item) => item.pinned).map((item) => item.value);
-    v1.saved = rows.map((item) => item.value);
-  }
-  return next;
-}
-
 export function getFollowers(actor, cursor, signal, limit = 30) {
   return xrpc('app.bsky.graph.getFollowers', { params: { actor, limit, cursor }, signal });
 }
@@ -710,28 +647,15 @@ export function getListFeed(list, cursor, signal) {
 }
 
 export function createList({ name, description, purpose, descriptionFacets }) {
-  const record = {
-    $type: 'app.bsky.graph.list',
-    purpose: purpose || 'app.bsky.graph.defs#curatelist',
-    name,
-    createdAt: new Date().toISOString(),
-  };
-  if (description) record.description = description;
-  if (descriptionFacets?.length) record.descriptionFacets = descriptionFacets;
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.graph.list', record),
+    body: recordBody('app.bsky.graph.list', new ListRecord({ name, description, purpose, descriptionFacets }).toJSON()),
     auth: 'required',
   });
 }
 
 export function addListMember(list, did) {
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.graph.listitem', {
-      $type: 'app.bsky.graph.listitem',
-      subject: did,
-      list,
-      createdAt: new Date().toISOString(),
-    }),
+    body: recordBody('app.bsky.graph.listitem', new ListItemRecord({ subject: did, list }).toJSON()),
     auth: 'required',
   });
 }
@@ -798,11 +722,7 @@ export async function deleteList(uri) {
     (data.items || []).forEach((item) => {
       const parts = splitAtUri(item.uri);
       if (!parts) return;
-      writes.push({
-        $type: 'com.atproto.repo.applyWrites#delete',
-        collection: parts.collection,
-        rkey: parts.rkey,
-      });
+      writes.push(new DeleteWrite(parts).toJSON());
     });
     await deleteWrites(writes);
     if (!data.cursor || data.cursor === cursor) break;
@@ -841,33 +761,21 @@ function recordBody(collection, record) {
 
 export function like(uri, cid) {
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.feed.like', {
-      $type: 'app.bsky.feed.like',
-      subject: { uri, cid },
-      createdAt: new Date().toISOString(),
-    }),
+    body: recordBody('app.bsky.feed.like', new LikeRecord({ uri, cid }).toJSON()),
     auth: 'required',
   });
 }
 
 export function repost(uri, cid) {
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.feed.repost', {
-      $type: 'app.bsky.feed.repost',
-      subject: { uri, cid },
-      createdAt: new Date().toISOString(),
-    }),
+    body: recordBody('app.bsky.feed.repost', new RepostRecord({ uri, cid }).toJSON()),
     auth: 'required',
   });
 }
 
 export function follow(did) {
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.graph.follow', {
-      $type: 'app.bsky.graph.follow',
-      subject: did,
-      createdAt: new Date().toISOString(),
-    }),
+    body: recordBody('app.bsky.graph.follow', new FollowRecord({ did }).toJSON()),
     auth: 'required',
   });
 }
@@ -908,7 +816,7 @@ export async function getPublicRecord(repo, collection, rkey) {
   url.searchParams.set('collection', collection);
   url.searchParams.set('rkey', rkey);
   const res = await fetch(url);
-  return read(res);
+  return readXrpcResponse(res);
 }
 
 export function deleteRecord(uri) {
@@ -930,11 +838,7 @@ export function unmuteActor(did) {
 
 export function block(did) {
   return xrpc('com.atproto.repo.createRecord', {
-    body: recordBody('app.bsky.graph.block', {
-      $type: 'app.bsky.graph.block',
-      subject: did,
-      createdAt: new Date().toISOString(),
-    }),
+    body: recordBody('app.bsky.graph.block', new BlockRecord({ did }).toJSON()),
     auth: 'required',
   });
 }
@@ -948,7 +852,7 @@ export function reportPost(uri, cid, reasonType, reason) {
     body: {
       reasonType,
       reason: reason || undefined,
-      subject: { $type: 'com.atproto.repo.strongRef', uri, cid },
+      subject: new TypedStrongRef({ uri, cid }).toJSON(),
     },
     auth: 'required',
   });
@@ -959,7 +863,7 @@ export function reportAccount(did, reasonType, reason) {
     body: {
       reasonType,
       reason: reason || undefined,
-      subject: { $type: 'com.atproto.admin.defs#repoRef', did },
+      subject: new RepoRef(did).toJSON(),
     },
     auth: 'required',
   });
@@ -972,12 +876,7 @@ export function createThreadgate(postUri, allow) {
       repo: currentDid(),
       collection: 'app.bsky.feed.threadgate',
       rkey,
-      record: {
-        $type: 'app.bsky.feed.threadgate',
-        post: postUri,
-        allow,
-        createdAt: new Date().toISOString(),
-      },
+      record: new ThreadgateRecord({ post: postUri, allow }).toJSON(),
     },
     auth: 'required',
   });
@@ -1264,13 +1163,7 @@ export async function inspectLink(url) {
 }
 
 export function externalEmbed({ url, title, description, thumb }) {
-  const external = {
-    uri: url,
-    title: String(title || url).slice(0, 300),
-    description: String(description || '').slice(0, 1000),
-  };
-  if (thumb) external.thumb = thumb;
-  return { $type: 'app.bsky.embed.external', external };
+  return new ExternalEmbed({ url, title, description, thumb }).toJSON();
 }
 
 const VIDEO_SERVICE = 'https://video.bsky.app';
@@ -1387,54 +1280,37 @@ function mergeFacets(found, extra) {
 
 export async function createPost({ text, images = [], video = null, reply = null, quote = null, link = null, langs = null }) {
   const prepared = applyShortLinks(text);
-  const record = {
-    $type: 'app.bsky.feed.post',
-    text: prepared.text,
-    createdAt: new Date().toISOString(),
-  };
+  const createdAt = new Date().toISOString();
   const facets = mergeFacets(await facetsFor(prepared.text), prepared.links);
-  if (facets.length) record.facets = facets;
   const chosen = (Array.isArray(langs) ? langs : [])
     .map((code) => String(code || '').trim().toLowerCase())
     .filter((code) => /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(code))
     .filter((code, index, all) => all.indexOf(code) === index)
     .slice(0, 3);
-  if (chosen.length) record.langs = chosen;
+  let languages;
+  if (chosen.length) languages = chosen;
   else {
     const lang = (navigator.language || '').slice(0, 2).toLowerCase();
-    if (/^[a-z]{2}$/.test(lang)) record.langs = [lang];
+    if (/^[a-z]{2}$/.test(lang)) languages = [lang];
   }
-  if (reply) {
-    record.reply = {
-      root: reply.root,
-      parent: reply.parent,
-    };
-  }
-  const imageEmbed = images.length
-    ? {
-      $type: 'app.bsky.embed.images',
-      images: images.map((image) => ({ alt: image.alt || '', image: image.blob })),
-    }
-    : null;
+  const imageEmbed = images.length ? new ImagesEmbed(images).toJSON() : null;
   const videoEmbed = video?.blob
-    ? {
-      $type: 'app.bsky.embed.video',
-      video: video.blob,
-      alt: String(video.alt || '').slice(0, 2000),
-      ...(video.aspectRatio?.width && video.aspectRatio?.height ? { aspectRatio: video.aspectRatio } : {}),
-    }
+    ? new VideoEmbed({ video: video.blob, alt: video.alt, aspectRatio: video.aspectRatio }).toJSON()
     : null;
   const media = imageEmbed || videoEmbed;
-  if (media && quote) {
-    record.embed = {
-      $type: 'app.bsky.embed.recordWithMedia',
-      record: { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } },
-      media,
-    };
-  } else if (media) record.embed = media;
-  else if (quote) {
-    record.embed = { $type: 'app.bsky.embed.record', record: { uri: quote.uri, cid: quote.cid } };
-  } else if (link) record.embed = link;
+  let embed;
+  if (media && quote) embed = new RecordWithMediaEmbed({ uri: quote.uri, cid: quote.cid, media }).toJSON();
+  else if (media) embed = media;
+  else if (quote) embed = new RecordEmbed({ uri: quote.uri, cid: quote.cid }).toJSON();
+  else if (link) embed = link;
+  const record = new PostRecord({
+    text: prepared.text,
+    createdAt,
+    facets,
+    langs: languages,
+    reply: reply ? { root: reply.root, parent: reply.parent } : undefined,
+    embed,
+  }).toJSON();
   return xrpc('com.atproto.repo.createRecord', {
     body: recordBody('app.bsky.feed.post', record),
     auth: 'required',
@@ -1493,13 +1369,12 @@ export async function readChatDeclaration() {
 }
 
 export function writeChatDeclaration(allowIncoming) {
-  const allow = allowIncoming === 'none' || allowIncoming === 'following' ? allowIncoming : 'all';
   return xrpc('com.atproto.repo.putRecord', {
     body: {
       repo: currentDid(),
       collection: CHAT_DECLARATION,
       rkey: 'self',
-      record: { $type: CHAT_DECLARATION, allowIncoming: allow },
+      record: new ChatDeclarationRecord(allowIncoming).toJSON(),
     },
     auth: 'required',
   });

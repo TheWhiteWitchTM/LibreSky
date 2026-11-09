@@ -11,4 +11,6 @@ await rm(www, { recursive: true, force: true });
 await mkdir(www, { recursive: true });
 await Promise.all(files.map((file) => cp(path.join(root, file), path.join(www, file))));
 await Promise.all(dirs.map((dir) => cp(path.join(root, dir), path.join(www, dir), { recursive: true })));
+await mkdir(path.join(www, 'lib'), { recursive: true });
+await cp(path.join(root, 'lib', 'dist'), path.join(www, 'lib', 'dist'), { recursive: true });
 console.log(`Copied the site into ${www}`);

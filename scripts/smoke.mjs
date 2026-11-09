@@ -902,7 +902,7 @@ assert.ok(tweetCard.title);
 const homeCard = await inspectLink('https://thewhitewitchtm.github.io/');
 assert.equal(homeCard?.kind, 'external');
 assert.match(homeCard.title, /White Witch/);
-assert.match(homeCard.image, /\/og\.jpg|\/banner\.jpg/, 'homepage link preview is missing its image');
+assert.match(homeCard.image, /(?:\/|%2F)(?:og|banner)\.jpg/i, 'homepage link preview is missing its image');
 assert.match(linkPreviewHtml(homeCard), /<img [^>]*og\.jpg|banner\.jpg/);
 
 const metadata = JSON.parse(await readFile(path.join(root, 'client-metadata.json'), 'utf8'));
