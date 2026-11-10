@@ -625,16 +625,19 @@ const siteProfile = profileHtml({
 }, {
   links: [
     { url: 'https://example.com/about', label: 'example.com', kind: 'website' },
+    { url: 'https://www.youtube.com/@me', label: 'YouTube', kind: 'youtube' },
     { url: 'https://github.com/me', label: 'GitHub', kind: 'github' },
     { url: 'https://paypal.me/me', label: 'PayPal', kind: 'paypal' },
   ],
 });
-assert.match(siteProfile, /class="profile-site"/);
-assert.match(siteProfile, /example\.com/);
-const siteToolbar = siteProfile.slice(siteProfile.indexOf('social-toolbar'));
+assert.doesNotMatch(siteProfile, /profile-site/);
+const siteToolbar = siteProfile.slice(siteProfile.indexOf('social-toolbar'), siteProfile.indexOf('</nav>'));
+assert.match(siteToolbar, /example\.com/);
+assert.match(siteToolbar, /youtube\.com/);
 assert.match(siteToolbar, /github\.com/);
 assert.match(siteToolbar, /paypal\.me/);
-assert.doesNotMatch(siteToolbar, /example\.com/);
+assert.ok(siteToolbar.indexOf('example.com') < siteToolbar.indexOf('youtube.com'));
+assert.ok(siteToolbar.indexOf('youtube.com') < siteToolbar.indexOf('github.com'));
 const articlePage = articlePageHtml({
   title: 'Hello sky',
   text: 'A **bold** line\n\n- one\n\n> quoted',

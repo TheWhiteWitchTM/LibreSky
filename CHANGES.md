@@ -4,6 +4,10 @@ This is the record of the beta you can [open today](https://libresky.sociallydea
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 10 November 2026
+
+- The profile link row keeps the website and every social link together. Adding YouTube leaves the website on that same toolbar.
+
 ## 9 November 2026
 
 - A profile can show Highlights and Articles on the tab row, and a toolbar of social links under the name. Those records are public on the account. Another LibreSky window reads them.

@@ -418,7 +418,7 @@ const SOCIAL_ICON = {
   other: 'link',
 };
 
-function siteHost(url) {
+function linkHost(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
   } catch {
@@ -426,30 +426,21 @@ function siteHost(url) {
   }
 }
 
-function splitProfileLinks(links) {
-  const items = (links || []).filter((link) => safeUrl(link?.url));
-  const index = items.findIndex((link) => (link.kind || 'website') === 'website');
-  return {
-    website: index >= 0 ? items[index] : null,
-    rest: items.filter((_, item) => item !== index),
-  };
-}
-
-function websiteLine(link) {
-  if (!link) return '';
-  const href = safeUrl(link.url);
-  if (!href) return '';
-  const label = siteHost(href) || link.label || 'Website';
-  return `<p class="profile-site"><a href="${attr(href)}" target="_blank" rel="noopener noreferrer">${icon('link')}<span>${escapeHtml(label)}</span></a></p>`;
+function linkChipLabel(link, href) {
+  const label = String(link?.label || '').trim();
+  if (label) return label;
+  const kind = link?.kind || 'website';
+  if (kind === 'website' || kind === 'other') return linkHost(href) || 'Website';
+  return 'Link';
 }
 
 function socialToolbarHtml(links) {
-  const items = splitProfileLinks(links).rest;
+  const items = (links || []).filter((link) => safeUrl(link?.url));
   if (!items.length) return '';
   const buttons = items.map((link) => {
     const href = safeUrl(link.url);
-    const glyph = SOCIAL_ICON[link.kind] || 'link';
-    return `<a href="${attr(href)}" target="_blank" rel="noopener noreferrer">${icon(glyph)}<span>${escapeHtml(link.label || 'Link')}</span></a>`;
+    const glyph = SOCIAL_ICON[link.kind] || SOCIAL_ICON.website;
+    return `<a href="${attr(href)}" target="_blank" rel="noopener noreferrer">${icon(glyph)}<span>${escapeHtml(linkChipLabel(link, href))}</span></a>`;
   }).join('');
   return `<nav class="social-toolbar" aria-label="Social links">${buttons}</nav>`;
 }
@@ -466,7 +457,6 @@ export function profileHtml(profile, options = {}) {
     <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
     <div class="handle">@${escapeHtml(profile.handle)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
-    ${websiteLine(splitProfileLinks(options.links).website)}
     ${socialToolbarHtml(options.links)}
     ${joinedLine(profile.createdAt)}
     <p class="counts"><a href="#/profile/${encodeURIComponent(profile.handle)}/following"><strong>${fullCount(profile.followsCount)}</strong> following</a><a href="#/profile/${encodeURIComponent(profile.handle)}/followers"><strong>${fullCount(profile.followersCount)}</strong> followers</a><span><strong>${fullCount(profile.postsCount)}</strong> posts</span></p>

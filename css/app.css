@@ -1574,17 +1574,6 @@ a.person.request-entry { width: 100%; }
 }
 .social-toolbar a:hover { background: var(--hover); }
 .social-toolbar .ico { width: 16px; height: 16px; }
-.profile-site { margin: 8px 16px 0; }
-.profile-site a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  color: var(--text);
-  font-weight: 700;
-}
-.profile-site .ico { width: 16px; height: 16px; color: var(--text-2); flex: none; }
-.profile-site span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .article-card {
   display: flex;
   flex-direction: column;
