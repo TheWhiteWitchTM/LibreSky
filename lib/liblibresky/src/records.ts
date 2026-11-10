@@ -27,7 +27,7 @@ export const LINK_KINDS = [
 export type LinkKind = (typeof LINK_KINDS)[number];
 
 export const LINK_LABEL: Record<LinkKind, string> = {
-  website: 'Website',
+  website: 'Homepage',
   x: 'X',
   instagram: 'Instagram',
   youtube: 'YouTube',
@@ -161,7 +161,7 @@ export function normalizeLink(input: { url?: unknown; label?: unknown; kind?: un
 export function presentLink(link: SocialLink): { url: string; label: string; kind: LinkKind } {
   const kind = KIND_SET.has(link.kind) ? link.kind : kindForUrl(link.url);
   const host = hostname(link.url);
-  const fallback = (kind === 'website' || kind === 'other') && host ? host : (LINK_LABEL[kind] || host || 'Link');
+  const fallback = kind === 'other' && host ? host : (LINK_LABEL[kind] || host || 'Link');
   return { url: link.url, label: link.label.trim() || fallback, kind };
 }
 

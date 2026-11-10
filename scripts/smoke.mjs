@@ -633,6 +633,9 @@ const siteProfile = profileHtml({
 assert.doesNotMatch(siteProfile, /profile-site/);
 const siteToolbar = siteProfile.slice(siteProfile.indexOf('social-toolbar'), siteProfile.indexOf('</nav>'));
 assert.match(siteToolbar, /example\.com/);
+assert.match(siteToolbar, />Homepage</);
+assert.match(siteToolbar, /M4 10\.4/);
+assert.doesNotMatch(siteToolbar, /<span>example\.com<\/span>/);
 assert.match(siteToolbar, /youtube\.com/);
 assert.match(siteToolbar, /github\.com/);
 assert.match(siteToolbar, /paypal\.me/);

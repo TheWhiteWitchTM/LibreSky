@@ -397,7 +397,7 @@ function joinedLine(iso) {
 }
 
 const SOCIAL_ICON = {
-  website: 'globe',
+  website: 'home',
   x: 'x',
   instagram: 'instagram',
   youtube: 'youtube',
@@ -428,9 +428,12 @@ function linkHost(url) {
 
 function linkChipLabel(link, href) {
   const label = String(link?.label || '').trim();
-  if (label) return label;
   const kind = link?.kind || 'website';
-  if (kind === 'website' || kind === 'other') return linkHost(href) || 'Website';
+  const host = linkHost(href);
+  // A saved homepage often carries the address as its label. The chip stays short.
+  if (kind === 'website' && (!label || label === host || label === href || label === 'Website')) return 'Homepage';
+  if (label) return label;
+  if (kind === 'other') return host || 'Link';
   return 'Link';
 }
 
