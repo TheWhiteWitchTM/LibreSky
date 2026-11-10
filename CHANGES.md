@@ -6,7 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 10 November 2026
 
-- The profile link row keeps the homepage and every social link together. Adding YouTube leaves the homepage on that same toolbar. The homepage chip is a home icon and the word Homepage, the same pill as the other links.
+- The profile link row keeps the website and every social link together. The website chip is first. It is a home icon and the word Website, the same pill as the other links.
+- Support development opens Mira's PayPal link.
 
 ## 9 November 2026
 

@@ -27,7 +27,7 @@ export const LINK_KINDS = [
 export type LinkKind = (typeof LINK_KINDS)[number];
 
 export const LINK_LABEL: Record<LinkKind, string> = {
-  website: 'Homepage',
+  website: 'Website',
   x: 'X',
   instagram: 'Instagram',
   youtube: 'YouTube',

@@ -481,11 +481,11 @@
         <label>Bio
           <textarea id="profile-bio" maxlength="256" rows="3"></textarea>
         </label>
-        <label>Homepage
+        <label>Website
           <span class="site-input"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10.4 12 3.6l8 6.8V20a1 1 0 0 1-1 1h-5.2v-6.2H10.2V21H5a1 1 0 0 1-1-1v-9.6z"/></svg><input id="profile-website" type="text" inputmode="url" autocomplete="url" placeholder="yoursite.com" maxlength="2000"></span>
         </label>
         <div class="social-block">
-          <div class="social-label-row"><strong>Social</strong><span class="dim">Eight links, counting the homepage.</span></div>
+          <div class="social-label-row"><strong>Social</strong><span class="dim">Eight links, counting the website.</span></div>
           <div class="kind-row" id="social-kinds"></div>
           <div id="social-current"></div>
           <button type="button" class="text-btn" data-act="social-custom">Add another link</button>
@@ -596,7 +596,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <h3>Home</h3>
       <p>Following is people you follow. Discover is what is happening. Scroll the row for lists and feeds you add. Arrows show when there is more off to the side. The … on that row opens Edit tabs. Remove takes a list or a saved feed off the row.</p>
       <h3>Profile</h3>
-      <p>Posts, Replies, Media, and Likes use that same row as Home. Highlights and Articles sit on that row when the profile has them. Your own Articles tab stays. Feeds, lists, and starter packs you attach sit on that row, and Remove takes one off. The … there is the menu for that profile. Edit profile puts the camera on the banner and on the avatar. Homepage and the social icons are on that same screen.</p>
+      <p>Posts, Replies, Media, and Likes use that same row as Home. Highlights and Articles sit on that row when the profile has them. Your own Articles tab stays. Feeds, lists, and starter packs you attach sit on that row, and Remove takes one off. The … there is the menu for that profile. Edit profile puts the camera on the banner and on the avatar. Website and the social icons are on that same screen.</p>
       <h3>Search</h3>
       <p>The row under the search box holds For you, Ukraine, the topics you keep, and searches you add. Scroll, and the search box leaves. The row stays. Ukraine shows posts about Ukraine, in English and in Ukrainian. It does not add Latest or Top. Those sit in page config, with the other search settings, for every tab. SociallyDead is on that row with a folder, and opens the directory in a new tab. The … on that row opens Edit tabs. For you stays. Remove takes any of those off the row, and Add puts one back. Add a search term, and give it a name if you want one. Move, then Save, to change the order.</p>
       <h3>Writing</h3>
@@ -786,6 +786,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261109c" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261110a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

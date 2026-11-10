@@ -6087,7 +6087,7 @@ async function saveDesktopZip(file, button) {
 function showSupport() {
   generation += 1;
   setChrome({ title: 'Support', nav: 'support', back: true });
-  $('view').innerHTML = `<div class="support-page"><h2>Support development</h2><p>LibreSky is free. A payment helps the work continue: the browser client, the desktop apps, and what comes next.</p><p><a class="primary support-pay" href="https://www.paypal.com/ncp/payment/4P85EQRES3RGU" target="_blank" rel="noopener noreferrer">PayPal</a></p><p class="dim">PayPal opens in a new tab. LibreSky does not see the payment.</p></div>`;
+  $('view').innerHTML = `<div class="support-page"><h2>Support development</h2><p>LibreSky is free. A payment helps the work continue: the browser client, the desktop apps, and what comes next.</p><p><a class="primary support-pay" href="https://www.paypal.com/ncp/payment/BVY3E2H2E2VWA" target="_blank" rel="noopener noreferrer">PayPal</a></p><p class="dim">PayPal opens in a new tab. LibreSky does not see the payment.</p></div>`;
 }
 
 function showUkraine() {

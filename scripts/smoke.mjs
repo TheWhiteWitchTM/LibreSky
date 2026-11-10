@@ -624,16 +624,16 @@ const siteProfile = profileHtml({
   displayName: 'Me',
 }, {
   links: [
-    { url: 'https://example.com/about', label: 'example.com', kind: 'website' },
     { url: 'https://www.youtube.com/@me', label: 'YouTube', kind: 'youtube' },
     { url: 'https://github.com/me', label: 'GitHub', kind: 'github' },
     { url: 'https://paypal.me/me', label: 'PayPal', kind: 'paypal' },
+    { url: 'https://example.com/about', label: 'example.com', kind: 'website' },
   ],
 });
 assert.doesNotMatch(siteProfile, /profile-site/);
 const siteToolbar = siteProfile.slice(siteProfile.indexOf('social-toolbar'), siteProfile.indexOf('</nav>'));
 assert.match(siteToolbar, /example\.com/);
-assert.match(siteToolbar, />Homepage</);
+assert.match(siteToolbar, />Website</);
 assert.match(siteToolbar, /M4 10\.4/);
 assert.doesNotMatch(siteToolbar, /<span>example\.com<\/span>/);
 assert.match(siteToolbar, /youtube\.com/);
@@ -1040,7 +1040,7 @@ const sitemap = await readFile(path.join(root, 'sitemap.xml'), 'utf8');
 assert.match(robots, /Sitemap: https:\/\/thewhitewitchtm\.github\.io\/LibreSky\/sitemap\.xml/);
 assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
 const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
-assert.match(appSource, /https:\/\/www\.paypal\.com\/ncp\/payment\/4P85EQRES3RGU/);
+assert.match(appSource, /https:\/\/www\.paypal\.com\/ncp\/payment\/BVY3E2H2E2VWA/);
 assert.match(appSource, /data-act="desktop-download"/);
 assert.doesNotMatch(appSource, /href="\.\/download\//);
 const desktopManifest = JSON.parse(await readFile(path.join(root, 'download/manifest.json'), 'utf8'));

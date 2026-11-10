@@ -430,8 +430,8 @@ function linkChipLabel(link, href) {
   const label = String(link?.label || '').trim();
   const kind = link?.kind || 'website';
   const host = linkHost(href);
-  // A saved homepage often carries the address as its label. The chip stays short.
-  if (kind === 'website' && (!label || label === host || label === href || label === 'Website')) return 'Homepage';
+  // A saved website often carries the address as its label. The chip stays short.
+  if (kind === 'website' && (!label || label === host || label === href || label === 'Website' || label === 'Homepage')) return 'Website';
   if (label) return label;
   if (kind === 'other') return host || 'Link';
   return 'Link';
@@ -439,6 +439,7 @@ function linkChipLabel(link, href) {
 
 function socialToolbarHtml(links) {
   const items = (links || []).filter((link) => safeUrl(link?.url));
+  items.sort((a, b) => ((a.kind || 'website') === 'website' ? 0 : 1) - ((b.kind || 'website') === 'website' ? 0 : 1));
   if (!items.length) return '';
   const buttons = items.map((link) => {
     const href = safeUrl(link.url);
