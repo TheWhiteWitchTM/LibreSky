@@ -1089,28 +1089,51 @@ function pieceLabel(game, piece) {
   return `${tone} pawn`;
 }
 
-function outlined(inner, fill, stroke) {
-  return `<g fill="${fill}" stroke="${stroke}" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" paint-order="fill stroke">${inner}</g>`;
-}
+const PIECE_SHAPES = {
+  k: {
+    body: `<path d="M30 4h4v6h6v4h-6v6h-4v-6h-6V10h6z"/><path d="M18 16h28l-4 32H22z"/><path d="M14 42h36v14H14z"/>`,
+  },
+  q: {
+    body: `<path d="M8 24l8 3 6-14 6 14 6-14 6 14 8-3 4 6H4z"/><path d="M18 24h28l-4 24H22z"/><path d="M14 42h36v14H14z"/>`,
+  },
+  r: {
+    body: `<path d="M12 8h8v8h6V8h8v8h6V8h8v12H12z"/><path d="M18 16h28v32H18z"/><path d="M12 42h40v13H12z"/>`,
+  },
+  b: {
+    body: `<path d="M32 5c4 0 7 3.2 7 7 0 2.4-1.2 4.4-3 5.6V20h4l3 4-2 22H23l-2-22 3-4h4v-2.4c-1.8-1.2-3-3.2-3-5.6 0-3.8 3-7 7-7z"/><path d="M14 40h36v16H14z"/>`,
+    marks: (ink) => `<path d="M31 16h2v9h-2z" fill="${ink}"/>`,
+  },
+  n: {
+    body: `<path d="M46 56H16v-6h7c-4-4-9-8-9-16 0-7 4-12 9-14-1-7 4-12 11-12 5 0 8 4 7 8 6 1 11 7 10 15 0 7-5 11-9 14h4v11z"/>`,
+    marks: (ink) => `<circle cx="26" cy="30" r="2.1" fill="${ink}"/>`,
+  },
+  p: {
+    body: `<circle cx="32" cy="16" r="8"/><path d="M26 18h12l5 28H21z"/><path d="M16 40h32v14H16z"/>`,
+  },
+  man: { body: `<circle cx="32" cy="32" r="18"/>` },
+  kingman: {
+    body: `<circle cx="32" cy="32" r="18"/>`,
+    marks: (ink) => `<circle cx="32" cy="32" r="7" fill="none" stroke="${ink}" stroke-width="2.4"/>`,
+  },
+  disc: {
+    body: `<circle cx="32" cy="32" r="18"/>`,
+    marks: (ink) => `<circle cx="32" cy="32" r="6" fill="none" stroke="${ink}" stroke-width="2.2"/>`,
+  },
+  hound: { body: `<circle cx="32" cy="34" r="16"/><path d="M18 30c2-10 8-16 14-16s12 6 14 16"/>` },
+  fox: {
+    body: `<path d="M10 32 22 10l8 16L32 8l2 18 8-16 12 22c6 10 2 22-14 24S4 44 10 32z"/>`,
+    marks: (ink) => `<circle cx="26" cy="30" r="2.1" fill="${ink}"/><circle cx="40" cy="34" r="2.1" fill="${ink}"/>`,
+  },
+};
 
 function pieceSvg(shape, light) {
   const fill = light ? '#ffffff' : '#000000';
-  const stroke = light ? '#000000' : '#ffffff';
-  const eye = `<circle cx="26" cy="30" r="2.1" fill="${stroke}" stroke="none"/>`;
-  const paths = {
-    k: `<path d="M30 4h4v6h6v4h-6v6h-4v-6h-6V10h6z"/><path d="M18 28h28l-4 20H22z"/><path d="M14 50h36v6H14z"/>`,
-    q: `<path d="M8 24l8 3 6-14 6 14 6-14 6 14 8-3 4 6H4z"/><path d="M18 32h28l-4 16H22z"/><path d="M14 50h36v6H14z"/>`,
-    r: `<path d="M12 8h8v8h6V8h8v8h6V8h8v12H12z"/><path d="M18 20h28v26H18z"/><path d="M12 48h40v7H12z"/>`,
-    b: `<path d="M32 5c4 0 7 3.2 7 7 0 2.4-1.2 4.4-3 5.6V20h4l3 4-2 22H23l-2-22 3-4h4v-2.4c-1.8-1.2-3-3.2-3-5.6 0-3.8 3-7 7-7z"/><path d="M31 16h2v9h-2z"/><path d="M14 50h36v6H14z"/>`,
-    n: `<path d="M46 56H16v-6h7c-4-4-9-8-9-16 0-7 4-12 9-14-1-7 4-12 11-12 5 0 8 4 7 8 6 1 11 7 10 15 0 7-5 11-9 14h4v11z"/>${eye}`,
-    p: `<circle cx="32" cy="16" r="8"/><path d="M26 26h12l5 20H21z"/><path d="M16 48h32v6H16z"/>`,
-    man: `<circle cx="32" cy="32" r="18"/>`,
-    kingman: `<circle cx="32" cy="32" r="18"/><circle cx="32" cy="32" r="7" fill="none"/>`,
-    disc: `<circle cx="32" cy="32" r="18"/><circle cx="32" cy="32" r="6" fill="none"/>`,
-    hound: `<circle cx="32" cy="34" r="16"/><path d="M18 30c2-10 8-16 14-16s12 6 14 16"/>`,
-    fox: `<path d="M10 32 22 10l8 16L32 8l2 18 8-16 12 22c6 10 2 22-14 24S4 44 10 32z"/>${eye}<circle cx="40" cy="34" r="2.1" fill="${stroke}" stroke="none"/>`,
-  };
-  return `<svg viewBox="0 0 64 64" width="64" height="64" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${outlined(paths[shape] || paths.p, fill, stroke)}</svg>`;
+  const ink = light ? '#000000' : '#ffffff';
+  const spec = PIECE_SHAPES[shape] || PIECE_SHAPES.p;
+  const border = `<g fill="none" stroke="${ink}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">${spec.body}</g>`;
+  const solid = `<g fill="${fill}" stroke="none">${spec.body}</g>`;
+  const marks = spec.marks ? spec.marks(ink) : '';
+  return `<svg viewBox="0 0 64 64" width="64" height="64" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${border}${solid}${marks}</svg>`;
 }
 
 export function boardHtml(state, opts = {}) {

@@ -4227,6 +4227,7 @@ body.ringing .game-invite { bottom: 132px; }
 .game-invite .primary,
 .game-invite .danger { flex: none; }
 #game {
+  --board-max: calc(100dvh - 108px);
   width: min(980px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   overflow: auto;
@@ -4256,7 +4257,10 @@ body.ringing .game-invite { bottom: 132px; }
   align-items: start;
   padding: 12px 16px 16px;
 }
-.game-panel { min-width: 0; }
+.game-board { min-width: 0; }
+.game-panel { min-width: 0; max-height: var(--board-max); overflow: auto; }
+#game .game-board:has(.promo-pop) { --board-max: calc(100dvh - 168px); }
+#game .marble { width: min(100%, var(--board-max)); margin-inline: auto; }
 .game-status { margin: 0 0 6px; font-weight: 800; }
 .game-you { margin: 0 0 10px; }
 .game-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
@@ -4411,11 +4415,16 @@ button.sq { cursor: pointer; }
 .sq.dark .coord { color: #e7efe9; }
 .marble.is-mini .coord { font-size: 8px; }
 .marble.is-mini .marble-frame { padding: 7px; }
-#game.is-full .game-play {
-  min-height: calc(100dvh - 64px);
-  align-items: center;
+#game.is-full {
+  --board-max: calc(100dvh - 84px);
 }
-#game.is-full .marble { width: min(100%, calc(100dvh - 140px)); margin: 0 auto; }
+#game.is-full .game-board:has(.promo-pop) { --board-max: calc(100dvh - 144px); }
+#game.is-full .game-play {
+  min-height: 0;
+  height: calc(100dvh - 52px);
+  align-items: start;
+}
+#game.is-full .marble { width: min(100%, var(--board-max)); margin: 0 auto; }
 :root[data-theme="contrast-light"] .game-card,
 :root[data-theme="contrast-dark"] .game-card,
 :root[data-theme="contrast-light"] .game-sample,
@@ -4453,7 +4462,7 @@ button.sq { cursor: pointer; }
 @media (max-width: 720px) {
   .game-card { grid-template-columns: 1fr; }
   .game-play { grid-template-columns: 1fr; }
-  #game .marble { width: min(100%, 440px); margin: 0 auto; }
+  #game .marble { width: min(100%, 440px, var(--board-max)); margin: 0 auto; }
   .game-invite { bottom: calc(136px + env(safe-area-inset-bottom)); }
   body.ringing .game-invite { bottom: calc(250px + env(safe-area-inset-bottom)); }
 }
