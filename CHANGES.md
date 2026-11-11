@@ -8,7 +8,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 - A profile, a chat, and a voice or video call show Available when that person has LibreSky open. Away means the app is open but not in front. Uses LibreSky means they have used it. Not on LibreSky means this account has no last seen. The time stays off the screen. LibreSky writes that last seen on the account while the app is open.
 - Articles sits above Post on the left. Games sits under Calls. Chess, checkers, Reversi, fox and hounds, and breakthrough share a marble board. Play a simple AI, or push an invite to someone who is Available in a chat or a call. The game opens in a dialog with a full screen option.
-- Pieces stay the same size after a move. White pieces are solid white with a black border, and black pieces are solid black with a white border. The light squares read as white marble, a little quieter than polished stone. A move, a capture, and the end of the game play a short sound. It follows the chat sound setting.
+- Pieces stay the same size after a move. White pieces are solid white with a black border, and black pieces are solid black with a white border. In the light theme the light squares read as white marble, a little quieter than polished stone. In the dark theme the board and the game dialog stay dark. A move, a capture, and the end of the game play a short sound. It follows the chat sound setting.
 - A profile banner keeps the picture’s own shape instead of cropping it into a short strip.
 - A site name typed without http, such as sociallydead.me, is a link in the same way as a full address.
 
