@@ -1508,6 +1508,12 @@ export function getConvo(convoId, signal) {
   return chat('chat.bsky.convo.getMessages', { params: { convoId, limit: 50 }, signal });
 }
 
+export function getMessages(convoId, cursor, signal) {
+  const params = { convoId, limit: 100 };
+  if (cursor) params.cursor = cursor;
+  return chat('chat.bsky.convo.getMessages', { params, signal });
+}
+
 export function getConvoView(convoId, signal) {
   return chat('chat.bsky.convo.getConvo', { params: { convoId }, signal });
 }

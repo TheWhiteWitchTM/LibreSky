@@ -620,6 +620,8 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <p>The lock on the left of the box opens a direct session. It starts as an open lock. Click it and it closes. The other person locks theirs too. Once the session is locked, that same control sends a photo or a file, and the session stays open for the next one. Click the lock again while it is still waiting, or Unlock, to stop. Both people need LibreSky open. Bluesky chat does not store the file. The browsers try a direct path, public STUN servers on the usual ports and on 80 and 443, then public TURN relays on 80 and 443, including a TLS path. A strict network can still block it.</p>
       <h3>Calls</h3>
       <p>Voice and video start from a profile or the Calls page. Both people need LibreSky open. Mute and the camera stay on your side. The time shows once the call connects. Hang up ends it.</p>
+      <h3>Games</h3>
+      <p>Games sits under Calls. Chess, checkers, Reversi, fox and hounds, and breakthrough share one marble board. Play a simple AI, or push an invite to someone who is Available in your chats or calls. The game opens in a dialog, and Full screen fills the window. Black pieces are black with a white outline. White pieces are white with a black outline. An invite travels in the chat, the same way a call does, and the other person can accept or decline.</p>
       <h3>Follows</h3>
       <p>Open Settings and choose Follows to decide whether a new follow rings the bell or plays a sound. Those follows still show on the notifications page. That setting also follows people back and cleans up accounts you followed. Auto follow back can skip accounts that look like spam. Cleanup shows why an account looks off, can unfollow the likely spam, and can follow that batch again.</p>
       <h3>Also here</h3>
@@ -723,7 +725,12 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
     </form>
   </dialog>
 
+  <dialog id="game" aria-labelledby="game-title">
+    <div class="game-stage" id="game-stage"></div>
+  </dialog>
+
   <div id="incoming-call" class="incoming-call" hidden role="status" aria-live="assertive"></div>
+  <div id="game-invite" class="game-invite" hidden role="status" aria-live="polite"></div>
 
   <div id="suggest" class="suggest" popover="manual"></div>
   <div id="type-ghost" class="type-ghost" popover="manual" hidden></div>
@@ -789,6 +796,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261110a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261111a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

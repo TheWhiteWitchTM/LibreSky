@@ -13,6 +13,7 @@ import {
   convoUnread,
   messageSender,
   parseCallMessage,
+  parseGameMessage,
   parseShareMessage,
   richText,
   safeUrl,
@@ -873,6 +874,13 @@ function messagePreview(message) {
   if (!message) return 'No messages yet';
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
+  const gameLine = parseGameMessage(message.text);
+  if (gameLine) {
+    const names = { chess: 'Chess', checkers: 'Checkers', reversi: 'Reversi', fox: 'Fox and hounds', break: 'Breakthrough' };
+    const name = names[gameLine.game] || 'Game';
+    if (gameLine.kind === 'invite') return `${name} invite`;
+    return name;
+  }
   if (parseCallMessage(message.text)) return '';
   const share = parseShareMessage(message.text);
   if (share) return share.kind === 'data' || share.name ? 'File' : 'Direct session';
@@ -950,7 +958,7 @@ export function messageHtml(message, me, options = {}) {
   const mine = Boolean(sender && sender === me);
   const text = message?.text || nested?.text || '';
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-  if (parseCallMessage(text) || parseShareMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
+  if (parseCallMessage(text) || parseShareMessage(text) || parseGameMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
   const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';

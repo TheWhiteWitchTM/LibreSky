@@ -7,7 +7,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 ## 11 November 2026
 
 - A profile, a chat, and a voice or video call show Available when that person has LibreSky open. Away means the app is open but not in front. Uses LibreSky means they have used it. Not on LibreSky means this account has no last seen. The time stays off the screen. LibreSky writes that last seen on the account while the app is open.
-- Articles sits above Post on the left. Games sits under Calls and opens a coming soon page with a link to contribute.
+- Articles sits above Post on the left. Games sits under Calls. Chess, checkers, Reversi, fox and hounds, and breakthrough share a marble board. Play a simple AI, or push an invite to someone who is Available in a chat or a call. The game opens in a dialog with a full screen option.
 - A profile banner keeps the picture’s own shape instead of cropping it into a short strip.
 - A site name typed without http, such as sociallydead.me, is a link in the same way as a full address.
 

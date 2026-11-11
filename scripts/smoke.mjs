@@ -1227,8 +1227,13 @@ assert.match(index, /data-nav="messages"[\s\S]*data-nav="calls"[\s\S]*data-nav="
 assert.match(index, /data-nav="calls"[\s\S]*data-nav="games"[\s\S]*data-nav="bookmarks"/);
 assert.match(index, /data-nav="articles"[\s\S]*class="post-btn"/);
 assert.match(appSource, /function showGames/);
-assert.match(appSource, /Coming soon/);
-assert.match(appSource, /Contribute to development/);
+assert.match(appSource, /game-ai/);
+assert.match(appSource, /game-person/);
+assert.match(appSource, /parseGameMessage/);
+assert.match(index, /id="game"/);
+assert.match(index, /id="game-invite"/);
+assert.match(await readFile(path.join(root, 'js/games.js'), 'utf8'), /Play AI/);
+assert.match(appSource, /Support development/);
 assert.match(index, /id="searches"/);
 assert.match(appSource, /Save this search/);
 assert.match(appSource, /edit-searches/);

@@ -400,7 +400,7 @@ export function normalizeSentMessage(sent, text, did) {
 export function convoUnread(convo, me) {
   const count = Number(convo?.unreadCount) || 0;
   if (count < 1 || convo?.muted) return 0;
-  if (parseCallMessage(convo?.lastMessage?.text)) return 0;
+  if (parseCallMessage(convo?.lastMessage?.text) || parseGameMessage(convo?.lastMessage?.text)) return 0;
   const sender = messageSender(convo?.lastMessage);
   if (sender && me && sender === me) return 0;
   return count;
@@ -574,6 +574,14 @@ export function assembleShareSdp(messages, rkey, sender) {
 const CALL_OFFER = /^!ls call (offer|answer) (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13})$/;
 const CALL_STOP = /^!ls call (decline|end)(?: ([234567abcdefghijklmnopqrstuvwxyz]{13}))?$/;
 const CALL_SDP = /^!ls call sdp (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13}) (\d+)\/(\d+) ([A-Za-z0-9_-]+)$/;
+
+const GAME_LINE = /^!ls game ([234567abcdefghijklmnopqrstuvwxyz]{13}) (chess|checkers|reversi|fox|break) (invite|accept|decline|move|resign|draw|yes|no)(?: ([a-z0-9-]{1,80}))?$/;
+
+export function parseGameMessage(text) {
+  const match = String(text || '').trim().match(GAME_LINE);
+  if (!match) return null;
+  return { rkey: match[1], game: match[2], kind: match[3], data: match[4] || '' };
+}
 
 export function parseCallMessage(text) {
   const raw = String(text || '').trim();
