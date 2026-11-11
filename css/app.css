@@ -2230,6 +2230,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #login h2 { margin: 8px 0; font-size: 24px; }
 #login label, .mute-form { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin: 12px 0; }
+.mute-form .check-row { display: flex; flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
+.mute-form .check-row input { width: 1.15rem; height: 1.15rem; padding: 0; border-radius: 4px; flex: none; }
 #login input, .mute-form input, #compose-previews input, .add-row input, #attach-q, #send-chat-find, .call-start input, .link-add input {
   border: 1px solid var(--border);
   background: var(--search);

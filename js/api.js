@@ -237,11 +237,29 @@ function tokenScopes(token) {
   return [];
 }
 
-function tokenManagesAppPasswords(token) {
+function tokenScopeKind(token) {
   const scopes = tokenScopes(token);
-  if (scopes.includes('com.atproto.appPass') || scopes.includes('com.atproto.appPassPrivileged')) return false;
-  if (scopes.includes('com.atproto.access')) return true;
-  return scopes.length === 0;
+  if (scopes.includes('com.atproto.appPass') || scopes.includes('com.atproto.appPassPrivileged')) return 'app';
+  if (scopes.includes('com.atproto.access') || scopes.length === 0) return 'full';
+  return 'none';
+}
+
+function livePasswordAppSession() {
+  if (getOauth()) return null;
+  const session = getPassword();
+  if (!session?.accessJwt || !session?.pds || !session?.did) return null;
+  const kind = tokenScopeKind(session.accessJwt);
+  if (kind === 'none') return null;
+  return { session, full: kind === 'full' };
+}
+
+export function appPasswordAccess() {
+  const did = currentDid();
+  const admin = readAppPassAdmin();
+  if (admin?.accessJwt && admin?.refreshJwt && (!did || admin.did === did)) return 'full';
+  const live = livePasswordAppSession();
+  if (live && (!did || live.session.did === did)) return live.full ? 'full' : 'list';
+  return 'none';
 }
 
 function readAppPassAdmin() {
@@ -274,7 +292,7 @@ export async function clearAppPassAdmin(did) {
   await deletePasswordSession(saved);
 }
 
-function appPassAuthError(message = 'Enter your account password to manage app passwords.') {
+function appPassAuthError(message = 'Enter the account password to change app passwords.') {
   const error = new Error(message);
   error.code = 'AppPassAuth';
   return error;
@@ -337,18 +355,12 @@ async function adminFetch(session, ns, options = {}) {
   }
 }
 
-function liveAppPassSession() {
-  if (getOauth()) return null;
-  const session = getPassword();
-  if (!session?.accessJwt || !session?.pds || !session?.did) return null;
-  if (!tokenManagesAppPasswords(session.accessJwt)) return null;
-  return session;
-}
-
-async function appPassCall(ns, options) {
+async function appPassCall(ns, options = {}, { full = false } = {}) {
   const did = currentDid();
-  const live = liveAppPassSession();
-  if (live && (!did || live.did === did)) return xrpc(ns, { ...options, auth: 'required' });
+  const live = livePasswordAppSession();
+  if (live && (!did || live.session.did === did) && (!full || live.full)) {
+    return xrpc(ns, { ...options, auth: 'required' });
+  }
   let admin = readAppPassAdmin();
   if (!admin || (did && admin.did !== did)) throw appPassAuthError();
   if (accessExpired(admin.accessJwt)) {
@@ -407,9 +419,9 @@ export function listAppPasswords() {
 }
 
 export function createAppPassword(name, privileged) {
-  const body = { name };
-  if (privileged) body.privileged = true;
-  return appPassCall('com.atproto.server.createAppPassword', { body });
+  return appPassCall('com.atproto.server.createAppPassword', {
+    body: { name, privileged: Boolean(privileged) },
+  }, { full: true });
 }
 
 export function revokeAppPassword(name) {

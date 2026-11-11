@@ -5009,22 +5009,29 @@ function showSettings() {
       ${signedIn() ? '<button type="button" class="danger" data-act="signout">Sign out</button>' : '<button type="button" class="primary small" data-act="signin">Sign in</button>'}
     </div>
     <h2>App passwords</h2>
-    <p class="dim">Tokens for other apps, stored on your account server. The password is shown once, then only the name stays here.</p>
+    <p class="dim">Use app passwords to sign in to other Bluesky clients without giving full access to your account or password. The list shows each name. The password itself is shown once, when you add it.</p>
     <div id="app-pass-unlock" hidden>
-      <p class="dim">A Bluesky login cannot list these. Enter the account password. LibreSky opens a server session with it and does not save the password.</p>
+      <p class="dim" id="app-pass-unlock-note"></p>
       <form id="app-pass-unlock-form" class="mute-form">
-        <input id="app-pass-secret" type="password" autocomplete="current-password" placeholder="Account password">
-        <input id="app-pass-code" inputmode="numeric" autocomplete="one-time-code" placeholder="Sign-in code" hidden>
-        <button class="primary small" type="submit">Show app passwords</button>
+        <input id="app-pass-secret" type="password" autocomplete="current-password" placeholder="Account password" aria-label="Account password">
+        <input id="app-pass-code" inputmode="numeric" autocomplete="one-time-code" placeholder="Sign-in code" aria-label="Sign-in code" hidden>
+        <button class="primary small" type="submit">Continue</button>
       </form>
     </div>
-    <form id="app-pass-form" class="mute-form" hidden>
-      <input id="app-pass-name" placeholder="App name" maxlength="40" autocomplete="off">
-      <label><input id="app-pass-privileged" type="checkbox"> Also allow direct messages</label>
-      <button class="primary small" type="submit">Create</button>
-    </form>
+    <div id="app-pass-tools" hidden>
+      <div class="toolbar">
+        <button type="button" class="primary small" data-act="add-app-password">Add App Password</button>
+      </div>
+      <form id="app-pass-form" class="mute-form" hidden>
+        <p class="dim">Enter a unique name, or leave this blank to use the suggested one.</p>
+        <input id="app-pass-name" maxlength="64" autocomplete="off" aria-label="App password name">
+        <p id="app-pass-error" class="form-error" hidden></p>
+        <label class="check-row"><input id="app-pass-privileged" type="checkbox"> Allow access to your direct messages</label>
+        <button class="primary small" type="submit">Next</button>
+      </form>
+    </div>
     <div id="app-pass-reveal" hidden></div>
-    <div id="app-pass-list"><p class="dim">Loading app passwords…</p></div>
+    <div id="app-pass-list" class="directory"><p class="dim">Loading app passwords…</p></div>
     <h2>Messages and calls</h2>
     <p class="dim">Everyone lets other people reach you as a request until you accept or delete it. People you follow skips the request and comes straight in. No one blocks new chats and new calls. A call rings on Calls, where you can accept or decline it, and it does not show up as a chat. The chat choice is your Bluesky chat setting, so the official app uses it too. The call choice is saved with your LibreSky settings.</p>
     ${signedIn() ? `<h3>Who can message you</h3><div class="segmented wrap" id="chat-allow">${allowButtons('chat', 'all')}</div><h3>Who can call you</h3><div class="segmented wrap" id="call-allow">${allowButtons('call', callAllow())}</div>` : '<p class="dim">Sign in to choose who can message or call you.</p>'}
@@ -5857,43 +5864,111 @@ async function loadSettingsLists(token) {
   await Promise.all([loadAppPasswords(token), loadMutedAccounts(token), loadBlockedAccounts(token)]);
 }
 
-function paintAppPassGate(mode) {
+const APP_PASS_LIST_NOTE = 'A Bluesky login cannot load these names. Enter the account password. LibreSky uses it in this tab and does not save it.';
+const APP_PASS_CREATE_NOTE = 'Adding an app password needs the account password. LibreSky uses it in this tab and does not save it.';
+const APP_PASS_SUGGESTIONS = [
+  'AliceBlue', 'Aqua', 'Aquamarine', 'Azure', 'BabyBlue', 'Blue', 'BlueViolet', 'CadetBlue',
+  'CornflowerBlue', 'Cyan', 'DarkBlue', 'DarkCyan', 'DarkSlateBlue', 'DeepSkyBlue', 'DodgerBlue',
+  'ElectricBlue', 'LightBlue', 'LightCyan', 'LightSkyBlue', 'LightSteelBlue', 'MediumAquaMarine',
+  'MediumBlue', 'MediumSlateBlue', 'MidnightBlue', 'Navy', 'PowderBlue', 'RoyalBlue', 'SkyBlue',
+  'SlateBlue', 'SteelBlue', 'Teal', 'Turquoise',
+];
+let appPassNames = [];
+let appPassIntent = '';
+
+function suggestedAppPasswordName() {
+  return APP_PASS_SUGGESTIONS[Math.floor(Math.random() * APP_PASS_SUGGESTIONS.length)];
+}
+
+function appPasswordNameError(name, existing) {
+  if (name.length < 4) return 'App password names must be at least 4 characters long.';
+  if (!/^[a-zA-Z0-9-_ ]*$/.test(name)) return 'App password names can only contain letters, numbers, spaces, hyphens, and underscores.';
+  if (existing.includes(name)) return 'App password name must be unique.';
+  return '';
+}
+
+function appPasswordWhen(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `Created ${date.toLocaleString()}`;
+}
+
+function paintAppPasswords(mode) {
   const unlock = $('app-pass-unlock');
+  const tools = $('app-pass-tools');
   const form = $('app-pass-form');
-  if (unlock) unlock.hidden = mode !== 'unlock';
-  if (form) form.hidden = mode !== 'ready';
+  const note = $('app-pass-unlock-note');
+  const showUnlock = mode === 'locked' || mode === 'create-auth';
+  const showTools = mode === 'locked' || mode === 'list' || mode === 'full' || mode === 'create-auth';
+  if (unlock) unlock.hidden = !showUnlock;
+  if (tools) tools.hidden = !showTools;
+  if (form && mode !== 'full') form.hidden = true;
+  if (note && showUnlock) note.textContent = appPassIntent === 'create' ? APP_PASS_CREATE_NOTE : APP_PASS_LIST_NOTE;
+}
+
+function appPasswordListHtml(rows) {
+  appPassNames = rows.map((item) => item.name || '').filter(Boolean);
+  if (!rows.length) return '<p class="dim">No app passwords yet.</p>';
+  return rows.map((item) => {
+    const name = item.name || '';
+    const created = appPasswordWhen(item.createdAt);
+    const access = item.privileged ? '<span class="handle">Allows access to direct messages</span>' : '';
+    return `<div class="person"><span class="person-link"><strong>${escapeHtml(name || 'App')}</strong>${created ? `<span class="handle">${escapeHtml(created)}</span>` : ''}${access}</span><button type="button" class="danger mini" data-act="revoke-token" data-name="${escapeHtml(name)}">Delete</button></div>`;
+  }).join('');
+}
+
+function openAddAppPassword() {
+  if (!signedIn()) return requireSignIn();
+  if (api.appPasswordAccess() !== 'full') {
+    appPassIntent = 'create';
+    paintAppPasswords(api.appPasswordAccess() === 'none' ? 'locked' : 'create-auth');
+    $('app-pass-secret')?.focus();
+    return;
+  }
+  const form = $('app-pass-form');
+  if (!form) return;
+  form.hidden = false;
+  const input = $('app-pass-name');
+  if (input && !input.value.trim()) input.placeholder = suggestedAppPasswordName();
+  const error = $('app-pass-error');
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  input?.focus();
 }
 
 async function loadAppPasswords(token = generation) {
   const box = $('app-pass-list');
   if (!box) return;
+  appPassIntent = '';
   if (!signedIn()) {
-    paintAppPassGate('off');
-    box.innerHTML = '<p class="dim">Sign in to see app passwords.</p>';
+    appPassNames = [];
+    paintAppPasswords('off');
+    box.innerHTML = '<p class="dim">Sign in to manage app passwords.</p>';
+    return;
+  }
+  if (api.appPasswordAccess() === 'none') {
+    appPassNames = [];
+    paintAppPasswords('locked');
+    box.innerHTML = '<p class="dim">Enter the account password above to load the names.</p>';
     return;
   }
   try {
     const data = await api.listAppPasswords();
     if (token !== generation || !$('app-pass-list')) return;
-    paintAppPassGate('ready');
-    const rows = data.passwords || [];
-    box.innerHTML = rows.length
-      ? rows.map((item) => {
-        const when = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
-        const access = item.privileged ? 'Direct messages' : 'Standard';
-        const detail = [when, access].filter(Boolean).join(' · ');
-        return `<div class="person"><span class="person-link"><strong>${escapeHtml(item.name || 'App')}</strong><span class="handle">${escapeHtml(detail)}</span></span><button type="button" class="danger mini" data-act="revoke-token" data-name="${escapeHtml(item.name || '')}">Revoke</button></div>`;
-      }).join('')
-      : '<p class="dim">No app passwords yet.</p>';
+    paintAppPasswords(api.appPasswordAccess() === 'full' ? 'full' : 'list');
+    box.innerHTML = appPasswordListHtml(data.passwords || []);
   } catch (error) {
     if (token !== generation || !$('app-pass-list')) return;
     const denied = error?.code === 'AppPassAuth' || error?.status === 401 || error?.status === 403;
     if (denied) {
-      paintAppPassGate('unlock');
-      box.innerHTML = '<p class="dim">Enter the account password to list the app passwords on this account.</p>';
+      appPassNames = [];
+      paintAppPasswords('locked');
+      box.innerHTML = '<p class="dim">Enter the account password above to load the names.</p>';
       return;
     }
-    paintAppPassGate('off');
+    paintAppPasswords('off');
     box.innerHTML = `<p class="dim">${escapeHtml(error.message || 'Could not load app passwords.')}</p>`;
   }
 }
@@ -10566,15 +10641,32 @@ async function handleChromeAct(act, event) {
     } catch (error) { toast(error.message); }
     return true;
   }
+  if (act === 'add-app-password') {
+    event.preventDefault();
+    openAddAppPassword();
+    return true;
+  }
+  if (act === 'dismiss-app-pass') {
+    event.preventDefault();
+    const reveal = $('app-pass-reveal');
+    if (reveal) {
+      reveal.hidden = true;
+      reveal.innerHTML = '';
+    }
+    return true;
+  }
   if (act === 'revoke-token') {
     event.preventDefault();
     const name = button?.dataset.name || '';
-    if (!name || !window.confirm(`Revoke the app password “${name}”?`)) return true;
+    if (!name || !window.confirm(`Are you sure you want to delete the app password “${name}”?`)) return true;
     try {
       await api.revokeAppPassword(name);
-      toast('App password revoked');
+      toast('App password deleted');
       await loadAppPasswords();
-    } catch (error) { toast(error.message); }
+    } catch (error) {
+      if (error?.code === 'AppPassAuth') paintAppPasswords('locked');
+      toast(error.message);
+    }
     return true;
   }
   if (act === 'unmute-account') {
@@ -13800,8 +13892,10 @@ async function unlockAppPasswords(event) {
       code.value = '';
       code.hidden = true;
     }
-    toast('App passwords unlocked');
+    const wantCreate = appPassIntent === 'create';
+    appPassIntent = '';
     await loadAppPasswords();
+    if (wantCreate && api.appPasswordAccess() === 'full') openAddAppPassword();
   } catch (error) {
     if (error?.code === 'AuthFactorTokenRequired') {
       if (code) {
@@ -13817,30 +13911,55 @@ async function unlockAppPasswords(event) {
 
 async function submitAppPassword() {
   if (!signedIn()) return requireSignIn();
+  if (api.appPasswordAccess() !== 'full') {
+    appPassIntent = 'create';
+    paintAppPasswords(api.appPasswordAccess() === 'none' ? 'locked' : 'create-auth');
+    toast('Enter the account password to add an app password.');
+    return;
+  }
   const input = $('app-pass-name');
-  const name = input?.value.trim() || '';
-  if (!name) return;
+  const name = (input?.value.trim() || input?.placeholder || '').trim();
+  const problem = appPasswordNameError(name, appPassNames);
+  const errorBox = $('app-pass-error');
+  if (problem) {
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.textContent = problem;
+    }
+    return;
+  }
+  if (errorBox) errorBox.hidden = true;
   const privileged = Boolean($('app-pass-privileged')?.checked);
+  const button = $('app-pass-form')?.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
   try {
     const created = await api.createAppPassword(name, privileged);
-    const password = created?.password || created?.appPassword || '';
+    const password = created?.password || '';
     const box = $('app-pass-reveal');
     if (box) {
       box.hidden = false;
-      box.innerHTML = `<p><strong>${escapeHtml(created?.name || name)}</strong></p><p class="token">${escapeHtml(password)}</p><button type="button" class="primary small" data-act="copy-token" data-token="${escapeHtml(password)}">Copy</button><p class="dim">Copy it now. LibreSky does not keep this password.</p>`;
+      box.innerHTML = `<p><strong>Here is your app password.</strong></p><p class="dim">Use this to sign in to the other app along with your handle.</p><p class="token">${escapeHtml(password)}</p><button type="button" class="primary small" data-act="copy-token" data-token="${escapeHtml(password)}">Copy</button><p class="dim">For security reasons, you won't be able to view this again. If you lose this app password, you'll need to generate a new one.</p><button type="button" class="text-btn" data-act="dismiss-app-pass">Done</button>`;
     }
-    if (input) input.value = '';
+    if (input) {
+      input.value = '';
+      input.placeholder = '';
+    }
     const flag = $('app-pass-privileged');
     if (flag) flag.checked = false;
+    const form = $('app-pass-form');
+    if (form) form.hidden = true;
     toast('App password created');
     await loadAppPasswords();
   } catch (error) {
     if (error?.code === 'AppPassAuth' || error?.status === 401 || error?.status === 403) {
-      paintAppPassGate('unlock');
-      toast('Enter the account password to create an app password.');
+      appPassIntent = 'create';
+      paintAppPasswords(api.appPasswordAccess() === 'none' ? 'locked' : 'create-auth');
+      toast('Enter the account password to add an app password.');
       return;
     }
     toast(error.message || 'Could not create an app password.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
   }
 }
 
