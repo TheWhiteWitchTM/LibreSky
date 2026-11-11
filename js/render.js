@@ -42,6 +42,27 @@ export function avatar(url, label, size) {
   return `<span class="avatar ${size || ''}" data-initial="${initial}">${src ? `<img src="${attr(src)}" alt="" onerror="this.remove()">` : ''}</span>`;
 }
 
+const PRESENCE_LABEL = {
+  available: 'Available',
+  away: 'Away',
+  offline: 'Uses LibreSky',
+  absent: 'Not on LibreSky',
+};
+
+export function presenceHtml(view) {
+  const label = PRESENCE_LABEL[view?.state];
+  if (!label) return '';
+  return `<span class="presence ${attr(view.state)}"><span class="presence-dot" aria-hidden="true"></span><span>${escapeHtml(label)}</span></span>`;
+}
+
+export function presenceLine(did, view) {
+  const id = String(did || '');
+  if (!id && !view) return '';
+  const mark = view ? presenceHtml(view) : '';
+  const slot = id ? ` data-presence="${attr(id)}"` : '';
+  return `<span class="presence-line"${slot}>${mark}</span>`;
+}
+
 export function accountIcon(actor, size, extraClass = '') {
   const id = typeof actor === 'string' ? actor : (actor?.handle || actor?.did || '');
   const name = (typeof actor === 'string' ? actor : (actor?.displayName || actor?.handle)) || 'Account';
@@ -467,6 +488,7 @@ export function profileHtml(profile, options = {}) {
     </div>
     <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
     <div class="handle">@${escapeHtml(profile.handle)}</div>
+    ${presenceLine(profile.did, options.presence)}
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     ${socialToolbarHtml(options.links)}
     ${joinedLine(profile.createdAt)}
@@ -872,7 +894,8 @@ export function convoHtml(convo, me, options = {}) {
   const remove = gone
     ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
-  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
+  const line = !gone && other.did ? presenceLine(other.did) : '';
+  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
 }
 
 export function requestPeople(requests, joins, me = '') {
@@ -972,8 +995,9 @@ export function callConvoHtml(convo, me) {
   const unread = convoUnread(convo, me);
   const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const tools = !gone && other.did ? callToolsHtml(other.did) : '';
+  const line = !gone && other.did ? presenceLine(other.did) : '';
   const href = convo.id ? `#/messages/${encodeURIComponent(convo.id)}` : '#/messages';
-  return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
+  return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
 }
 
 function bareHandle(actor) {
@@ -1003,7 +1027,8 @@ export function chatTitleNeedsProfile(actor) {
 export function chatHeaderHtml(actor) {
   if (!actor) return '';
   const name = chatTitleName(actor);
-  return `${accountIcon(actor)}<a href="${profileHash(actor)}">${escapeHtml(name)}</a>`;
+  const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
+  return `${accountIcon(actor)}<a href="${profileHash(actor)}">${escapeHtml(name)}</a>${line}`;
 }
 
 export function hoverCardHtml(profile, self = '') {
@@ -1015,7 +1040,8 @@ export function hoverCardHtml(profile, self = '') {
     ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(profile.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
     : '';
   const bio = profile?.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : '';
-  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
+  const line = profile?.did ? presenceLine(profile.did) : '';
+  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${line}${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
 }
 
 export function packHtml(pack) {
@@ -1035,7 +1061,8 @@ export function callRequestHtml(offer) {
   const label = offer?.ringing
     ? (video ? 'Incoming video call' : 'Incoming voice call')
     : (video ? 'Video call request' : 'Voice call request');
-  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
+  const line = offer?.peerDid ? presenceLine(offer.peerDid) : '';
+  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 
 export function shareBannerHtml(offer, extra = {}) {
@@ -1076,7 +1103,8 @@ export function callBannerHtml(offer, extra = {}) {
   const media = attr(offer?.media || 'audio');
   const convo = attr(extra.convoId || '');
   const peer = attr(extra.peerDid || '');
-  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
+  const line = extra.peerDid ? presenceLine(extra.peerDid) : '';
+  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span>${line}<button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
 }
 
 export function threadList(node) {

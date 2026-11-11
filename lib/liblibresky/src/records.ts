@@ -1,6 +1,6 @@
-import { AtUri, ValidationError } from '../../libbluesky/dist/index.js';
+import { AtDatetime, AtUri, ValidationError } from '../../libbluesky/dist/index.js';
 import type { ValidationIssue } from '../../libbluesky/dist/index.js';
-import { ARTICLE_COLLECTION, HIGHLIGHT_COLLECTION, LINKS_COLLECTION, POST_COLLECTION } from './ids.js';
+import { ARTICLE_COLLECTION, HIGHLIGHT_COLLECTION, LINKS_COLLECTION, POST_COLLECTION, PRESENCE_COLLECTION } from './ids.js';
 
 export const LINK_KINDS = [
   'website',
@@ -350,4 +350,97 @@ export function highlightsFrom(records: readonly RepoRecord[]): HighlightItem[] 
 
 export function articlesFrom(records: readonly RepoRecord[]): ArticleItem[] {
   return newest(records.map(parseArticle).filter((item): item is ArticleItem => Boolean(item)));
+}
+
+/** A last seen inside this window still counts as online. */
+export const PRESENCE_FRESH_MS = 5 * 60 * 1000;
+
+/** How long the same status can wait before the client writes it again. */
+export const PRESENCE_PULSE_MS = 2 * 60 * 1000;
+
+const PRESENCE_SKEW_MS = 2 * 60 * 1000;
+
+export type PresenceState = 'available' | 'away' | 'offline' | 'absent';
+
+export interface PresenceView {
+  usesLibreSky: boolean;
+  online: boolean;
+  available: boolean;
+  state: PresenceState;
+  seenAt: string;
+}
+
+export interface PresenceValue {
+  seenAt: string;
+  status: 'available' | 'away';
+}
+
+function absentPresence(): PresenceView {
+  return { usesLibreSky: false, online: false, available: false, state: 'absent', seenAt: '' };
+}
+
+export function parsePresence(value: unknown): PresenceValue | null {
+  if (!value || typeof value !== 'object') return null;
+  const body = value as { seenAt?: unknown; status?: unknown };
+  if (!AtDatetime.isValid(body.seenAt)) return null;
+  return { seenAt: body.seenAt, status: body.status === 'away' ? 'away' : 'available' };
+}
+
+/**
+ * Turns a public last-seen record into the flags the app shows.
+ * The timestamp stays internal. A missing record means this account has not published LibreSky presence.
+ */
+export function presenceView(value: unknown, now = Date.now()): PresenceView {
+  if (value == null) return absentPresence();
+  const parsed = parsePresence(value);
+  if (!parsed) {
+    return { usesLibreSky: true, online: false, available: false, state: 'offline', seenAt: '' };
+  }
+  const then = Date.parse(parsed.seenAt);
+  const fresh = Number.isFinite(then) && then - now <= PRESENCE_SKEW_MS && now - then <= PRESENCE_FRESH_MS;
+  if (!fresh) {
+    return { usesLibreSky: true, online: false, available: false, state: 'offline', seenAt: parsed.seenAt };
+  }
+  if (parsed.status === 'away') {
+    return { usesLibreSky: true, online: true, available: false, state: 'away', seenAt: parsed.seenAt };
+  }
+  return { usesLibreSky: true, online: true, available: true, state: 'available', seenAt: parsed.seenAt };
+}
+
+export function presencePulseDue(
+  view: PresenceView | null | undefined,
+  status: string,
+  now = Date.now(),
+  minMs = PRESENCE_PULSE_MS,
+): boolean {
+  const wanted = status === 'away' ? 'away' : 'available';
+  if (!view?.usesLibreSky || view.state !== wanted || !view.seenAt) return true;
+  const then = Date.parse(view.seenAt);
+  if (!Number.isFinite(then)) return true;
+  return now - then >= minMs;
+}
+
+export class PresenceRecord {
+  readonly $type = PRESENCE_COLLECTION;
+  readonly seenAt: string;
+  readonly status: 'available' | 'away';
+
+  constructor(input: { seenAt?: string; status?: string } = {}) {
+    const seenAt = input.seenAt || new Date().toISOString();
+    this.seenAt = AtDatetime.isValid(seenAt) ? seenAt : new Date().toISOString();
+    this.status = input.status === 'away' ? 'away' : 'available';
+  }
+
+  check(): void {
+    if (!AtDatetime.isValid(this.seenAt)) fail('seenAt', 'Required.');
+  }
+
+  toJSON() {
+    this.check();
+    return {
+      $type: this.$type,
+      seenAt: this.seenAt,
+      status: this.status,
+    };
+  }
 }

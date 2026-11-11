@@ -114,3 +114,41 @@ export declare function parseHighlight(record: RepoRecord): HighlightItem | null
 export declare function parseArticle(record: RepoRecord): ArticleItem | null;
 export declare function highlightsFrom(records: readonly RepoRecord[]): HighlightItem[];
 export declare function articlesFrom(records: readonly RepoRecord[]): ArticleItem[];
+/** A last seen inside this window still counts as online. */
+export declare const PRESENCE_FRESH_MS: number;
+/** How long the same status can wait before the client writes it again. */
+export declare const PRESENCE_PULSE_MS: number;
+export type PresenceState = 'available' | 'away' | 'offline' | 'absent';
+export interface PresenceView {
+    usesLibreSky: boolean;
+    online: boolean;
+    available: boolean;
+    state: PresenceState;
+    seenAt: string;
+}
+export interface PresenceValue {
+    seenAt: string;
+    status: 'available' | 'away';
+}
+export declare function parsePresence(value: unknown): PresenceValue | null;
+/**
+ * Turns a public last-seen record into the flags the app shows.
+ * The timestamp stays internal. A missing record means this account has not published LibreSky presence.
+ */
+export declare function presenceView(value: unknown, now?: number): PresenceView;
+export declare function presencePulseDue(view: PresenceView | null | undefined, status: string, now?: number, minMs?: number): boolean;
+export declare class PresenceRecord {
+    readonly $type = "app.libresky.actor.presence";
+    readonly seenAt: string;
+    readonly status: 'available' | 'away';
+    constructor(input?: {
+        seenAt?: string;
+        status?: string;
+    });
+    check(): void;
+    toJSON(): {
+        $type: string;
+        seenAt: string;
+        status: "available" | "away";
+    };
+}

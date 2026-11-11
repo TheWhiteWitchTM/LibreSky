@@ -5,6 +5,8 @@ export {
   LINKS_COLLECTION,
   LINKS_RKEY,
   POST_COLLECTION,
+  PRESENCE_COLLECTION,
+  PRESENCE_RKEY,
 } from './ids.js';
 
 export { LEXICONS, lexiconRecord, sameLexicon } from './lexicons.js';
@@ -24,10 +26,14 @@ export {
   parseArticle,
   parseHighlight,
   parseLinks,
+  presencePulseDue,
+  presenceView,
+  PRESENCE_FRESH_MS,
+  PRESENCE_PULSE_MS,
   presentLink,
   profileTabIds,
 } from './records.js';
-export type { ArticleItem, HighlightItem, LinkKind, RepoRecord, SocialLink } from './records.js';
+export type { ArticleItem, HighlightItem, LinkKind, PresenceState, PresenceView, RepoRecord, SocialLink } from './records.js';
 
 export { LibreSkyData } from './repo.js';
 export type { ArticleInput, RepoPage, RepoPort, Shelf } from './repo.js';

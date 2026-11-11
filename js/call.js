@@ -8,11 +8,13 @@ const RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
 const CHUNK = 900;
 
 let notify = () => {};
+let onStage = () => {};
 let session = null;
 let epoch = 0;
 
 export function setupCall(hooks) {
   notify = hooks.toast || notify;
+  onStage = hooks.onStage || onStage;
 }
 
 export function canCall() {
@@ -173,8 +175,14 @@ function showStage(media) {
   if (voice) voice.hidden = video;
   if (title) title.textContent = video ? 'Video call' : 'Voice call';
   if (dialog) dialog.dataset.media = video ? 'video' : 'audio';
+  const presence = $('call-presence');
+  if (presence) {
+    presence.dataset.presence = session?.peerDid || '';
+    presence.replaceChildren();
+  }
   paintCallControls();
   if (dialog && !dialog.open) dialog.showModal();
+  onStage(session?.peerDid || '');
 }
 
 
@@ -507,6 +515,11 @@ export async function hangUp(tell = true) {
     local.classList.remove('is-off');
   }
   if (audio) audio.srcObject = null;
+  const presence = $('call-presence');
+  if (presence) {
+    presence.dataset.presence = '';
+    presence.replaceChildren();
+  }
   stopClock();
   paintCallControls();
   const dialog = $('call');

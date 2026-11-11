@@ -32,6 +32,8 @@ export {
   LINK_LABEL,
   articleExcerpt,
   normalizeLink,
+  presencePulseDue,
+  presenceView,
   presentLink,
   profileTabIds,
 } from '../lib/liblibresky/dist/index.js';
@@ -931,6 +933,14 @@ export function saveArticle(input) {
 
 export function deleteArticle(uri) {
   return libre().deleteArticle(uri);
+}
+
+export function readPresence(did) {
+  return libre().readPresence(did);
+}
+
+export function writePresence(status) {
+  return libre().writePresence(status);
 }
 
 export function deleteRecord(uri) {

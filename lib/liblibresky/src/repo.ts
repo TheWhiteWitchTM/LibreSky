@@ -5,6 +5,8 @@ import {
   LEXICON_COLLECTION,
   LINKS_COLLECTION,
   LINKS_RKEY,
+  PRESENCE_COLLECTION,
+  PRESENCE_RKEY,
 } from './ids.js';
 import { LEXICONS, lexiconRecord, sameLexicon } from './lexicons.js';
 import {
@@ -16,8 +18,10 @@ import {
   parseArticle,
   parseHighlight,
   parseLinks,
+  PresenceRecord,
+  presenceView,
 } from './records.js';
-import type { ArticleItem, HighlightItem, RepoRecord, SocialLink } from './records.js';
+import type { ArticleItem, HighlightItem, PresenceView, RepoRecord, SocialLink } from './records.js';
 
 export interface RepoPage {
   records?: RepoRecord[];
@@ -49,11 +53,13 @@ export interface ArticleInput {
 }
 
 /**
- * Highlights, articles, and social links are public records in the account repo.
+ * Highlights, articles, social links, and last seen are public records in the account repo.
  * Copies of the lexicon documents go in that same repo. Another LibreSky window
- * reads the records directly. It does not need the writer to be online.
+ * reads the records directly. Last seen is fresh only while that window keeps writing it.
  */
 export class LibreSkyData {
+  private lexiconsFor = '';
+
   constructor(private readonly repo: RepoPort) {}
 
   async readShelf(did: string): Promise<Shelf> {
@@ -154,8 +160,24 @@ export class LibreSkyData {
     await this.repo.deleteRecord(uri);
   }
 
+  async readPresence(did: string): Promise<PresenceView> {
+    const got = await this.one(did, PRESENCE_COLLECTION, PRESENCE_RKEY);
+    if (!got) return presenceView(null);
+    return presenceView(got.value ?? {});
+  }
+
+  async writePresence(status: string = 'available'): Promise<PresenceView> {
+    const record = new PresenceRecord({ status });
+    record.check();
+    await this.ensureLexicons();
+    const json = record.toJSON();
+    await this.repo.putRecord(PRESENCE_COLLECTION, PRESENCE_RKEY, json);
+    return presenceView(json);
+  }
+
   async ensureLexicons(): Promise<void> {
     const did = this.repo.did();
+    if (!did || this.lexiconsFor === did) return;
     for (const doc of LEXICONS) {
       const record = lexiconRecord(doc);
       const current = await this.one(did, LEXICON_COLLECTION, doc.id);
@@ -168,6 +190,7 @@ export class LibreSkyData {
         }
       }
     }
+    this.lexiconsFor = did;
   }
 
   private async one(repo: string, collection: string, rkey: string): Promise<RepoRecord | null> {

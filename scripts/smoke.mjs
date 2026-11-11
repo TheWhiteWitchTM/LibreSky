@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, presenceHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
@@ -1642,6 +1642,7 @@ const callRow = callConvoHtml({
   members: [{ did: 'did:me', handle: 'me.bsky.social' }, { did: 'did:you', handle: 'you.bsky.social', displayName: 'You' }],
   lastMessage: { text: 'new from you', sender: { did: 'did:you' } },
 }, 'did:me');
+assert.match(callRow, /data-presence="did:you"/);
 assert.match(callRow, /data-act="call-audio"/);
 assert.match(callRow, /data-act="call-video"/);
 assert.match(callRow, /class="pill"/);
@@ -1699,6 +1700,7 @@ assert.doesNotMatch(quietCalls, /data-act="call-audio"/);
 assert.doesNotMatch(quietCalls, /data-act="call-video"/);
 assert.doesNotMatch(quietCalls, /Voice/);
 assert.doesNotMatch(quietCalls, /Video/);
+assert.match(quietCalls, /data-presence="did:x"/);
 assert.match(quietCalls, /data-act="account-card"/);
 assert.match(quietCalls, /href="#\/profile\/ada\.bsky\.social"/);
 const personRow = actorHtml({
@@ -1722,6 +1724,17 @@ assert.match(card, /Hello/);
 assert.doesNotMatch(hoverCardHtml({ did: 'did:me', handle: 'me.bsky.social' }, 'did:me'), /data-act="follow"/);
 const goneCalls = chatHeaderHtml({ did: 'did:gone', handle: 'handle.invalid' });
 assert.match(goneCalls, /Deleted account/);
+assert.doesNotMatch(goneCalls, /data-presence/);
+assert.match(presenceHtml({ state: 'available', available: true, online: true, usesLibreSky: true }), /class="presence available"/);
+assert.match(presenceHtml({ state: 'available' }), />Available</);
+assert.match(presenceHtml({ state: 'away' }), />Away</);
+assert.match(presenceHtml({ state: 'offline' }), />Uses LibreSky</);
+assert.match(presenceHtml({ state: 'absent' }), />Not on LibreSky</);
+assert.equal(presenceHtml(null), '');
+assert.doesNotMatch(presenceHtml({ state: 'available', seenAt: '2026-11-11T12:00:00.000Z' }), /2026/);
+const liveProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' }, { presence: { state: 'available' } });
+assert.match(liveProfile, /data-presence="did:plc:ada"/);
+assert.match(liveProfile, />Available</);
 assert.doesNotMatch(goneCalls, /call-btn/);
 assert.doesNotMatch(goneCalls, /chat-title-handle|class="handle"/);
 assert.match(appSource, /function paintChatTitle/);

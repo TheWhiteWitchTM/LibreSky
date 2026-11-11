@@ -1,4 +1,4 @@
-import { articleDoc, highlightDoc, linksDoc } from './generated/docs.js';
+import { articleDoc, highlightDoc, linksDoc, presenceDoc } from './generated/docs.js';
 import { LEXICON_COLLECTION } from './ids.js';
 
 export interface LexiconDoc {
@@ -8,7 +8,7 @@ export interface LexiconDoc {
   defs: Record<string, unknown>;
 }
 
-export const LEXICONS: readonly LexiconDoc[] = [linksDoc, highlightDoc, articleDoc];
+export const LEXICONS: readonly LexiconDoc[] = [linksDoc, highlightDoc, articleDoc, presenceDoc];
 
 export function lexiconRecord(doc: LexiconDoc): Record<string, unknown> {
   const record: Record<string, unknown> = {

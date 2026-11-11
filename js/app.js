@@ -12,6 +12,8 @@ import {
   chatHeaderHtml,
   chatTitleNeedsProfile,
   hoverCardHtml,
+  presenceHtml,
+  presenceLine,
   convoHtml,
   joinRequestHtml,
   requestEntryHtml,
@@ -540,6 +542,7 @@ async function loadMe() {
   rememberCurrent();
   refreshBadge();
   loadRail();
+  if (did) pulsePresence(true);
   if (did && followDeskPrefs().auto) {
     const owner = did;
     setTimeout(() => { if (myDid() === owner) runFollowBack(false); }, 5000);
@@ -915,7 +918,9 @@ function paintIncomingBar(offer) {
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
   const request = offer.requested ? ' data-request="1"' : '';
-  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span></span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  const line = offer.peerDid ? presenceLine(offer.peerDid) : '';
+  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span>${line}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  showPresence(bar);
   paintBadge('calls-badge', 1);
   startRingtone();
 }
@@ -2334,6 +2339,107 @@ function stopChatTimer() {
   chatTimer = 0;
 }
 
+const presenceViews = new Map();
+const presenceLoads = new Map();
+const PRESENCE_HOLD_MS = 45_000;
+let presenceWrote = null;
+let presenceDid = '';
+let presenceBusy = false;
+
+function presenceStatusNow() {
+  return document.visibilityState === 'visible' ? 'available' : 'away';
+}
+
+function rememberPresence(did, view) {
+  if (!did || !view) return;
+  presenceViews.set(did, { view, at: Date.now() });
+}
+
+function cachedPresence(did) {
+  const hit = presenceViews.get(did);
+  if (!hit) return null;
+  if (Date.now() - hit.at > PRESENCE_HOLD_MS) return null;
+  return hit.view;
+}
+
+function viewForDid(did) {
+  if (did && did === myDid() && signedIn()) {
+    return api.presenceView({ seenAt: new Date().toISOString(), status: presenceStatusNow() });
+  }
+  return cachedPresence(did);
+}
+
+function presenceDids(root) {
+  if (!root?.querySelectorAll) return [];
+  return [...root.querySelectorAll('[data-presence]')]
+    .map((node) => node.dataset.presence || '')
+    .filter((did) => did.startsWith('did:'));
+}
+
+function fillPresence(root) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll('[data-presence]').forEach((slot) => {
+    const did = slot.dataset.presence || '';
+    if (!did) return;
+    const view = viewForDid(did);
+    if (!view) return;
+    const html = presenceHtml(view);
+    if (slot.innerHTML !== html) slot.innerHTML = html;
+  });
+}
+
+function loadPresence(did) {
+  const existing = presenceLoads.get(did);
+  if (existing) return existing;
+  const job = api.readPresence(did).then((view) => {
+    rememberPresence(did, view);
+    return view;
+  }).finally(() => {
+    if (presenceLoads.get(did) === job) presenceLoads.delete(did);
+  });
+  presenceLoads.set(did, job);
+  return job;
+}
+
+async function showPresence(root) {
+  const scope = root?.isConnected ? root : null;
+  if (!scope) return;
+  fillPresence(scope);
+  const dids = [...new Set(presenceDids(scope))].filter((did) => did !== myDid() && !cachedPresence(did)).slice(0, 40);
+  if (!dids.length) return;
+  await Promise.all(dids.map((did) => loadPresence(did).catch(() => null)));
+  if (!scope.isConnected) return;
+  fillPresence(scope);
+}
+
+async function pulsePresence(force = false, override = '') {
+  const did = myDid();
+  if (!signedIn() || !did) return;
+  if (did !== presenceDid) {
+    presenceDid = did;
+    presenceWrote = null;
+  }
+  const status = override === 'away' || override === 'available' ? override : presenceStatusNow();
+  fillPresence(document);
+  const known = presenceWrote
+    ? api.presenceView({ seenAt: new Date(presenceWrote.at).toISOString(), status: presenceWrote.status })
+    : null;
+  if (!force && !api.presencePulseDue(known, status)) return;
+  if (presenceBusy) return;
+  presenceBusy = true;
+  try {
+    const view = await api.writePresence(status);
+    if (myDid() !== did) return;
+    presenceWrote = { status, at: Date.now() };
+    rememberPresence(did, view);
+    fillPresence(document);
+  } catch {
+    /* the next pulse can try again */
+  } finally {
+    presenceBusy = false;
+  }
+}
+
 function paintChatTitle(actor) {
   const html = chatHeaderHtml(actor);
   const title = $('title');
@@ -2350,8 +2456,11 @@ function paintChatTitle(actor) {
   icon.removeAttribute('aria-hidden');
   icon.replaceChildren(face);
   title.replaceChildren(link);
+  const line = holder.content.querySelector('.presence-line');
+  if (line) title.append(line);
   document.title = `${link.textContent || 'Chat'} — LibreSky`;
   measureHead();
+  showPresence(title);
 }
 
 function fillChatTitle(actor, token) {
@@ -2514,6 +2623,7 @@ function paintIncomingCall(messages, peerDid, convoId) {
   const html = callBannerHtml(offer, { convoId, peerDid });
   if (reply) reply.insertAdjacentHTML('beforebegin', html);
   else thread.insertAdjacentHTML('beforeend', html);
+  showPresence(thread);
   if (callMayRing(facts)) surfaceIncomingCall({ ...offer, convoId, peerDid, key });
 }
 
@@ -2672,6 +2782,7 @@ async function showMessages(convoId) {
           missed ? 'Bluesky still counts a request. Open this page again in a moment.' : 'When someone you have not accepted messages you, it shows up here.',
           missed ? '<button type="button" class="primary" data-act="retry">Try again</button>' : '',
         );
+        showPresence($('view'));
         return;
       }
       main.forEach((convo) => {
@@ -2680,6 +2791,7 @@ async function showMessages(convoId) {
       const rows = main.map((convo) => convoHtml(convo, mine)).join('');
       const entry = requestEntryHtml(waiting || reportedChat, people);
       $('view').innerHTML = `<div class="toolbar"><form id="new-chat" class="new-chat"><input id="new-chat-handle" placeholder="Enter a handle" aria-label="Handle" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="253"><button class="primary small" type="submit">New chat</button></form><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Enter a handle, then press New chat.')}`;
+      showPresence($('view'));
       refreshBadge();
       return;
     }
@@ -3139,7 +3251,8 @@ function rememberMyHighlights(shelf) {
 
 function profileHead(profile) {
   const links = (profileShelf.links || []).map((link) => api.presentLink(link));
-  return `${profileHtml(profile, { links })}<div id="profile-tabs"></div>`;
+  const presence = profile?.did ? viewForDid(profile.did) : null;
+  return `${profileHtml(profile, { links, presence })}<div id="profile-tabs"></div>`;
 }
 
 function finishProfile(profile, token, html, action) {
@@ -3212,6 +3325,11 @@ async function showProfile(actor, tab, nav = 'profile') {
       profileShelf = await api.readShelf(profile.did);
     } catch {
       profileShelf = emptyShelf();
+    }
+    try {
+      rememberPresence(profile.did, await api.readPresence(profile.did));
+    } catch {
+      /* the line stays empty until a later read */
     }
     if (token !== generation) return;
     if (profile.did === myDid()) rememberMyHighlights(profileShelf);
@@ -5987,6 +6105,7 @@ async function showCalls() {
     const requestBlock = requestRows ? `<h2 class="section-label">Call requests</h2>${requestRows}` : '';
     const rows = main.map((convo) => callConvoHtml(convo, myDid())).join('');
     $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${incomingBlock}${requestBlock}${rows || emptyHtml('No chats yet', 'Enter a handle above to start a voice or video call.')}`;
+    showPresence($('view'));
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = `<p class="call-note dim">${escapeHtml(note)}</p>${callStartHtml()}${emptyHtml('Calls are unavailable', error.message || 'This sign-in does not include chat access.')}`;
   }
@@ -8741,6 +8860,7 @@ async function openHover(found) {
   card.innerHTML = cached
     ? hoverCardHtml(cached, myDid())
     : `<div class="hover-body"><strong>@${escapeHtml(found.id)}</strong><p class="dim">Loading…</p></div>`;
+  if (cached) showPresence(card);
   placeHover(card, found.link);
   if (cached) return;
   const seq = ++hoverSeq;
@@ -8751,6 +8871,7 @@ async function openHover(found) {
     hoverProfiles.set(found.id, profile);
     if (seq !== hoverSeq || hoverActor !== found.id || card._anchor !== found.link) return;
     card.innerHTML = hoverCardHtml(profile, myDid());
+    showPresence(card);
     if (found.link?.isConnected) placeHover(card, found.link);
   } catch {
     if (seq !== hoverSeq || hoverActor !== found.id || card._anchor !== found.link) return;
@@ -11195,8 +11316,9 @@ function paintSendChatList() {
   const extra = handle && !people.some((row) => row.handle.toLowerCase() === handle.toLowerCase())
     ? `<button type="button" class="person send-chat-row" data-act="send-chat-handle" data-handle="${escapeHtml(handle)}">${avatar('', handle)}<span class="person-link"><strong>@${escapeHtml(handle)}</strong><span class="handle">Send to this handle</span></span></button>`
     : '';
-  const rows = people.map((row) => `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link"><strong>${escapeHtml(row.name)}</strong><span class="handle">${row.handle ? `@${escapeHtml(row.handle)}` : 'Chat'}</span></span></button>`).join('');
+  const rows = people.map((row) => `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link"><strong>${escapeHtml(row.name)}</strong>${presenceLine(row.other.did)}<span class="handle">${row.handle ? `@${escapeHtml(row.handle)}` : 'Chat'}</span></span></button>`).join('');
   list.innerHTML = extra + rows || '<p class="dim">No chats yet. Enter a handle above.</p>';
+  showPresence(list);
 }
 
 async function openSendToChat(found) {
@@ -11591,6 +11713,18 @@ async function removeAccount(did) {
 
 async function signOut() {
   const did = myDid();
+  if (did) {
+    try {
+      await Promise.race([
+        api.writePresence('away'),
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
+    } catch {
+      /* sign out still continues */
+    }
+  }
+  presenceWrote = null;
+  presenceDid = '';
   const oauthSub = getOauth()?.sub;
   const password = getPassword();
   if (password?.did === did) {
@@ -13193,7 +13327,10 @@ async function boot() {
   bindAlphaDoor();
   applyDesign(designOn());
   applyA11y(a11yPrefs());
-  setupCall({ toast });
+  setupCall({
+    toast,
+    onStage() { showPresence($('call')); },
+  });
   setupShare({
     toast,
     onFile(file, extra) { appendShareFile(file, Boolean(extra?.mine)); },
@@ -13256,8 +13393,13 @@ async function boot() {
       refreshBadge();
       if (signedIn() && followDeskPrefs().auto) runFollowBack(false);
     }
+    pulsePresence(false);
+    showPresence(document);
   });
+  window.addEventListener('pagehide', () => { pulsePresence(true, 'away'); });
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 4000);
+  setInterval(() => { pulsePresence(false); }, 30000);
+  setInterval(() => { if (document.visibilityState === 'visible') showPresence(document); }, 60000);
   window.addEventListener('resize', placeOpenLayers);
   window.addEventListener('scroll', placeOpenLayers, true);
   window.visualViewport?.addEventListener('resize', placeOpenLayers);

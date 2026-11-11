@@ -58,7 +58,7 @@ You can browse before you sign in, or sign in with an app password. This browser
 
 Posts come from your Bluesky account. The whole client is this site.
 
-Open a profile and the tabs follow what that account published. Highlights and Articles show on the row when the account has them. Social links sit under the name as a short toolbar. LibreSky writes those with its own lexicons, in the account’s public records, so another LibreSky window can read them.
+Open a profile and the tabs follow what that account published. Highlights and Articles show on the row when the account has them. Social links sit under the name as a short toolbar. LibreSky writes those with its own lexicons, in the account’s public records, so another LibreSky window can read them. The same records carry a last seen. A profile, a chat, and a voice or video call show Available when that person has LibreSky open.
 
 ## Write it
 

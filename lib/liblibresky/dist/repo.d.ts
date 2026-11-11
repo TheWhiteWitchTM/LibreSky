@@ -1,4 +1,4 @@
-import type { ArticleItem, HighlightItem, RepoRecord, SocialLink } from './records.js';
+import type { ArticleItem, HighlightItem, PresenceView, RepoRecord, SocialLink } from './records.js';
 export interface RepoPage {
     records?: RepoRecord[];
     cursor?: string;
@@ -31,12 +31,13 @@ export interface ArticleInput {
     createdAt?: string;
 }
 /**
- * Highlights, articles, and social links are public records in the account repo.
+ * Highlights, articles, social links, and last seen are public records in the account repo.
  * Copies of the lexicon documents go in that same repo. Another LibreSky window
- * reads the records directly. It does not need the writer to be online.
+ * reads the records directly. Last seen is fresh only while that window keeps writing it.
  */
 export declare class LibreSkyData {
     private readonly repo;
+    private lexiconsFor;
     constructor(repo: RepoPort);
     readShelf(did: string): Promise<Shelf>;
     readLinks(did: string): Promise<SocialLink[]>;
@@ -56,6 +57,8 @@ export declare class LibreSkyData {
     readArticle(did: string, rkey: string): Promise<ArticleItem | null>;
     saveArticle(input: ArticleInput): Promise<ArticleItem>;
     deleteArticle(uri: string): Promise<void>;
+    readPresence(did: string): Promise<PresenceView>;
+    writePresence(status?: string): Promise<PresenceView>;
     ensureLexicons(): Promise<void>;
     private one;
     private listAll;

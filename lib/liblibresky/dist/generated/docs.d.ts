@@ -117,3 +117,30 @@ export declare const articleDoc: {
         };
     };
 };
+export declare const presenceDoc: {
+    readonly lexicon: 1;
+    readonly id: "app.libresky.actor.presence";
+    readonly description: "Internal last seen LibreSky writes while the app is open. Another LibreSky window reads it to tell a LibreSky account from any other, and to show online and available. The time is not shown.";
+    readonly defs: {
+        readonly main: {
+            readonly type: "record";
+            readonly description: "The account's last seen.";
+            readonly key: "literal:self";
+            readonly record: {
+                readonly type: "object";
+                readonly required: readonly ["seenAt"];
+                readonly properties: {
+                    readonly seenAt: {
+                        readonly type: "string";
+                        readonly format: "datetime";
+                    };
+                    readonly status: {
+                        readonly type: "string";
+                        readonly knownValues: readonly ["available", "away"];
+                        readonly maxLength: 16;
+                    };
+                };
+            };
+        };
+    };
+};
