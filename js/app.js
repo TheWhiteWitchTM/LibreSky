@@ -667,6 +667,50 @@ function playSound(kind, options = {}) {
 }
 playSound.at = {};
 
+function playGameSound(kind) {
+  if (!soundsEnabled('chat')) return;
+  const level = soundLevel('chat');
+  if (level <= 0) return;
+  const nowMs = Date.now();
+  if (playGameSound.kind === kind && nowMs - (playGameSound.at || 0) < 70) return;
+  playGameSound.kind = kind;
+  playGameSound.at = nowMs;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!playSound.ctx) playSound.ctx = new Ctx();
+    const ctx = playSound.ctx;
+    ctx.resume?.().catch(() => {});
+    const startAt = ctx.currentTime;
+    const notes = {
+      move: [[210, 0, 0.05, 0.055, 'triangle'], [620, 0.01, 0.035, 0.02, 'sine']],
+      capture: [[180, 0, 0.07, 0.065, 'triangle'], [494, 0.045, 0.09, 0.04, 'sine']],
+      win: [[523, 0, 0.12, 0.045, 'sine'], [659, 0.1, 0.13, 0.045, 'sine'], [784, 0.21, 0.2, 0.05, 'sine']],
+      lose: [[392, 0, 0.14, 0.04, 'sine'], [311, 0.12, 0.2, 0.035, 'sine']],
+      draw: [[440, 0, 0.11, 0.035, 'sine'], [440, 0.14, 0.13, 0.028, 'sine']],
+    }[kind] || [[210, 0, 0.05, 0.055, 'triangle']];
+    notes.forEach(([freq, delay, duration, gain, type]) => {
+      const osc = ctx.createOscillator();
+      const amp = ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      const start = startAt + delay;
+      const peak = Math.max(0.0008, gain * level);
+      amp.gain.setValueAtTime(0.0001, start);
+      amp.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+      amp.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(amp);
+      amp.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.03);
+    });
+  } catch {
+    /* this browser stayed quiet */
+  }
+}
+playGameSound.at = 0;
+playGameSound.kind = '';
+
 let ringLoop = 0;
 
 function stopRingtone() {
@@ -6258,6 +6302,19 @@ function gameOver() {
   return resultOf(gameMatch.state).over;
 }
 
+function soundMove(prev, next) {
+  if (!prev || !next || !gameMatch) return;
+  const result = resultOf(next);
+  if (result.over) {
+    if (result.draw || !result.winner) playGameSound('draw');
+    else playGameSound(result.winner === gameMatch.you ? 'win' : 'lose');
+    return;
+  }
+  const before = prev.board.filter(Boolean).length;
+  const after = next.board.filter(Boolean).length;
+  playGameSound(after < before ? 'capture' : 'move');
+}
+
 function canPlay() {
   if (!gameMatch || gameMatch.thinking || gameMatch.mode === 'pick') return false;
   if (gameMatch.mode === 'net' && !gameMatch.accepted) return false;
@@ -6413,8 +6470,12 @@ function maybeThink() {
       if (!gameMatch || gameMatch.seq !== seq) return;
       gameMatch.thinking = false;
       if (move) {
-        const next = applyMove(gameMatch.state, move);
-        if (next) gameMatch.state = next;
+        const prev = gameMatch.state;
+        const next = applyMove(prev, move);
+        if (next) {
+          gameMatch.state = next;
+          soundMove(prev, next);
+        }
       }
       gameMatch.selected = -1;
       gameMatch.prefix = [];
@@ -6568,6 +6629,7 @@ async function commitMove(move) {
   gameMatch.promos = null;
   gameMatch.drawFrom = '';
   holdGame();
+  soundMove(prev, next);
   paintMatch();
   if (!net) {
     maybeThink();
@@ -6626,6 +6688,7 @@ async function resignGame() {
   gameMatch.resigned = 'you';
   gameMatch.thinking = false;
   gameMatch.seq = ++gameSeq;
+  playGameSound('lose');
   paintMatch();
 }
 
@@ -6635,6 +6698,7 @@ async function offerDraw() {
     gameMatch.drawAgreed = true;
     gameMatch.thinking = false;
     gameMatch.seq = ++gameSeq;
+    playGameSound('draw');
     paintMatch();
     return;
   }
@@ -6655,7 +6719,10 @@ async function answerDraw(yes) {
     return;
   }
   if (!gameMatch) return;
-  if (yes) gameMatch.drawAgreed = true;
+  if (yes) {
+    gameMatch.drawAgreed = true;
+    playGameSound('draw');
+  }
   gameMatch.drawFrom = '';
   paintMatch();
 }
@@ -6716,7 +6783,11 @@ function adoptNet(replay) {
   };
   if (replay.accepted) setFlag('accepted', true);
   if (replay.declined) setFlag('declined', true);
+  if (replay.resigned && gameMatch.resigned !== replay.resigned) {
+    playGameSound(replay.resigned === 'you' ? 'lose' : 'win');
+  }
   if (replay.resigned) setFlag('resigned', replay.resigned);
+  if (replay.drawAgreed && !gameMatch.drawAgreed) playGameSound('draw');
   if (replay.drawAgreed) setFlag('drawAgreed', true);
   const held = Date.now() < (gameMatch.hold || 0);
   const serverMoves = replay.state?.moves?.length || 0;
@@ -6725,11 +6796,13 @@ function adoptNet(replay) {
   if (serverMoves >= localMoves) {
     const same = serverMoves === localMoves && gameMatch.state.moves.every((move, index) => move === replay.state.moves[index]);
     if (!same) {
+      const prev = gameMatch.state;
       gameMatch.state = replay.state;
       gameMatch.selected = -1;
       gameMatch.prefix = [];
       gameMatch.promos = null;
       changed = true;
+      if (serverMoves > localMoves) soundMove(prev, replay.state);
     }
     const offer = replay.drawOffer === 'you' || replay.drawOffer === 'them' ? replay.drawOffer : '';
     if (gameMatch.drawFrom !== offer) {

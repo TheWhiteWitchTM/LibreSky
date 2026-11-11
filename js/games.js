@@ -1090,12 +1090,12 @@ function pieceLabel(game, piece) {
 }
 
 function outlined(inner, fill, stroke) {
-  return `<g fill="${fill}" stroke="${stroke}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round">${inner}</g>`;
+  return `<g fill="${fill}" stroke="${stroke}" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" paint-order="fill stroke">${inner}</g>`;
 }
 
 function pieceSvg(shape, light) {
-  const fill = light ? '#f6f6f4' : '#141414';
-  const stroke = light ? '#161616' : '#f4f4f2';
+  const fill = light ? '#ffffff' : '#000000';
+  const stroke = light ? '#000000' : '#ffffff';
   const eye = `<circle cx="26" cy="30" r="2.1" fill="${stroke}" stroke="none"/>`;
   const paths = {
     k: `<path d="M30 4h4v6h6v4h-6v6h-4v-6h-6V10h6z"/><path d="M18 28h28l-4 20H22z"/><path d="M14 50h36v6H14z"/>`,
@@ -1110,7 +1110,7 @@ function pieceSvg(shape, light) {
     hound: `<circle cx="32" cy="34" r="16"/><path d="M18 30c2-10 8-16 14-16s12 6 14 16"/>`,
     fox: `<path d="M10 32 22 10l8 16L32 8l2 18 8-16 12 22c6 10 2 22-14 24S4 44 10 32z"/>${eye}<circle cx="40" cy="34" r="2.1" fill="${stroke}" stroke="none"/>`,
   };
-  return `<svg viewBox="0 0 64 64" aria-hidden="true">${outlined(paths[shape] || paths.p, fill, stroke)}</svg>`;
+  return `<svg viewBox="0 0 64 64" width="64" height="64" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${outlined(paths[shape] || paths.p, fill, stroke)}</svg>`;
 }
 
 export function boardHtml(state, opts = {}) {

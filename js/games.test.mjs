@@ -187,6 +187,12 @@ test('the games page shows a sample board for every game', () => {
   assert.ok(html.includes('Play AI'));
   assert.ok(html.includes('LibreSky player'));
   assert.ok(html.includes('marble'));
+  const chess = boardHtml(startGame('chess'), { quiet: true });
+  assert.ok(chess.includes('fill="#ffffff"'));
+  assert.ok(chess.includes('stroke="#000000"'));
+  assert.ok(chess.includes('fill="#000000"'));
+  assert.ok(chess.includes('stroke="#ffffff"'));
+  assert.ok(chess.includes('width="64" height="64"'));
   ['chess', 'checkers', 'reversi', 'fox', 'break'].forEach((id) => {
     const sample = sampleState(id);
     assert.ok(sample.moves.length > 0, `${id} sample did not play`);
