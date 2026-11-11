@@ -664,9 +664,16 @@ function applyClient(record) {
       scale: snapScale(record.a11y.scale),
     });
   }
-  if (THEMES.has(record.theme)) {
-    try { localStorage.setItem(THEME_KEY, record.theme); } catch { /* the screen still follows the record */ }
-    return record.theme;
+  const incoming = record.theme === 'black' ? 'dark' : record.theme;
+  const local = savedTheme();
+  if (local) {
+    try { localStorage.setItem(THEME_KEY, local); } catch { /* the screen still follows this browser */ }
+    if (local !== incoming) dirtyClient = true;
+    return local;
+  }
+  if (THEMES.has(incoming)) {
+    try { localStorage.setItem(THEME_KEY, incoming); } catch { /* the screen still follows the record */ }
+    return incoming;
   }
   return '';
 }
@@ -695,12 +702,20 @@ export function saveA11yPrefs(partial) {
   return a11yPrefs();
 }
 
-function themeName() {
+function savedTheme() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'black') return 'dark';
     if (THEMES.has(saved)) return saved;
+    const legacy = localStorage.getItem('libresky:theme');
+    if (legacy === 'black' || legacy === 'dark') return 'dark';
+    if (THEMES.has(legacy)) return legacy;
   } catch { /* the screen still follows the default */ }
-  return 'light';
+  return '';
+}
+
+function themeName() {
+  return savedTheme() || 'dark';
 }
 
 function clientRecord() {
@@ -974,9 +989,10 @@ export async function pullAccountPrefs() {
     if (currentDid() !== did) return null;
     if (!sawRecord) clientMissing = false;
     else if (record) {
+      const incoming = record.theme === 'black' ? 'dark' : record.theme;
       theme = applyClient(record);
       clientMissing = false;
-      dirtyClient = false;
+      dirtyClient = Boolean(theme) && theme !== incoming;
     } else clientMissing = true;
     pulledDid = did;
     let aiChanged = false;
@@ -989,7 +1005,7 @@ export async function pullAccountPrefs() {
     if (hadMuted) dirtyMuted = false;
     else if (!dirtyMuted && !mutedItems.length && mutedWords().length) syncMutedWords(mutedWords());
     else if (!dirtyMuted) mutedItems = [];
-    if (clientMissing || dirtyMuted || dirtyAi || dirtyDraft || dirtyWords) schedule();
+    if (clientMissing || dirtyClient || dirtyMuted || dirtyAi || dirtyDraft || dirtyWords) schedule();
     return { theme, aiChanged, draftChanged };
   })();
   pullPromise = run.finally(() => {

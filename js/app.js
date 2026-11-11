@@ -250,7 +250,8 @@ function account() {
 const THEMES = ['light', 'dark', 'contrast-light', 'contrast-dark'];
 
 function applyTheme(theme, options = {}) {
-  const next = THEMES.includes(theme) ? theme : 'light';
+  const named = theme === 'black' ? 'dark' : theme;
+  const next = THEMES.includes(named) ? named : 'dark';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('libresky.theme', next);
   const meta = document.querySelector('meta[name="theme-color"]');
@@ -4960,7 +4961,7 @@ function settingsPanel(id, body) {
 }
 
 function displaySettingsHtml() {
-  const theme = THEMES.includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'light';
+  const theme = THEMES.includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'dark';
   const access = a11yPrefs();
   const themes = [
     ['light', 'Light'],

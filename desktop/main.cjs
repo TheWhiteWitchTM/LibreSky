@@ -229,7 +229,7 @@ function createWindow() {
     minHeight: 560,
     title: 'LibreSky',
     autoHideMenuBar: process.platform !== 'darwin',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#000000',
     icon: path.join(ROOT, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

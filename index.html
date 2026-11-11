@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -64,10 +64,10 @@
     "codeRepository": "https://github.com/TheWhiteWitchTM/LibreSky"
   }
   </script>
-  <meta name="theme-color" content="#0085ff">
+  <meta name="theme-color" content="#000000">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="LibreSky">
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./assets/icon.png">
@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261111c">
+  <link rel="stylesheet" href="./css/app.css?v=20261111d">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -87,10 +87,14 @@
         return;
       }
       try {
-        var theme = localStorage.getItem('libresky.theme') || localStorage.getItem('libresky:theme');
+        var stored = localStorage.getItem('libresky.theme');
+        var legacy = localStorage.getItem('libresky:theme');
+        var theme = stored || legacy;
         if (theme === 'black') theme = 'dark';
-        if (!theme && matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark';
-        if (theme === 'dark' || theme === 'light' || theme === 'contrast-light' || theme === 'contrast-dark') document.documentElement.dataset.theme = theme;
+        if (theme !== 'dark' && theme !== 'light' && theme !== 'contrast-light' && theme !== 'contrast-dark') theme = 'dark';
+        document.documentElement.dataset.theme = theme;
+        if (!stored && (legacy === 'black' || legacy === 'dark')) localStorage.setItem('libresky.theme', 'dark');
+        else if (stored === 'black') localStorage.setItem('libresky.theme', 'dark');
         var access = JSON.parse(localStorage.getItem('libresky.a11y') || 'null');
         if (access && typeof access === 'object') {
           if (access.reader) document.documentElement.dataset.reader = 'on';
@@ -796,6 +800,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261111b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261111d" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>
