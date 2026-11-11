@@ -449,8 +449,15 @@ function socialToolbarHtml(links) {
   return `<nav class="social-toolbar" aria-label="Social links">${buttons}</nav>`;
 }
 
+// The banner preset crops every picture to 3:1. feed_thumbnail keeps the picture's own shape and is the largest of those presets.
+export function profileBannerSrc(url) {
+  const safe = safeUrl(url || '');
+  if (!safe) return '';
+  return safe.replace('/img/banner/plain/', '/img/feed_thumbnail/plain/');
+}
+
 export function profileHtml(profile, options = {}) {
-  const banner = safeUrl(profile.banner || '');
+  const banner = profileBannerSrc(profile.banner || '');
   const name = profile.displayName || profile.handle;
   return `<header class="profile">
     <div class="banner">${banner ? `<img src="${attr(banner)}" alt="" decoding="async" onerror="this.remove()">` : ''}</div>

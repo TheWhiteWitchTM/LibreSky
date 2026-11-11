@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-11-10-website';
+const CACHE = 'libresky-2026-11-11-nav';
 
 const SHELL = [
   './',

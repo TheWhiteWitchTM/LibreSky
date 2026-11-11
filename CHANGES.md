@@ -4,6 +4,12 @@ This is the record of the beta you can [open today](https://libresky.sociallydea
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 11 November 2026
+
+- Articles sits above Post on the left. Games sits under Calls and opens a coming soon page with a link to contribute.
+- A profile banner keeps the picture’s own shape instead of cropping it into a short strip.
+- A site name typed without http, such as sociallydead.me, is a link in the same way as a full address.
+
 ## 10 November 2026
 
 - The profile link row keeps the website and every social link together. The website chip is first. It is a home icon and the word Website, the same pill as the other links.

@@ -1,8 +1,4 @@
-import { escapeHtml, safeUrl } from './util.js';
-
-function trimUrl(raw) {
-  return String(raw || '').replace(/[.,;:!?)]+$/g, '');
-}
+import { eachLink, escapeHtml, safeUrl } from './util.js';
 
 function parseLink(src, index) {
   if (src[index] !== '[') return null;
@@ -19,6 +15,8 @@ function parseLink(src, index) {
 
 function inline(raw) {
   const src = String(raw ?? '');
+  const links = eachLink(src);
+  let linkAt = 0;
   let out = '';
   let index = 0;
   while (index < src.length) {
@@ -78,13 +76,14 @@ function inline(raw) {
         continue;
       }
     }
-    const urlMatch = /^https?:\/\/[^\s<]+/.exec(src.slice(index));
-    if (urlMatch) {
-      const raw = trimUrl(urlMatch[0]);
-      const href = safeUrl(raw);
+    while (linkAt < links.length && links[linkAt].index < index) linkAt += 1;
+    const link = links[linkAt];
+    if (link && link.index === index) {
+      const href = safeUrl(link.uri);
       if (href) {
-        out += `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw)}</a>`;
-        index += raw.length;
+        out += `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.shown)}</a>`;
+        index += link.shown.length;
+        linkAt += 1;
         continue;
       }
     }

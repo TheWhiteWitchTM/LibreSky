@@ -1,5 +1,6 @@
 import { englishExtends, englishWord } from './dict-en.js';
 import { currentDid } from './session.js';
+import { eachLink } from './util.js';
 
 const LEARNED_KEY = 'libresky.words';
 const LATIN = /^[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){1,40}$/;
@@ -196,13 +197,7 @@ export function typoWords(text, langs, caret) {
     pools: codes.filter((code) => code !== 'en').flatMap((code) => (LISTS[code] || []).map((word) => word.toLowerCase())),
     learned: new Set(learnedWords().map((word) => word.toLowerCase().replace(/’/g, "'"))),
   };
-  const urls = [];
-  const urlRe = /https?:\/\/\S+/gi;
-  let urlMatch = urlRe.exec(source);
-  while (urlMatch) {
-    urls.push([urlMatch.index, urlMatch.index + urlMatch[0].length]);
-    urlMatch = urlRe.exec(source);
-  }
+  const urls = eachLink(source).map((link) => [link.index, link.end]);
   const bad = [];
   const re = /[A-Za-z\u00C0-\u024F](?:[A-Za-z\u00C0-\u024F]|['’\-]){2,40}/g;
   let match = re.exec(source);

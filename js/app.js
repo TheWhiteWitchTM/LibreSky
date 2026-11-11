@@ -30,6 +30,7 @@ import {
   packHtml,
   postHtml,
   profileHtml,
+  profileBannerSrc,
   articleCardHtml,
   articlePageHtml,
   imageUrl,
@@ -3181,7 +3182,19 @@ async function highlightsBody(profile, token) {
   return `${goneHtml}${feed}${blank}`;
 }
 
-async function showProfile(actor, tab) {
+async function showArticles() {
+  if (!signedIn()) {
+    generation += 1;
+    setChrome({ title: 'Articles', nav: 'articles' });
+    $('view').innerHTML = emptyHtml('Articles', 'Sign in to read and write articles on your profile.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
+    return;
+  }
+  const actor = me.profile?.handle || myDid();
+  if (!actor) return requireSignIn();
+  return showProfile(actor, 'articles', 'articles');
+}
+
+async function showProfile(actor, tab, nav = 'profile') {
   const token = ++generation;
   const current = PROFILE_LABELS[tab] ? tab : 'posts';
   shownProfile = null;
@@ -3189,7 +3202,7 @@ async function showProfile(actor, tab) {
   profileFeatured = new Set();
   profileShelf = emptyShelf();
   profileTab = { actor, tab: current };
-  setChrome({ title: 'Profile', nav: 'profile', back: true });
+  setChrome({ title: nav === 'articles' ? 'Articles' : 'Profile', nav, back: true });
   showSkeletons();
   try {
     const profile = await api.getProfile(actor);
@@ -3202,8 +3215,10 @@ async function showProfile(actor, tab) {
     }
     if (token !== generation) return;
     if (profile.did === myDid()) rememberMyHighlights(profileShelf);
-    $('title').textContent = profile.displayName || profile.handle;
-    document.title = `${$('title').textContent} — LibreSky`;
+    if (nav !== 'articles') {
+      $('title').textContent = profile.displayName || profile.handle;
+      document.title = `${$('title').textContent} — LibreSky`;
+    }
     const action = profileAction(profile);
     const head = profileHead(profile);
     if (current === 'highlights') {
@@ -6084,6 +6099,12 @@ async function saveDesktopZip(file, button) {
   }
 }
 
+function showGames() {
+  generation += 1;
+  setChrome({ title: 'Games', nav: 'games' });
+  $('view').innerHTML = '<div class="support-page"><h2>Coming soon</h2><p>Games are not ready yet.</p><p><a class="primary support-pay" href="#/support">Contribute to development</a></p></div>';
+}
+
 function showSupport() {
   generation += 1;
   setChrome({ title: 'Support', nav: 'support', back: true });
@@ -6588,6 +6609,8 @@ function route() {
   if (a === 'ai') return showAi();
   if (a === 'c' && b) return showCallLink(b);
   if (a === 'calls') return showCalls();
+  if (a === 'games') return showGames();
+  if (a === 'articles') return showArticles();
   if (a === 'bookmarks') return showBookmarks();
   if (a === 'feeds') return showFeeds();
   if (a === 'feed' && b) return showCustomFeed(b);
@@ -10550,7 +10573,7 @@ async function openProfileEditor() {
   $('profile-avatar').value = '';
   $('profile-banner').value = '';
   dialog.dataset.clearBanner = '';
-  paintBannerSlot($('profile-banner-preview'), $('profile-banner-clear'), profile.banner || '');
+  paintBannerSlot($('profile-banner-preview'), $('profile-banner-clear'), profileBannerSrc(profile.banner || ''));
   paintAvatarFace(profile.avatar, profile.displayName || profile.handle);
   let links = shownProfile?.did === myDid() ? (profileShelf.links || []) : [];
   if (shownProfile?.did !== myDid()) {

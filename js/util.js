@@ -222,8 +222,56 @@ export function tagFromQuery(query) {
   return marks[0].tag;
 }
 
+const FILE_TLDS = new Set('js mjs cjs jsx ts tsx json map css scss md txt csv png jpg jpeg gif webp svg ico bmp avif mp3 mp4 wav webm mov avi mkv pdf zip gz html htm xml yml yaml woff woff2 ttf otf wasm lock'.split(' '));
+const URL_TAIL = String.raw`(?:(?![\p{Extended_Pictographic}\u200d\ufe0f])[^\s<>"'])*`;
+const BARE_HOST = String.raw`(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}`;
+
 export function httpUrlRe() {
-  return /https?:\/\/(?:(?![\p{Extended_Pictographic}\u200d\ufe0f])[^\s<>"'])+/gu;
+  return new RegExp(
+    String.raw`https?:\/\/(?:(?![\p{Extended_Pictographic}\u200d\ufe0f])[^\s<>"'])+|(?<![\p{L}\p{N}_@./])${BARE_HOST}${URL_TAIL}`,
+    'giu',
+  );
+}
+
+// A typed host such as sociallydead.me is the same link as https://sociallydead.me.
+// The short display form ends in "..." and must not be linked again as a new address.
+export function websiteUri(raw) {
+  const shown = trimLink(raw);
+  if (!shown) return '';
+  const explicit = /^https?:\/\//i.test(shown);
+  if (!explicit && shown.endsWith('...')) return '';
+  const absolute = explicit ? shown : `https://${shown}`;
+  let url;
+  try { url = new URL(absolute); } catch { return ''; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+  if (!explicit) {
+    const host = url.hostname;
+    const tld = (host.split('.').pop() || '').toLowerCase();
+    if (!host.includes('.') || FILE_TLDS.has(tld)) return '';
+  }
+  return explicit ? shown : absolute;
+}
+
+// trimLink drops a trailing "..." the same way it drops a period. That mark is the
+// already-shortened display, so it must not become a second, shorter link.
+function bareShortForm(raw) {
+  if (/^https?:\/\//i.test(raw)) return false;
+  return String(raw || '').replace(/[)\]}>'"]+$/g, '').endsWith('...');
+}
+
+export function eachLink(source) {
+  const text = String(source ?? '');
+  const re = httpUrlRe();
+  const found = [];
+  let match = re.exec(text);
+  while (match) {
+    const shown = bareShortForm(match[0]) ? '' : trimLink(match[0]);
+    const uri = shown ? websiteUri(shown) : '';
+    if (uri) found.push({ index: match.index, shown, uri, end: match.index + shown.length });
+    if (match.index === re.lastIndex) re.lastIndex += 1;
+    match = re.exec(text);
+  }
+  return found;
 }
 
 function syntheticMarks(source) {
@@ -240,13 +288,9 @@ function syntheticMarks(source) {
     take(start, start + encoder.encode(`@${match[2]}`).length, [{ $type: 'libresky.richtext#ai' }]);
     match = aiRe.exec(source);
   }
-  const linkRe = httpUrlRe();
-  match = linkRe.exec(source);
-  while (match) {
-    const raw = trimLink(match[0]);
-    const start = byteAt(source, match.index);
-    take(start, start + encoder.encode(raw).length, [{ $type: 'app.bsky.richtext.facet#link', uri: raw }]);
-    match = linkRe.exec(source);
+  for (const link of eachLink(source)) {
+    const start = byteAt(source, link.index);
+    take(start, start + encoder.encode(link.shown).length, [{ $type: 'app.bsky.richtext.facet#link', uri: link.uri }]);
   }
   const mentionRe = /(^|\s)@([A-Za-z0-9](?:[A-Za-z0-9._-]{0,80}))/g;
   match = mentionRe.exec(source);
@@ -622,9 +666,7 @@ export function trimLink(raw) {
 }
 
 export function firstUrl(text) {
-  const match = String(text ?? '').match(httpUrlRe());
-  if (!match) return '';
-  return trimLink(match[0]);
+  return eachLink(text)[0]?.uri || '';
 }
 
 // Bluesky counts and stores the short display form. The facet keeps the full URI.
@@ -655,9 +697,9 @@ export function trailingUrl(text) {
   if (!line) return '';
   const match = httpUrlRe().exec(line);
   if (!match || match.index !== 0 || line.slice(match[0].length)) return '';
-  const uri = trimLink(match[0]);
-  if (!uri || trimLink(line) !== uri) return '';
-  return uri;
+  const shown = trimLink(match[0]);
+  if (!shown || trimLink(line) !== shown) return '';
+  return websiteUri(shown);
 }
 
 export function withoutTrailingUrl(text) {
@@ -688,22 +730,24 @@ export function applyShortLinks(text) {
   const links = [];
   let match = re.exec(source);
   while (match) {
-    const raw = trimLink(match[0]);
+    const shown = bareShortForm(match[0]) ? '' : trimLink(match[0]);
+    const uri = shown ? websiteUri(shown) : '';
     const start = match.index;
     const matchEnd = start + match[0].length;
     out += source.slice(last, start);
-    if (raw) {
-      const short = toShortUrl(raw);
-      if (short === raw) out += raw;
+    if (uri) {
+      const short = toShortUrl(uri);
+      const visible = source.slice(start, start + shown.length);
+      if (short === visible || short === uri) out += visible;
       else {
         const byteStart = encoder.encode(out).length;
         out += short;
         links.push({
           index: { byteStart, byteEnd: encoder.encode(out).length },
-          features: [{ $type: 'app.bsky.richtext.facet#link', uri: raw }],
+          features: [{ $type: 'app.bsky.richtext.facet#link', uri }],
         });
       }
-      out += source.slice(start + raw.length, matchEnd);
+      out += source.slice(start + shown.length, matchEnd);
     } else out += match[0];
     last = matchEnd;
     match = re.exec(source);

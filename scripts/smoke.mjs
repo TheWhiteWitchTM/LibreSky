@@ -599,6 +599,12 @@ const headed = profileHtml({
 });
 assert.match(headed, /class="banner"/);
 assert.match(headed, /src="https:\/\/cdn.example\/banner.jpg"/);
+const shaped = profileHtml({
+  handle: 'me.bsky.social',
+  displayName: 'Me',
+  banner: 'https://cdn.bsky.app/img/banner/plain/did:plc:me/abc@jpeg',
+});
+assert.match(shaped, /src="https:\/\/cdn.bsky.app\/img\/feed_thumbnail\/plain\/did:plc:me\/abc@jpeg"/);
 assert.doesNotMatch(headed, /social-toolbar/);
 const linked = profileHtml({
   handle: 'me.bsky.social',
@@ -643,13 +649,14 @@ assert.ok(siteToolbar.indexOf('example.com') < siteToolbar.indexOf('youtube.com'
 assert.ok(siteToolbar.indexOf('youtube.com') < siteToolbar.indexOf('github.com'));
 const articlePage = articlePageHtml({
   title: 'Hello sky',
-  text: 'A **bold** line\n\n- one\n\n> quoted',
+  text: 'A **bold** line\n\n- one\n\n> quoted\n\nsociallydead.me',
   summary: 'Short',
   rkey: 'abc',
   createdAt: '2026-11-01T00:00:00.000Z',
   uri: 'at://did:plc:me/app.libresky.article.article/abc',
 }, { did: 'did:plc:me', actor: 'me.bsky.social', profile: { displayName: 'Me', handle: 'me.bsky.social', avatar: '' } });
 assert.match(articlePage, /<strong>bold<\/strong>/);
+assert.match(articlePage, /href="https:\/\/sociallydead\.me\/"/);
 assert.match(articlePage, /<li>one<\/li>/);
 assert.match(articlePage, /<blockquote>/);
 assert.doesNotMatch(articlePage, /\*\*bold\*\*/);
@@ -666,6 +673,20 @@ assert.equal(trimLink('https://example.com/a.'), 'https://example.com/a');
 assert.equal(trimLink('https://en.wikipedia.org/wiki/Foo_(bar)'), 'https://en.wikipedia.org/wiki/Foo_(bar)');
 assert.equal(firstUrl('see (https://example.com/a).'), 'https://example.com/a');
 assert.equal(firstUrl('https://example.com/a👍 more'), 'https://example.com/a');
+assert.equal(firstUrl('see sociallydead.me.'), 'https://sociallydead.me');
+assert.equal(firstUrl('example.com/a👍 more'), 'https://example.com/a');
+assert.equal(firstUrl('mail me at a@sociallydead.me'), '');
+assert.equal(firstUrl('open app.js now'), '');
+assert.equal(firstUrl('notes.md'), '');
+const bareSite = richText('Visit sociallydead.me today');
+const fullSite = richText('Visit https://sociallydead.me today');
+assert.match(bareSite, /href="https:\/\/sociallydead\.me\/"/);
+assert.match(bareSite, /sociallydead\.me<\/a>/);
+assert.match(fullSite, /href="https:\/\/sociallydead\.me\/"/);
+assert.doesNotMatch(richText('@jay.bsky.team'), /https:\/\/jay\.bsky\.team/);
+assert.equal(trailingUrl('Hello\nsociallydead.me'), 'https://sociallydead.me');
+assert.equal(trailingUrl('Hello\nsociallydead.me.'), 'https://sociallydead.me');
+assert.equal(trailingUrl('see sociallydead.me'), '');
 assert.equal(toShortUrl('https://bsky.app'), 'bsky.app');
 assert.equal(toShortUrl('https://bsky.app/'), 'bsky.app');
 assert.equal(toShortUrl('https://bsky.app/about'), 'bsky.app/about');
@@ -1203,6 +1224,11 @@ assert.doesNotMatch(index, /id="title-tools"/);
 assert.match(index, /data-nav="ai"/);
 assert.match(index, /href="#\/ai"/);
 assert.match(index, /data-nav="messages"[\s\S]*data-nav="calls"[\s\S]*data-nav="bookmarks"[\s\S]*data-nav="profile"[\s\S]*data-nav="ai"[\s\S]*id="more-btn"/);
+assert.match(index, /data-nav="calls"[\s\S]*data-nav="games"[\s\S]*data-nav="bookmarks"/);
+assert.match(index, /data-nav="articles"[\s\S]*class="post-btn"/);
+assert.match(appSource, /function showGames/);
+assert.match(appSource, /Coming soon/);
+assert.match(appSource, /Contribute to development/);
 assert.match(index, /id="searches"/);
 assert.match(appSource, /Save this search/);
 assert.match(appSource, /edit-searches/);
