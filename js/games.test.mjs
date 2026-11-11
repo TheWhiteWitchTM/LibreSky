@@ -30,6 +30,11 @@ function play(id, moves) {
 test('chess counts the opening tree', () => {
   const start = startGame('chess');
   assert.equal(legalMoves(start).length, 20);
+  assert.ok(legalMoves(start).includes('e2e3'));
+  assert.ok(legalMoves(start).includes('e2e4'));
+  const black = applyMove(start, 'e2e4');
+  assert.ok(legalMoves(black).includes('e7e6'));
+  assert.ok(legalMoves(black).includes('e7e5'));
   assert.equal(perft(start, 1), 20);
   assert.equal(perft(start, 2), 400);
   assert.equal(perft(start, 3), 8902);
@@ -53,6 +58,9 @@ test('chess mates, castle, en passant, and a pin', () => {
   const castle = loadFen('r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq -');
   assert.ok(legalMoves(castle).includes('e1g1'));
   assert.ok(legalMoves(castle).includes('e1c1'));
+  const blackCastle = applyMove(castle, 'a2a3');
+  assert.ok(legalMoves(blackCastle).includes('e8g8'));
+  assert.ok(legalMoves(blackCastle).includes('e8c8'));
   const castled = applyMove(castle, 'e1g1');
   assert.equal(castled.board[name('g1')], 'K');
   assert.equal(castled.board[name('f1')], 'R');
@@ -68,6 +76,14 @@ test('chess mates, castle, en passant, and a pin', () => {
   const promo = loadFen('8/P7/8/8/8/8/8/4K2k w - -');
   assert.ok(legalMoves(promo).includes('a7a8q'));
   assert.equal(applyMove(promo, 'a7a8q').board[name('a8')], 'Q');
+
+  const lateMate = loadFen('6k1/5Q2/6K1/8/8/8/8/8 w - - 99 80');
+  const mated = applyMove(lateMate, 'f7g7');
+  assert.equal(mated.half, 100);
+  assert.equal(resultOf(mated).reason, 'checkmate');
+  assert.equal(resultOf(mated).winner, 'w');
+  const lateStale = loadFen('7k/5Q2/6K1/8/8/8/8/8 b - - 100 80');
+  assert.equal(resultOf(lateStale).reason, 'stalemate');
 });
 
 test('kiwipete agrees on the first two plies', () => {
@@ -110,6 +126,21 @@ test('checkers forces the jump and crowns a man', () => {
   const kingJump = boardState('checkers', [['d4', 'W'], ['e5', 'b'], ['a1', 'b']], 'w');
   assert.ok(legalMoves(kingJump).includes('d4-f6'));
   assert.equal(legalMoves(kingJump).includes('d4-c3'), false);
+
+  const backward = boardState('checkers', [
+    ['d4', 'w'],
+    ['e3', 'b'],
+    ['a3', 'w'],
+    ['h8', 'b'],
+  ], 'w');
+  assert.ok(legalMoves(backward).includes('d4-f2'));
+  assert.equal(legalMoves(backward).includes('a3-b4'), false);
+  const hopped = applyMove(backward, 'd4-f2');
+  assert.equal(hopped.board[name('e3')], '');
+  assert.equal(hopped.board[name('f2')], 'w');
+  const quiet = boardState('checkers', [['d4', 'w'], ['a1', 'b']], 'w');
+  assert.equal(legalMoves(quiet).includes('d4-e3'), false);
+  assert.ok(legalMoves(quiet).includes('d4-c5'));
 });
 
 test('reversi flips a line and passes', () => {

@@ -449,8 +449,8 @@ function chessEdges(state) {
 
 function checkersJumps(board, index, piece) {
   const white = piece === 'w' || piece === 'W';
-  const king = piece === 'W' || piece === 'B';
-  const dirs = king ? [[-1, -1], [1, -1], [-1, 1], [1, 1]] : (white ? [[-1, -1], [1, -1]] : [[-1, 1], [1, 1]]);
+  // Men move forward only. English draughts still lets them jump backward.
+  const dirs = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
   const file = fileOf(index);
   const rank = rankTop(index);
   const jumps = [];
@@ -721,12 +721,16 @@ function insufficient(board) {
 export function resultOf(state) {
   if (!state) return { over: true, draw: true, reason: 'broken' };
   if (state.id === 'chess') {
+    const edges = chessEdges(state);
+    // Mate and stalemate end the game before a fifty-move or repetition claim.
+    if (!edges.length) {
+      if (kingAttacked(state)) return { over: true, winner: state.turn === 'w' ? 'b' : 'w', reason: 'checkmate' };
+      return { over: true, draw: true, reason: 'stalemate' };
+    }
     if ((state.seen?.[posKey(state)] || 0) >= 3) return { over: true, draw: true, reason: 'repeat' };
     if ((state.half || 0) >= 100) return { over: true, draw: true, reason: 'fifty' };
     if (insufficient(state.board)) return { over: true, draw: true, reason: 'material' };
-    if (chessEdges(state).length) return { over: false };
-    if (kingAttacked(state)) return { over: true, winner: state.turn === 'w' ? 'b' : 'w', reason: 'checkmate' };
-    return { over: true, draw: true, reason: 'stalemate' };
+    return { over: false };
   }
   if (state.id === 'checkers') {
     const white = state.turn === 'w';
@@ -850,10 +854,11 @@ function evaluate(state) {
 
 function quickEnd(state) {
   if (state.id === 'chess') {
-    if ((state.seen?.[posKey(state)] || 0) >= 3) return { score: 0 };
-    if ((state.half || 0) >= 100) return { score: 0 };
     if (insufficient(state.board)) return { score: 0 };
-    return null;
+    const clockDraw = (state.seen?.[posKey(state)] || 0) >= 3 || (state.half || 0) >= 100;
+    if (!clockDraw) return null;
+    if (kingAttacked(state) && !chessEdges(state).length) return null;
+    return { score: 0 };
   }
   const result = resultOf(state);
   if (!result.over) return null;
