@@ -2794,19 +2794,27 @@ function watchOpenChat(convoId, peerDid, token) {
 
 function pinChatEnd(list) {
   if (!list) return;
+  let frames = 0;
   const snap = () => {
     list.scrollTop = list.scrollHeight;
   };
+  const nearEnd = () => list.scrollHeight - list.scrollTop - list.clientHeight < 160;
   snap();
-  requestAnimationFrame(() => {
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+    if (frames < 8 || nearEnd()) snap();
+  }) : null;
+  observer?.observe(list);
+  const step = () => {
     snap();
-    requestAnimationFrame(snap);
-  });
+    frames += 1;
+    if (frames < 8) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  setTimeout(() => observer?.disconnect(), 1500);
   list.querySelectorAll('img').forEach((img) => {
     if (img.complete) return;
     img.addEventListener('load', () => {
-      const near = list.scrollHeight - list.scrollTop - list.clientHeight < 160;
-      if (near) snap();
+      if (nearEnd()) snap();
     }, { once: true });
   });
 }
@@ -7692,7 +7700,15 @@ function goBack() {
   location.hash = target;
 }
 
+function scrollPageTop() {
+  const root = document.scrollingElement || document.documentElement;
+  root.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
 function route() {
+  scrollPageTop();
+  requestAnimationFrame(scrollPageTop);
   stopVideo();
   noteNav();
   closeMenu();
@@ -12977,6 +12993,7 @@ function onKey(event) {
 }
 
 function bind() {
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   setPrefsError((error) => toast(error?.message || 'Could not save settings to your account'));
   const synth = window.speechSynthesis;
   if (synth) {

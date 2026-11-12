@@ -1972,6 +1972,11 @@ a.person.request-entry { width: 100%; }
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.chat-thread > .messages > *,
+.ai-chat .messages > * {
+  flex: none;
+  min-height: min-content;
+}
 .chat-thread > .reply-bar { position: relative; bottom: auto; }
 body:has(.chat-thread) { overflow: hidden; }
 .center:has(.chat-thread) {

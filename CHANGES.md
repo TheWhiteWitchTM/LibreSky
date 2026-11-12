@@ -4,6 +4,10 @@ This is the record of the beta you can [open today](https://libresky.sociallydea
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 12 November 2026
+
+- A chat shows each reply in full. Opening a chat starts at the latest message. Switching pages, such as Profile to Home, starts at the top.
+
 ## 11 November 2026
 
 - Dark is the default again. The page opens black, with light text. A saved light or high-contrast choice still applies. The old black setting stays dark, and a signed-in account no longer replaces that dark screen with white.
