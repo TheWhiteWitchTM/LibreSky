@@ -400,6 +400,7 @@ function setChrome({ title, back = true, tabs = [], nav = '', menuAct = '', menu
 }
 
 function showSkeletons() {
+  if (scrollHold) return;
   resetPosts();
   forgetStrips($('view'));
   $('view').innerHTML = skeletons();
@@ -7706,9 +7707,63 @@ function scrollPageTop() {
   document.body.scrollTop = 0;
 }
 
-function route() {
-  scrollPageTop();
-  requestAnimationFrame(scrollPageTop);
+let scrollHold = null;
+let scrollHoldTimer = 0;
+
+function holdPageScroll(y) {
+  scrollHold = { y, armed: false };
+  clearTimeout(scrollHoldTimer);
+  scrollHoldTimer = setTimeout(() => { scrollHold = null; }, 4000);
+  // Arm after this turn, so removing the new-posts link does not count as the reload.
+  setTimeout(() => { if (scrollHold) scrollHold.armed = true; }, 0);
+  const root = document.scrollingElement || document.documentElement;
+  root.scrollTop = y;
+  document.body.scrollTop = y;
+  requestAnimationFrame(() => {
+    if (!scrollHold || scrollHold.armed) return;
+    root.scrollTop = scrollHold.y;
+    document.body.scrollTop = scrollHold.y;
+  });
+}
+
+function releaseScrollHold() {
+  if (!scrollHold?.armed) return;
+  const y = scrollHold.y;
+  const root = document.scrollingElement || document.documentElement;
+  const view = $('view');
+  if (!view || view.childElementCount < 1) return;
+  const max = Math.max(0, root.scrollHeight - root.clientHeight);
+  // A reload that has not laid out yet reports no height. A shorter page keeps the lowest place that still exists.
+  if (max < 1 && y > 0 && view.scrollHeight < 80) return;
+  root.scrollTop = Math.min(y, max);
+  document.body.scrollTop = root.scrollTop;
+  scrollHold = null;
+}
+
+function watchScrollHold() {
+  const view = $('view');
+  if (!view) return;
+  new MutationObserver(() => {
+    if (!scrollHold) return;
+    if (!scrollHold.armed) {
+      const root = document.scrollingElement || document.documentElement;
+      root.scrollTop = scrollHold.y;
+      document.body.scrollTop = scrollHold.y;
+      return;
+    }
+    releaseScrollHold();
+    requestAnimationFrame(releaseScrollHold);
+  }).observe(view, { childList: true });
+}
+
+function route(options = {}) {
+  if (Number.isFinite(options.keepScroll)) holdPageScroll(options.keepScroll);
+  else {
+    scrollHold = null;
+    clearTimeout(scrollHoldTimer);
+    scrollPageTop();
+    requestAnimationFrame(scrollPageTop);
+  }
   stopVideo();
   noteNav();
   closeMenu();
@@ -8864,13 +8919,15 @@ async function publish(event) {
       }
     }
     if (!reply && !quote && !editing) saveDraft('');
+    const keptScroll = reply ? (window.scrollY || document.documentElement.scrollTop || 0) : null;
     dialog.close();
     const href = created?.uri
       ? postHash({ uri: created.uri, author: { handle: account()?.handle || myDid(), did: myDid() } })
       : '';
     showPosted(editing ? 'Updated' : 'Posted', href);
     if (gateWarning.trim()) toast(gateWarning.trim());
-    route();
+    if (keptScroll != null) route({ keepScroll: keptScroll });
+    else route();
   } catch (error) {
     toast(error.message);
   } finally {
@@ -12994,6 +13051,7 @@ function onKey(event) {
 
 function bind() {
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  watchScrollHold();
   setPrefsError((error) => toast(error?.message || 'Could not save settings to your account'));
   const synth = window.speechSynthesis;
   if (synth) {

@@ -6,6 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 12 November 2026
 
+- A profile banner stays inside the Bluesky banner height, 150 pixels. A taller picture is cropped to that strip instead of filling the page. The same limit is used while editing the picture.
+- Sending a reply leaves the page where it was. A new post, a quote, or an edit still opens at the top.
 - A chat shows each reply in full. Opening a chat starts at the latest message. Switching pages, such as Profile to Home, starts at the top.
 
 ## 11 November 2026

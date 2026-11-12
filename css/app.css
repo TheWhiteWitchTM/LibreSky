@@ -1582,11 +1582,13 @@ a.person.request-entry { width: 100%; }
 .note.unread .avatar-stack .avatar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 10%, var(--bg)); }
 
 .profile { padding-bottom: 12px; }
-.banner { height: auto; background: linear-gradient(120deg, #0085ff, #6bc1ff); overflow: hidden; }
-.banner:not(:has(img)) { height: 200px; }
+/* The Bluesky app draws this strip at 150px. A taller picture stays inside it. */
+.banner { height: 150px; background: linear-gradient(120deg, #0085ff, #6bc1ff); overflow: hidden; }
 .banner img {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
   display: block;
   opacity: 0;
   color-scheme: light;
@@ -2382,17 +2384,11 @@ html[data-signed-out] #login::backdrop { background: rgba(0, 20, 40, 0.55); }
 .edit-hero { margin-bottom: 8px; }
 .edit-banner {
   position: relative;
-  height: 168px;
+  height: 150px;
   background: linear-gradient(120deg, #0085ff, #6bc1ff);
   overflow: hidden;
 }
-.edit-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
-#profile-edit .edit-banner:has(#profile-banner-preview:not([hidden])) { height: auto; }
-#profile-edit .edit-banner:has(#profile-banner-preview:not([hidden])) #profile-banner-preview {
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-}
+.edit-banner img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
 .edit-banner img[hidden] { display: none; }
 .photo-btn {
   position: absolute;
