@@ -578,6 +578,10 @@ export function getRepostedBy(uri, cursor, signal) {
   return xrpc('app.bsky.feed.getRepostedBy', { params: { uri, limit: 50, cursor }, signal });
 }
 
+export function getQuotes(uri, cursor, signal) {
+  return xrpc('app.bsky.feed.getQuotes', { params: { uri, limit: 50, cursor }, signal });
+}
+
 export function getUnreadCount() {
   return xrpc('app.bsky.notification.getUnreadCount', { auth: 'required' });
 }
@@ -1303,6 +1307,51 @@ export function externalEmbed({ url, title, description, thumb }) {
 }
 
 const VIDEO_SERVICE = 'https://video.bsky.app';
+export const VIDEO_MAX_BYTES = 300000000;
+export const VIDEO_MAX_SECONDS = 180;
+
+const VIDEO_FAIL = {
+  validation_failure: 'The video service rejected this file. Use an MP4, and stay within the size and length limits.',
+  encoding_failure: 'The video service could not encode this file.',
+  pds_upload_failure: 'Your server rejected the processed video.',
+  pds_upload_unsupported_blob_size: 'The processed video is larger than this account’s server allows. Bluesky accepts up to 300 MB, and a personal server can be lower.',
+  generic_failure: 'The video service could not process this file.',
+};
+
+function videoSizeLabel(bytes) {
+  const n = Math.max(0, Number(bytes) || 0);
+  if (n < 1000) return `${n} B`;
+  if (n < 1000000) return `${Math.round(n / 1000)} KB`;
+  const mb = n / 1000000;
+  return `${mb >= 10 ? mb.toFixed(0) : mb.toFixed(1).replace(/\.0$/, '')} MB`;
+}
+
+function videoClock(seconds) {
+  const whole = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (!minutes) return `${rest} seconds`;
+  if (!rest) return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+  return `${minutes} min ${rest} s`;
+}
+
+export function videoLimitMessage(file, meta = {}) {
+  const size = Number(file?.size) || 0;
+  if (size > VIDEO_MAX_BYTES) {
+    return `This video is ${videoSizeLabel(size)}. Bluesky accepts a video up to ${videoSizeLabel(VIDEO_MAX_BYTES)}.`;
+  }
+  const duration = Number(meta?.duration) || 0;
+  if (duration > VIDEO_MAX_SECONDS) {
+    return `This video is ${videoClock(duration)}. Bluesky accepts a video up to 3 minutes.`;
+  }
+  return '';
+}
+
+function videoText(value) {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+  return videoText(value.message || value.error || value.reason || '');
+}
 
 async function readLoose(res) {
   const text = await res.text();
@@ -1349,10 +1398,15 @@ function jobBlob(data) {
 
 function videoJobError(data, status) {
   const job = data?.jobStatus || data || {};
-  const message = job.error || job.message || data?.message || data?.error || '';
-  if (message === 'already_exists') return 'The video service did not return the processed video.';
-  if (message) return String(message);
-  return status ? `Video processing failed (${status})` : 'Video processing failed.';
+  const code = videoText(job.failureCode) || videoText(job.error);
+  const message = videoText(job.error) || videoText(job.message) || videoText(data?.message) || videoText(data?.error);
+  if (code === 'already_exists' || message === 'already_exists') return 'The video service did not return the processed video.';
+  if (VIDEO_FAIL[code]) return VIDEO_FAIL[code];
+  if (status === 413 || /blob size|unsupported_blob|too large/i.test(message)) return VIDEO_FAIL.pds_upload_unsupported_blob_size;
+  if (/duration|too long|length/i.test(code) || /duration|too long/i.test(message)) return 'Bluesky accepts a video up to 3 minutes.';
+  if (message && !/^[a-z0-9_]+$/i.test(message)) return message;
+  if (message && message !== code) return message;
+  return status ? `Video processing failed (${status}).` : 'Video processing failed.';
 }
 
 export async function uploadVideo(file, { signal, onProgress } = {}) {

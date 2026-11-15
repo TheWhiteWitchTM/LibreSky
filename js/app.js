@@ -10,6 +10,7 @@ import {
   callConvoHtml,
   callStartHtml,
   chatHeaderHtml,
+  chatTitleName,
   chatTitleNeedsProfile,
   hoverCardHtml,
   presenceHtml,
@@ -42,6 +43,7 @@ import {
   speechText,
   threadList,
   trendsHtml,
+  whoHtml,
 } from './render.js';
 import {
   activeDid,
@@ -81,6 +83,7 @@ import {
   callAllow,
   callIsRequest,
   callMayRing,
+  detailPrefs,
   feedView,
   homeAllows,
   commitAiAccount,
@@ -94,6 +97,7 @@ import {
   noteFollowBack,
   releaseFollowHold,
   saveCallAllow,
+  saveDetailPrefs,
   saveFeedView,
   saveFollowDeskPrefs,
   saveSearchPrefs,
@@ -204,6 +208,24 @@ function toast(message) {
   node.textContent = message;
   $('toasts').append(node);
   setTimeout(() => node.remove(), 3400);
+}
+
+function showError(message, title = 'That did not work') {
+  const text = String(message || '').trim() || 'Something went wrong.';
+  const dialog = $('fail');
+  if (!dialog) {
+    toast(text);
+    return;
+  }
+  const heading = $('fail-title');
+  const body = $('fail-body');
+  if (heading) heading.textContent = title || 'That did not work';
+  if (body) body.textContent = text;
+  try {
+    if (!dialog.open) dialog.showModal();
+  } catch {
+    toast(text);
+  }
 }
 
 let postedTimer = 0;
@@ -455,6 +477,7 @@ function paintFeed(items, { append = false, post = null } = {}) {
     else $('view').insertAdjacentHTML('beforeend', html);
   } else $('view').innerHTML = html || emptyHtml('Nothing here', 'There are no posts to show.');
   remember();
+  showPresence($('view'));
 }
 
 function clearBoot() {
@@ -842,7 +865,8 @@ async function classifyCalls(convos) {
       ...offer,
       convoId: convo.id,
       peerDid: other.did,
-      name: other.displayName || (other.handle ? `@${other.handle}` : 'Someone'),
+      name: other.displayName || other.handle || 'Someone',
+      handle: other.handle || '',
       avatar: other.avatar || '',
       requested: convo?.status === 'request',
       key,
@@ -973,8 +997,8 @@ function paintIncomingBar(offer) {
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
   const request = offer.requested ? ' data-request="1"' : '';
-  const line = offer.peerDid ? presenceLine(offer.peerDid) : '';
-  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(offer.name || 'Someone')}</span>${line}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '' }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
+  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong>${who}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
   showPresence(bar);
   paintBadge('calls-badge', 1);
   startRingtone();
@@ -2099,7 +2123,7 @@ function queueNoteSave(mutator) {
       paintNotePrefs();
       await api.putNotificationPreferences(notePrefsPayload(notePrefs));
     } catch (error) {
-      toast(error.message || 'Could not save notification settings.');
+      showError(error.message || 'Could not save notification settings.');
       notePrefs = null;
       notePrefsDid = '';
       loadNotificationPrefs();
@@ -2185,11 +2209,16 @@ async function showNotifications(filter) {
       }
     }
     const rows = notificationsHtml(all, state.subjects);
+    remember();
     const nextHtml = rows || emptyHtml('No notifications', 'You are all caught up.');
     const list = $('note-list');
     if (!list || !view.contains(list)) view.innerHTML = `${tools}<div id="note-list">${nextHtml}</div>`;
     else if (list.innerHTML !== nextHtml) list.innerHTML = nextHtml;
-    else return;
+    else {
+      showPresence(view);
+      return;
+    }
+    showPresence(view);
     if (!anchorKey || !CSS?.escape) return;
     try {
       const next = view.querySelector(`article.note[data-note="${CSS.escape(anchorKey)}"]`);
@@ -2323,7 +2352,7 @@ async function showNotifications(filter) {
       }
       pagerFor(mainCursor || repostCursor, more);
     } catch (error) {
-      if (!cancelled(token, error)) toast(error.message || 'Could not load more notifications.');
+      if (!cancelled(token, error)) showError(error.message || 'Could not load more notifications.');
     } finally {
       paging = false;
     }
@@ -2388,7 +2417,7 @@ async function showNotifications(filter) {
     if (!paging) pagerFor(mainCursor || repostCursor, more);
   } catch (error) {
     if (cancelled(token, error)) return;
-    if ($('note-list')) toast(error.message || 'Could not refresh notifications.');
+    if ($('note-list')) showError(error.message || 'Could not refresh notifications.');
     else $('view').innerHTML = emptyHtml('Could not load notifications', error.message);
   }
 }
@@ -2502,22 +2531,20 @@ async function pulsePresence(force = false, override = '') {
 function paintChatTitle(actor) {
   const html = chatHeaderHtml(actor);
   const title = $('title');
-  const icon = $('page-icon');
-  if (!html || !title || !icon) return;
+  const iconSlot = $('page-icon');
+  if (!html || !title || !iconSlot) return;
   const card = $('hovercard');
-  if (card?._anchor && (title.contains(card._anchor) || icon.contains(card._anchor))) closeHover();
+  if (card?._anchor && (title.contains(card._anchor) || iconSlot.contains(card._anchor))) closeHover();
   const holder = document.createElement('template');
   holder.innerHTML = html;
-  const face = holder.content.firstElementChild;
-  const link = holder.content.querySelector('a');
-  if (!face || !link) return;
-  icon.hidden = false;
-  icon.removeAttribute('aria-hidden');
-  icon.replaceChildren(face);
-  title.replaceChildren(link);
-  const line = holder.content.querySelector('.presence-line');
-  if (line) title.append(line);
-  document.title = `${link.textContent || 'Chat'} — LibreSky`;
+  const face = holder.content.querySelector('.avatar-btn');
+  const id = holder.content.querySelector('.chat-id');
+  if (!face || !id) return;
+  iconSlot.hidden = false;
+  iconSlot.removeAttribute('aria-hidden');
+  iconSlot.replaceChildren(face);
+  title.replaceChildren(id);
+  document.title = `${chatTitleName(actor)} — LibreSky`;
   measureHead();
   showPresence(title);
 }
@@ -2620,7 +2647,7 @@ async function ensureChatAccepted() {
     $('view')?.querySelector('.request-banner')?.remove();
     return true;
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
     return false;
   }
 }
@@ -2629,7 +2656,8 @@ function chatPeerInfo(peerDid) {
   const convo = [...convoById.values()].find((row) => (row.members || []).some((member) => member?.did === peerDid));
   const other = (convo?.members || []).find((member) => member?.did === peerDid);
   return {
-    name: other?.displayName || (other?.handle ? `@${other.handle}` : 'Someone'),
+    name: other?.displayName || other?.handle || 'Someone',
+    handle: other?.handle || '',
     avatar: other?.avatar || '',
   };
 }
@@ -2652,6 +2680,7 @@ function surfaceIncomingCall(offer) {
     ...offer,
     key,
     name: offer.name || peer.name,
+    handle: offer.handle || peer.handle || '',
     avatar: offer.avatar || peer.avatar,
   };
   const fresh = key !== badgeMemory.ring;
@@ -3333,6 +3362,7 @@ function finishProfile(profile, token, html, action) {
   paintProfileTabs();
   $('profile-action').innerHTML = action;
   remember();
+  showPresence($('view'));
   document.documentElement.dataset.ready = '1';
   loadProfileShelf(profile, token);
 }
@@ -3562,7 +3592,7 @@ async function loadProfileShelf(profile, token) {
     paintProfileTabs();
     if ($('attach')?.open) paintAttachCurrent();
   } catch (error) {
-    if (token === generation && $('profile-tabs')) toast(error.message || 'Could not load profile links.');
+    if (token === generation && $('profile-tabs')) showError(error.message || 'Could not load profile links.');
   }
 }
 
@@ -3741,7 +3771,7 @@ async function saveLaneDraft({ close = true, note = '' } = {}) {
     if (active?.kind === 'lane' && !homeLanes.some((item) => item.value === active.value)) location.hash = '#/';
     else if (active) paintHomeChrome(active);
   } catch (error) {
-    toast(error.message || 'Could not save home tabs');
+    showError(error.message || 'Could not save home tabs');
     if (button?.isConnected) button.disabled = false;
   }
 }
@@ -3951,7 +3981,7 @@ async function saveSearchDraft({ close = true, note = '' } = {}) {
     if ($('searches')?.open) paintSearchEditor();
     refreshSearchRow();
   } catch (error) {
-    toast(error.message || 'Could not save search tabs');
+    showError(error.message || 'Could not save search tabs');
     if (button?.isConnected) button.disabled = false;
   }
 }
@@ -4093,6 +4123,7 @@ async function showThread(actor, rkey) {
     const order = '<div class="toolbar"><button type="button" class="text-btn" data-act="thread-settings">Thread order</button></div>';
     $('view').innerHTML = order + above + postHtml({ post: thread.post, reply: thread.parent ? { parent: thread.parent.post ? { author: thread.parent.post.author } : null } : null }) + replyBox + replies;
     remember();
+    showPresence($('view'));
     document.documentElement.dataset.ready = '1';
   } catch (error) {
     if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not open this post', error.message);
@@ -4426,7 +4457,7 @@ async function saveAiForm(event) {
     toast('Added that remote AI');
     refreshAiSettingsView();
   } catch (error) {
-    toast(error.message || 'Could not save the key on your Bluesky account.');
+    showError(error.message || 'Could not save the key on your Bluesky account.');
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -4446,7 +4477,7 @@ async function saveLocalForm(event) {
     toast('Local AI saved in this browser');
     refreshAiSettingsView();
   } catch (error) {
-    toast(error.message || 'Could not save local AI.');
+    showError(error.message || 'Could not save local AI.');
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -4525,7 +4556,21 @@ function feedSettingsBody(feedId, { heading = true, title = 'Home' } = {}) {
     ${switchRow(`${prefix}.showReplies`, 'Show replies', !prefs.hideReplies, 'Off hides every reply.')}
     ${switchRow(`${prefix}.showOutside`, 'Replies outside people you follow', !prefs.hideRepliesByUnfollowed, 'Off keeps a reply when you follow the person being replied to.')}
     ${switchRow(`${prefix}.showReposts`, 'Show reposts', !prefs.hideReposts)}
-    ${switchRow(`${prefix}.showQuotes`, 'Show quote posts', !prefs.hideQuotePosts)}`;
+    ${switchRow(`${prefix}.showQuotes`, 'Show quote posts', !prefs.hideQuotePosts)}
+    ${detailControl('feed')}`;
+}
+
+function detailControl(kind) {
+  const prefs = detailPrefs();
+  const notes = kind === 'notes';
+  const current = notes ? prefs.notes : prefs.feed;
+  const rows = notes
+    ? [['brief', 'Brief'], ['actions', 'Actions'], ['full', 'Full']]
+    : [['brief', 'Brief'], ['posts', 'Posts'], ['full', 'Full']];
+  const hint = notes
+    ? 'Saved with LibreSky. Actions is the default, so a reply, mention, or quote has Reply, Repost, and Like. Full adds pictures and video. Brief is the short line.'
+    : 'Saved with LibreSky. Posts is the default and shows the post being answered. Full adds its pictures and video. Brief is only the name.';
+  return `<p class="dim">${hint}</p><div class="segmented" role="group" aria-label="Detail">${rows.map(([id, label]) => `<button type="button" data-detail="${kind}" data-level="${id}" aria-pressed="${current === id ? 'true' : 'false'}">${label}</button>`).join('')}</div>`;
 }
 
 function homeSettingsHtml() {
@@ -4610,7 +4655,7 @@ function onPanelClick(event) {
       toast(`${modelPick.dataset.aiRuntime || 'Local AI'} · ${modelPick.dataset.aiModel}`);
       refreshAiSettingsView();
     } catch (error) {
-      toast(error.message || 'Could not use that model.');
+      showError(error.message || 'Could not use that model.');
     }
     return true;
   }
@@ -4669,6 +4714,12 @@ function onPanelClick(event) {
     chooseSearchSort(sort);
     return true;
   }
+  const detail = event.target.closest('[data-detail]');
+  if (detail?.dataset.detail && detail.dataset.level) {
+    event.preventDefault();
+    chooseDetail(detail.dataset.detail, detail.dataset.level);
+    return true;
+  }
   return false;
 }
 
@@ -4687,7 +4738,8 @@ function callsPageHtml() {
 }
 
 function notificationPageHtml() {
-  return `<p class="dim">Page scoped. These settings are stored with Bluesky, so the official app uses them too. On this page is what shows in Notifications. Phone alert is the official app’s alert. People you follow is applied by Bluesky.</p>
+  return `${detailControl('notes')}
+    <p class="dim">Page scoped. These settings are stored with Bluesky, so the official app uses them too. On this page is what shows in Notifications. Phone alert is the official app’s alert. People you follow is applied by Bluesky.</p>
     ${followNotifyPanel()}
     <div id="note-prefs"><p class="dim">Loading notification settings…</p></div>`;
 }
@@ -4762,7 +4814,7 @@ function openTune(kind, feedId) {
       support: 'Support',
       ukraine: 'Ukraine',
       likes: 'Likes',
-      reposts: 'Reposts',
+      reposts: 'Reposts and quotes',
     };
     const name = names[parseHash()[0]] || $('title')?.textContent || 'This page';
     title.textContent = name;
@@ -4784,6 +4836,22 @@ function chooseSearchSort(sort) {
   });
   const query = $('search-q')?.value.trim() || (parseHash()[0] === 'search' ? (parseHash()[1] || '') : '');
   if (parseHash()[0] === 'search' && query) showSearch(query, { focus: false });
+}
+
+function chooseDetail(kind, level) {
+  const notes = kind === 'notes';
+  const allowed = notes ? new Set(['brief', 'actions', 'full']) : new Set(['brief', 'posts', 'full']);
+  if ((kind !== 'feed' && !notes) || !allowed.has(level)) return;
+  saveDetailPrefs(notes ? { notes: level } : { feed: level });
+  document.querySelectorAll(`[data-detail="${kind}"]`).forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.level === level ? 'true' : 'false');
+  });
+  const page = parseHash()[0];
+  if (notes) {
+    if (page === 'notifications') route();
+    return;
+  }
+  if (!page || page === 'discover' || page === 'feed' || page === 'profile' || page === 'search' || page === 'bookmarks') route();
 }
 
 function chooseThreadSort(sort) {
@@ -5857,7 +5925,7 @@ async function chooseChatAllow(allow) {
     await api.writeChatDeclaration(allow);
     toast(allow === 'none' ? 'New chats are off' : allow === 'following' ? 'Only people you follow can message you' : 'Anyone can send a message request');
   } catch (error) {
-    toast(error.message || 'Could not save who can message you.');
+    showError(error.message || 'Could not save who can message you.');
     loadChatAllow();
   }
 }
@@ -6283,7 +6351,7 @@ async function startCallToHandle(media) {
     const convoId = await convoIdFor(did);
     await startCall({ convoId, peerDid: did, media });
   } catch (error) {
-    toast(error?.message || 'The call could not start.');
+    showError(error?.message || 'The call could not start.');
   } finally {
     buttons.forEach((button) => { if (button.isConnected) button.disabled = false; });
   }
@@ -6355,7 +6423,7 @@ async function saveDesktopZip(file, button) {
     saveBlob(new Blob(chunks, { type: 'application/zip' }), saveAs);
     toast(`Saved ${saveAs}. Unzip it and run LibreSky.`);
   } catch (error) {
-    toast(error?.message || 'The download failed.');
+    showError(error?.message || 'The download failed.');
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
@@ -6449,8 +6517,8 @@ function gameControls() {
 
 function personRow(row) {
   const pressed = gameMatch.picked === row.convoId ? 'true' : 'false';
-  const handle = row.handle ? `<span class="handle">@${escapeHtml(row.handle)}</span>` : '';
-  return `<button type="button" class="person" data-act="game-pick" data-convo="${escapeHtml(row.convoId)}" aria-pressed="${pressed}">${avatar(row.avatar, row.name)}<span class="person-link"><strong>${escapeHtml(row.name)}</strong>${handle}${presenceLine(row.did)}</span><span class="dim">${row.kind}</span></button>`;
+  const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.did });
+  return `<button type="button" class="person" data-act="game-pick" data-convo="${escapeHtml(row.convoId)}" aria-pressed="${pressed}">${avatar(row.avatar, row.name)}<span class="person-link">${who}</span><span class="dim">${row.kind}</span></button>`;
 }
 
 function peopleHtml(rows, label) {
@@ -6657,7 +6725,7 @@ async function startPerson(gameId) {
     if (!gameMatch || gameMatch.seq !== seq) return;
     gameMatch.people = [];
     paintMatch();
-    toast(error?.message || 'Could not load people.');
+    showError(error?.message || 'Could not load people.');
   }
 }
 
@@ -6673,7 +6741,7 @@ async function pushInvite() {
     await api.sendMessage(person.convoId, gameLine(rkey, gameMatch.game, 'invite', gameMatch.you));
   } catch (error) {
     if (button?.isConnected) button.disabled = false;
-    toast(error?.message || 'Could not push the invite.');
+    showError(error?.message || 'Could not push the invite.');
     return;
   }
   if (!gameMatch || gameMatch.seq !== seq) return;
@@ -6728,7 +6796,7 @@ async function commitMove(move) {
       gameMatch.state = prev;
       paintMatch();
     }
-    toast(error?.message || 'The move did not send.');
+    showError(error?.message || 'The move did not send.');
   }
 }
 
@@ -6765,7 +6833,7 @@ async function resignGame() {
   if (gameMatch.mode === 'net') {
     if (!gameMatch.accepted) return;
     try { await sendGame('resign'); } catch (error) {
-      toast(error?.message || 'Could not resign.');
+      showError(error?.message || 'Could not resign.');
       return;
     }
   }
@@ -6789,7 +6857,7 @@ async function offerDraw() {
   }
   if (!gameMatch.accepted) return;
   try { await sendGame('draw'); } catch (error) {
-    toast(error?.message || 'Could not offer a draw.');
+    showError(error?.message || 'Could not offer a draw.');
     return;
   }
   if (!gameMatch) return;
@@ -6800,7 +6868,7 @@ async function offerDraw() {
 async function answerDraw(yes) {
   if (!gameMatch || gameMatch.mode !== 'net' || gameMatch.drawFrom !== 'them') return;
   try { await sendGame(yes ? 'yes' : 'no'); } catch (error) {
-    toast(error?.message || 'Could not answer the draw.');
+    showError(error?.message || 'Could not answer the draw.');
     return;
   }
   if (!gameMatch) return;
@@ -6951,7 +7019,7 @@ async function acceptGame(convoId, rkey) {
     api.markConvoRead(convoId).catch(() => {});
   } catch (error) {
     settledGames.delete(key);
-    toast(error?.message || 'Could not accept the game.');
+    showError(error?.message || 'Could not accept the game.');
   }
 }
 
@@ -6971,7 +7039,7 @@ async function declineGame(convoId, rkey, gameId) {
     api.markConvoRead(convoId).catch(() => {});
   } catch (error) {
     ignoredGames.delete(key);
-    toast(error?.message || 'Could not decline.');
+    showError(error?.message || 'Could not decline.');
   }
 }
 
@@ -6986,7 +7054,7 @@ async function openSavedGame(convoId, rkey) {
     }
     beginNet(replay, convoId);
   } catch (error) {
-    toast(error?.message || 'Could not open the game.');
+    showError(error?.message || 'Could not open the game.');
   }
 }
 
@@ -7341,7 +7409,7 @@ async function followPack(listUri, button) {
     toast(followed ? `Followed ${followed} ${followed === 1 ? 'account' : 'accounts'}` : 'You already follow these accounts.');
     route();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
@@ -7350,7 +7418,70 @@ async function followPack(listUri, button) {
   }
 }
 
+async function showRepostsAndQuotes(uri) {
+  const token = ++generation;
+  setChrome({ title: 'Reposts and quotes', nav: 'home', back: true });
+  showSkeletons();
+  let reposts = [];
+  let quotes = [];
+  let repostCursor = '';
+  let quoteCursor = '';
+  const paint = () => {
+    if (token !== generation) return;
+    const people = reposts.filter(Boolean).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
+    const posted = feedHtml(quotes);
+    const peopleBlock = people ? `<h2 class="section-label">Reposts</h2><div class="directory">${people}</div>` : '';
+    const quoteBlock = posted ? `<h2 class="section-label">Quotes</h2>${posted}` : '';
+    $('view').innerHTML = (peopleBlock + quoteBlock) || emptyHtml('Nobody yet', 'No reposts or quotes yet.');
+    remember();
+    showPresence($('view'));
+  };
+  const more = async () => {
+    if (token !== generation) return;
+    const jobs = [];
+    const repostNow = repostCursor;
+    const quoteNow = quoteCursor;
+    if (repostNow) jobs.push(api.getRepostedBy(uri, repostNow).then((page) => ({ kind: 'repost', page })).catch(() => ({ kind: 'repost', page: null })));
+    if (quoteNow) jobs.push(api.getQuotes(uri, quoteNow).then((page) => ({ kind: 'quote', page })).catch(() => ({ kind: 'quote', page: null })));
+    if (!jobs.length) return;
+    const parts = await Promise.all(jobs);
+    if (token !== generation) return;
+    parts.forEach(({ kind, page }) => {
+      if (!page) {
+        if (kind === 'repost') repostCursor = '';
+        else quoteCursor = '';
+        return;
+      }
+      if (kind === 'repost') {
+        repostCursor = page.cursor && page.cursor !== repostNow ? page.cursor : '';
+        reposts = reposts.concat(page.repostedBy || []);
+      } else {
+        quoteCursor = page.cursor && page.cursor !== quoteNow ? page.cursor : '';
+        quotes = quotes.concat(page.posts || []);
+      }
+    });
+    paint();
+    pagerFor(repostCursor || quoteCursor, more);
+  };
+  try {
+    const [reposted, quoted] = await Promise.all([
+      api.getRepostedBy(uri),
+      api.getQuotes(uri).catch(() => ({ posts: [], cursor: '' })),
+    ]);
+    if (token !== generation) return;
+    reposts = reposted.repostedBy || [];
+    quotes = quoted.posts || [];
+    repostCursor = reposted.cursor || '';
+    quoteCursor = quoted.cursor || '';
+    paint();
+    pagerFor(repostCursor || quoteCursor, more);
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not load this list', error.message);
+  }
+}
+
 async function showEngagement(kind, uri) {
+  if (kind === 'reposts') return showRepostsAndQuotes(uri);
   const token = ++generation;
   setChrome({ title: kind === 'likes' ? 'Likes' : 'Reposts', nav: 'home', back: true });
   showSkeletons();
@@ -7363,9 +7494,8 @@ async function showEngagement(kind, uri) {
       const html = list.filter(Boolean).map((actor) => actorHtml(actor, { follow: signedIn(), self: myDid() })).join('');
       if (append) {
         if (html) $('view').insertAdjacentHTML('beforeend', html);
-        return;
-      }
-      $('view').innerHTML = html || emptyHtml('Nobody yet', kind === 'likes' ? 'No likes yet.' : 'No reposts yet.');
+      } else $('view').innerHTML = html || emptyHtml('Nobody yet', kind === 'likes' ? 'No likes yet.' : 'No reposts yet.');
+      showPresence($('view'));
     };
     paint(actorsOf(data), false);
     const more = async (cursor) => {
@@ -7811,9 +7941,10 @@ function route(options = {}) {
 }
 
 function postFrom(node) {
-  const article = node?.closest?.('.post');
+  const article = node?.closest?.('.post') || node?.closest?.('article.note[data-uri]');
   if (!article) return null;
-  return { article, item: posts.get(article.dataset.uri), post: posts.get(article.dataset.uri)?.post || posts.get(article.dataset.uri) };
+  const item = posts.get(article.dataset.uri);
+  return { article, item, post: item?.post || item };
 }
 
 function gifEmbed(external) {
@@ -8765,7 +8896,7 @@ async function addFiles(list) {
       const image = await compress(file);
       bucket.push({ file: image, alt: '', url: URL.createObjectURL(image) });
     } catch (error) {
-      toast(error.message);
+      showError(error.message);
     }
   }
   $('compose')._files = bucket;
@@ -8929,7 +9060,8 @@ async function publish(event) {
     if (keptScroll != null) route({ keepScroll: keptScroll });
     else route();
   } catch (error) {
-    toast(error.message);
+    const video = Boolean($('compose')?._video?.file || $('compose')?._video?.blob);
+    showError(error.message, video ? 'Video was not posted' : 'Post was not sent');
   } finally {
     const send = $('compose-send');
     if (send) send.textContent = $('compose')?.dataset.edit ? 'Update' : 'Post';
@@ -9460,7 +9592,7 @@ async function pinFeatured(view) {
     toast(current.length >= 8 ? 'Attached. The oldest pin was dropped.' : 'Attached to your profile.');
     if (parseHash()[0] === 'profile') loadProfileShelf({ did: myDid() }, generation);
   } catch (error) {
-    toast(error.message || 'Could not attach that.');
+    showError(error.message || 'Could not attach that.');
   } finally {
     attachBusy = false;
   }
@@ -9485,7 +9617,7 @@ async function unpinFeatured(uri) {
     profileFeatured = previousFeatured;
     paintProfileTabs();
     if ($('attach')?.open) paintAttachCurrent();
-    toast(error.message || 'Could not remove that.');
+    showError(error.message || 'Could not remove that.');
   } finally {
     attachBusy = false;
   }
@@ -9708,18 +9840,20 @@ async function addVideo(file) {
   }
   const allowed = /^video\/(mp4|webm|quicktime)$/.test(file.type) || /\.(mp4|webm|mov)$/i.test(file.name || '');
   if (!allowed) {
-    toast('Use an MP4, WebM, or MOV video.');
+    showError('Use an MP4, WebM, or MOV video.', 'Video was not added');
     return;
   }
-  if (file.size > 50 * 1024 * 1024) {
-    toast('Videos need to be under 50 MB.');
+  const sizeLimit = api.videoLimitMessage(file);
+  if (sizeLimit) {
+    showError(sizeLimit, 'Video was not added');
     return;
   }
   const url = URL.createObjectURL(file);
   const meta = await videoMeta(url);
-  if (meta.duration > 180) {
+  const lengthLimit = api.videoLimitMessage(file, meta);
+  if (lengthLimit) {
     URL.revokeObjectURL(url);
-    toast('Videos need to be under 3 minutes.');
+    showError(lengthLimit, 'Video was not added');
     return;
   }
   if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
@@ -10183,7 +10317,7 @@ async function rewriteDraft() {
   } catch (error) {
     if (seq !== aiDraftSeq) return;
     hideAiDraft();
-    toast(error?.message || 'The account did not answer.');
+    showError(error?.message || 'The account did not answer.');
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -10278,7 +10412,7 @@ function onAiDraft(act, id) {
     bubble?.remove();
     if (sized.trimmed) toast('Sent the first part. A chat message stops at 1000 characters.');
   }).catch((error) => {
-    toast(error.message);
+    showError(error.message);
     if (button?.isConnected) button.disabled = false;
   });
 }
@@ -10359,7 +10493,7 @@ async function saveManage(event) {
     $('manage').close();
     route();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     button.disabled = false;
   }
@@ -10457,7 +10591,7 @@ async function followAllBack(button) {
     toast(followed ? `Followed ${followed} ${followed === 1 ? 'person' : 'people'} back.${tail}${cleaned}` : `You already follow them back.${cleaned}`);
     await refreshHere();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
@@ -10491,7 +10625,7 @@ async function markEveryChatRead(button) {
     refreshBadge();
     await refreshHere();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -10522,7 +10656,7 @@ async function cleanupDeletedChats(button) {
     refreshBadge();
     await refreshHere();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -10554,7 +10688,7 @@ async function cleanupBookmarks(button) {
     toast(removed ? `Removed ${removed} unavailable ${removed === 1 ? 'bookmark' : 'bookmarks'}` : 'No unavailable bookmarks');
     await refreshHere();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -10711,7 +10845,7 @@ async function handleChromeAct(act, event) {
     try {
       await navigator.clipboard.writeText(button?.dataset.token || '');
       toast('App password copied');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'add-app-password') {
@@ -10738,7 +10872,7 @@ async function handleChromeAct(act, event) {
       await loadAppPasswords();
     } catch (error) {
       if (error?.code === 'AppPassAuth') paintAppPasswords('locked');
-      toast(error.message);
+      showError(error.message);
     }
     return true;
   }
@@ -10749,7 +10883,7 @@ async function handleChromeAct(act, event) {
       await api.unmuteActor(button?.dataset.did || '');
       toast('Unmuted');
       await loadMutedAccounts();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'unblock-account') {
@@ -10764,7 +10898,7 @@ async function handleChromeAct(act, event) {
       await api.deleteRecord(uri);
       toast('Unblocked');
       await loadBlockedAccounts();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'pack-follow') {
@@ -10791,7 +10925,7 @@ async function handleChromeAct(act, event) {
       if (!convoId || !peer) throw new Error('Could not open that conversation.');
       await startCall({ convoId, peerDid: peer, media });
     } catch (error) {
-      toast(error?.message || 'The call could not start.');
+      showError(error?.message || 'The call could not start.');
     }
     return true;
   }
@@ -10802,7 +10936,7 @@ async function handleChromeAct(act, event) {
       const id = await convoIdFor(button?.dataset.did || '');
       location.hash = `#/messages/${encodeURIComponent(id)}`;
     } catch (error) {
-      toast(error.message);
+      showError(error.message);
     }
     return true;
   }
@@ -10841,7 +10975,7 @@ async function handleChromeAct(act, event) {
       if (!isInCall() && convoId && rkey) ignoredRings.delete(`${convoId}:${rkey}`);
     }).catch((error) => {
       if (convoId && rkey) ignoredRings.delete(`${convoId}:${rkey}`);
-      toast(error.message);
+      showError(error.message);
     });
     return true;
   }
@@ -10891,7 +11025,7 @@ async function handleChromeAct(act, event) {
       return true;
     }
     if (!(await ensureChatAccepted())) return true;
-    openShare({ convoId, peerDid: peer, me: myDid() }).catch((error) => toast(error?.message || 'The direct session could not start.'));
+    openShare({ convoId, peerDid: peer, me: myDid() }).catch((error) => showError(error?.message || 'The direct session could not start.'));
     return true;
   }
   if (act === 'share-accept') {
@@ -10921,7 +11055,7 @@ async function handleChromeAct(act, event) {
       rkey,
       me: myDid(),
       legacy: button?.dataset.legacy === '1',
-    }).catch((error) => toast(error.message));
+    }).catch((error) => showError(error.message));
     return true;
   }
   if (act === 'share-decline') {
@@ -10967,7 +11101,7 @@ async function handleChromeAct(act, event) {
         $('view').querySelector('.request-banner')?.remove();
       }
       refreshBadge();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'decline-convo') {
@@ -10981,7 +11115,7 @@ async function handleChromeAct(act, event) {
       refreshBadge();
       if (parseHash()[1] === id) location.hash = '#/messages/requests';
       else route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'withdraw-join') {
@@ -10995,7 +11129,7 @@ async function handleChromeAct(act, event) {
       toast('Request withdrawn');
       refreshBadge();
       if (!$('view')?.querySelector('.person')) route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'leave-convo') {
@@ -11008,7 +11142,7 @@ async function handleChromeAct(act, event) {
       button.closest('.person')?.remove();
       toast('Chat removed');
       refreshBadge();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'bookmarks-cleanup') {
@@ -11109,7 +11243,7 @@ async function handleChromeAct(act, event) {
       toast('List deleted');
       if (parseHash()[0] === 'list') location.hash = '#/lists';
       else route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'list-mute') {
@@ -11120,7 +11254,7 @@ async function handleChromeAct(act, event) {
       else await api.muteList(button.dataset.uri);
       toast(button.dataset.muted === '1' ? 'List unmuted' : 'List muted');
       route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'list-more') {
@@ -11144,7 +11278,7 @@ async function handleChromeAct(act, event) {
       } else button.closest('.toolbar')?.remove();
     } catch (error) {
       button.disabled = false;
-      toast(error.message);
+      showError(error.message);
     }
     return true;
   }
@@ -11155,7 +11289,7 @@ async function handleChromeAct(act, event) {
       await api.deleteRecord(button.dataset.uri);
       button.closest('.person')?.remove();
       toast('Removed from list');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'feed-pin' || act === 'feed-save' || act === 'feed-remove') {
@@ -11180,7 +11314,7 @@ async function handleChromeAct(act, event) {
         toast(pinned ? 'Unpinned' : 'Pinned');
       }
       route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   if (act === 'feed-delete') {
@@ -11193,7 +11327,7 @@ async function handleChromeAct(act, event) {
       toast('Feed deleted');
       if (parseHash()[0] === 'feeds') route();
       else location.hash = '#/feeds';
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return true;
   }
   return false;
@@ -11232,7 +11366,7 @@ async function onClick(event) {
   if (act?.startsWith('game-')) {
     event.preventDefault();
     Promise.resolve(handleGameAct(act, event.target.closest('[data-act]'))).catch((error) => {
-      toast(error?.message || 'That did not work.');
+      showError(error?.message || 'That did not work.');
     });
     return;
   }
@@ -11335,7 +11469,7 @@ async function onClick(event) {
         $('view').insertAdjacentHTML('beforeend', emptyHtml('No bookmarks', 'Tap the bookmark on a post to save it here.'));
       }
       toast('Bookmark removed');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (act === 'expand-names') {
@@ -11392,16 +11526,14 @@ async function onClick(event) {
     checkProfileAi();
     return;
   }
-  if (act === 'alpha-debug') {
+  if (act === 'debug') {
     event.preventDefault();
-    closeAlphaMenu();
     openDebug();
     return;
   }
-  if (act === 'alpha-design') {
+  if (act === 'design') {
     event.preventDefault();
     applyDesign(!designOn());
-    closeAlphaMenu();
     return;
   }
   if (act === 'attach') {
@@ -11453,7 +11585,7 @@ async function onClick(event) {
       await api.removeHighlight(uri);
       toast('Removed from Highlights');
       route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (act === 'shelf-more') {
@@ -11515,7 +11647,7 @@ async function onClick(event) {
     commitAiAccount(null).then(() => {
       toast('AI account removed from your Bluesky account');
       refreshAiSettingsView();
-    }).catch((error) => toast(error.message || 'Could not remove the key from your Bluesky account.'));
+    }).catch((error) => showError(error.message || 'Could not remove the key from your Bluesky account.'));
     return;
   }
   if (act === 'ai-local-clear') {
@@ -12012,7 +12144,7 @@ async function saveArticle(event) {
     if (location.hash === next) route();
     else location.hash = next;
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     button.disabled = false;
   }
@@ -12028,7 +12160,7 @@ async function removeArticle(uri) {
     if (location.hash === next) route();
     else location.hash = next;
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   }
 }
 
@@ -12045,7 +12177,7 @@ async function toggleHighlight(found, remove) {
     const [page, , tab] = parseHash();
     if (page === 'profile' && tab !== 'post' && tab !== 'article' && (tab === 'highlights' || shownProfile?.did === myDid())) route();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   }
 }
 
@@ -12073,7 +12205,7 @@ async function saveProfile(event) {
     await loadMe();
     route();
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     button.disabled = false;
   }
@@ -12094,7 +12226,7 @@ async function submitReport(event) {
     reportTarget = null;
     toast('Report sent');
   } catch (error) {
-    toast(error.message);
+    showError(error.message);
   } finally {
     button.disabled = false;
   }
@@ -12136,7 +12268,7 @@ async function onMenu(event) {
     try {
       const convo = await convoIdFor(shownProfile?.did || '');
       location.hash = `#/messages/${encodeURIComponent(convo)}`;
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'profile-voice' || id === 'profile-video') {
@@ -12155,7 +12287,7 @@ async function onMenu(event) {
       if (!convoId || !peer) throw new Error('Could not open that conversation.');
       await startCall({ convoId, peerDid: peer, media: id === 'profile-video' ? 'video' : 'audio' });
     } catch (error) {
-      toast(error?.message || 'The call could not start.');
+      showError(error?.message || 'The call could not start.');
     }
     return;
   }
@@ -12167,7 +12299,7 @@ async function onMenu(event) {
       else await api.muteActor(profile.did);
       toast(profile.viewer?.muted ? 'Unmuted' : `Muted @${profile.handle || 'account'}`);
       route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'profile-block') {
@@ -12185,7 +12317,7 @@ async function onMenu(event) {
         toast('Blocked');
       }
       route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'profile-report') return openReport({ did: shownProfile?.did });
@@ -12196,7 +12328,7 @@ async function onMenu(event) {
     try {
       await navigator.clipboard.writeText(profileLink(profile));
       toast('Link copied');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'go-ai') return void (location.hash = '#/ai');
@@ -12214,7 +12346,7 @@ async function onMenu(event) {
     try {
       await navigator.clipboard.writeText(value);
       toast(id === 'copy' ? 'Link copied' : 'Text copied');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'repost' || id === 'unrepost') return toggleRepost(found);
@@ -12232,7 +12364,7 @@ async function onMenu(event) {
       if (id === 'mute') await api.muteActor(found.post.author.did);
       else await api.unmuteActor(found.post.author.did);
       toast(id === 'mute' ? `Muted @${found.post.author.handle}` : 'Unmuted');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'block') {
@@ -12242,14 +12374,14 @@ async function onMenu(event) {
       await api.block(found.post.author.did);
       found.article.remove();
       toast('Blocked');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'mute-thread') {
     try {
       await api.muteThread(threadRoot(found.post));
       toast('Thread muted');
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
     return;
   }
   if (id === 'pin' || id === 'unpin') {
@@ -12259,7 +12391,7 @@ async function onMenu(event) {
       try { me.profile = await api.getProfile(myDid()); } catch { if (me.profile) me.profile.pinnedPost = ref; }
       toast(id === 'pin' ? 'Pinned to your profile' : 'Unpinned');
       if (parseHash()[0] === 'profile') route();
-    } catch (error) { toast(error.message); }
+    } catch (error) { showError(error.message); }
   }
 }
 
@@ -12286,7 +12418,7 @@ async function toggleLike(found) {
     button.closest('.action-group')?.classList.toggle('on', Boolean(existing));
     const rolled = button.closest('.action-group')?.querySelector('.count-link, .count');
     if (rolled) rolled.textContent = compactCount(previous);
-    toast(error.message);
+    showError(error.message);
   }
 }
 
@@ -12320,7 +12452,7 @@ async function toggleRepost(found) {
     button?.classList.toggle('on', Boolean(existing));
     button?.closest('.action-group')?.classList.toggle('on', Boolean(existing));
     if (count) count.textContent = compactCount(previous);
-    toast(error.message);
+    showError(error.message);
   }
 }
 
@@ -12348,7 +12480,7 @@ async function toggleBlock(button) {
       toast('Blocked');
       route();
     }
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 async function toggleBookmark(found) {
@@ -12371,7 +12503,7 @@ async function toggleBookmark(found) {
     button?.classList.toggle('on', !on);
     button?.setAttribute('aria-pressed', on ? 'false' : 'true');
     toast(on ? 'Bookmark removed' : 'Bookmarked');
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 let sendChatPost = null;
@@ -12404,7 +12536,11 @@ function paintSendChatList() {
   const extra = handle && !people.some((row) => row.handle.toLowerCase() === handle.toLowerCase())
     ? `<button type="button" class="person send-chat-row" data-act="send-chat-handle" data-handle="${escapeHtml(handle)}">${avatar('', handle)}<span class="person-link"><strong>@${escapeHtml(handle)}</strong><span class="handle">Send to this handle</span></span></button>`
     : '';
-  const rows = people.map((row) => `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link"><strong>${escapeHtml(row.name)}</strong>${presenceLine(row.other.did)}<span class="handle">${row.handle ? `@${escapeHtml(row.handle)}` : 'Chat'}</span></span></button>`).join('');
+  const rows = people.map((row) => {
+    const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.other.did });
+    const extra = row.handle ? '' : '<span class="handle">Chat</span>';
+    return `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link">${who}${extra}</span></button>`;
+  }).join('');
   list.innerHTML = extra + rows || '<p class="dim">No chats yet. Enter a handle above.</p>';
   showPresence(list);
 }
@@ -12447,7 +12583,7 @@ async function deliverPostToChat(convoId, found) {
     sendChatPost = null;
     toast('Sent in chat');
     location.hash = `#/messages/${encodeURIComponent(convoId)}`;
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 async function sendPostToChatHandle(handle) {
@@ -12463,7 +12599,7 @@ async function sendPostToChatHandle(handle) {
     const did = await api.resolveHandle(who);
     const id = await convoIdFor(did);
     await deliverPostToChat(id, found);
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 async function toggleFollow(button) {
@@ -12488,7 +12624,7 @@ async function toggleFollow(button) {
       dropFollowHold(myDid(), did);
       if ($('followback-status')) paintFollowBack();
     }
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 async function deletePost(found) {
@@ -12497,7 +12633,7 @@ async function deletePost(found) {
     await api.deleteRecord(found.post.uri);
     found.article.remove();
     toast('Deleted');
-  } catch (error) { toast(error.message); }
+  } catch (error) { showError(error.message); }
 }
 
 async function convoIdFor(peerDid) {
@@ -12526,7 +12662,7 @@ async function newChat() {
     const id = await convoIdFor(did);
     location.hash = `#/messages/${encodeURIComponent(id)}`;
   } catch (error) {
-    toast(error.message || 'Could not open that chat.');
+    showError(error.message || 'Could not open that chat.');
     if (button?.isConnected) button.disabled = false;
     if (input?.isConnected) {
       input.disabled = false;
@@ -12768,7 +12904,7 @@ async function switchAccount(did) {
     route();
     toast(`Signed in as @${me.profile?.handle || entry.handle || 'account'}`);
   } catch (error) {
-    toast(error.message || 'Could not switch accounts.');
+    showError(error.message || 'Could not switch accounts.');
     if (previous && previous.did !== did) {
       try { await useAccount(previous); } catch { /* the previous session stays saved */ }
     }
@@ -13052,7 +13188,7 @@ function onKey(event) {
 function bind() {
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   watchScrollHold();
-  setPrefsError((error) => toast(error?.message || 'Could not save settings to your account'));
+  setPrefsError((error) => showError(error?.message || 'Could not save settings to your account'));
   const synth = window.speechSynthesis;
   if (synth) {
     synth.addEventListener?.('voiceschanged', fillVoiceSelect);
@@ -13485,7 +13621,7 @@ function bind() {
         paintFieldHighlight(input, $('chat-highlight'));
         fitChatInput(input);
         paintStyleButtons(input);
-      }).catch((error) => toast(error.message)).finally(() => {
+      }).catch((error) => showError(error.message)).finally(() => {
         if (input.isConnected) {
           input.disabled = false;
           input.focus();
@@ -13552,7 +13688,7 @@ function bind() {
       api.resolveHandle(handle).then((did) => api.addListMember(uri, did)).then(() => {
         toast(`Added @${handle}`);
         route();
-      }).catch((error) => toast(error.message)).finally(() => { if (input.isConnected) input.disabled = false; });
+      }).catch((error) => showError(error.message)).finally(() => { if (input.isConnected) input.disabled = false; });
     }
     if (event.target.id === 'thread-reply') {
       event.preventDefault();
@@ -13978,7 +14114,7 @@ async function unlockAppPasswords(event) {
         code.focus();
       }
       toast('Enter the sign-in code for this account.');
-    } else toast(error.message || 'Could not open app passwords.');
+    } else showError(error.message || 'Could not open app passwords.');
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -14032,7 +14168,7 @@ async function submitAppPassword() {
       toast('Enter the account password to add an app password.');
       return;
     }
-    toast(error.message || 'Could not create an app password.');
+    showError(error.message || 'Could not create an app password.');
   } finally {
     if (button?.isConnected) button.disabled = false;
   }
@@ -14090,63 +14226,6 @@ async function settleSession(result) {
   }
 }
 
-let alphaAudio;
-
-function playAlphaDoor() {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return;
-  if (!alphaAudio) alphaAudio = new AudioCtx();
-  const ctx = alphaAudio;
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-  const now = ctx.currentTime;
-  const master = ctx.createGain();
-  master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.72);
-  master.connect(ctx.destination);
-
-  const noiseLen = Math.floor(ctx.sampleRate * 0.07);
-  const buffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < noiseLen; i += 1) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.018));
-  const noise = ctx.createBufferSource();
-  noise.buffer = buffer;
-  const band = ctx.createBiquadFilter();
-  band.type = 'bandpass';
-  band.frequency.value = 1400;
-  band.Q.value = 0.7;
-  noise.connect(band);
-  band.connect(master);
-  noise.start(now);
-
-  const tick = ctx.createOscillator();
-  tick.type = 'triangle';
-  tick.frequency.setValueAtTime(240, now);
-  tick.frequency.exponentialRampToValueAtTime(80, now + 0.12);
-  const tickGain = ctx.createGain();
-  tickGain.gain.setValueAtTime(0.45, now);
-  tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-  tick.connect(tickGain);
-  tickGain.connect(master);
-  tick.start(now);
-  tick.stop(now + 0.16);
-
-  [784, 1176].forEach((freq, index) => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    const gain = ctx.createGain();
-    const start = now + 0.06;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(index === 0 ? 0.16 : 0.07, start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.55);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(start);
-    osc.stop(start + 0.56);
-  });
-}
-
 const DESIGN_KEY = 'libresky.design';
 const AI_CHECK_POST = 'You are AI Assist in LibreSky. Check the post you are given. Say what it is about, note claims you cannot verify from the text alone, and keep it to one short paragraph. Do not invent sources, names, or events. Plain text.';
 const AI_CHECK_PROFILE = 'You are AI Assist in LibreSky. Check the profile you are given. Describe how the account presents itself from the name, handle, and bio only. Do not invent a biography, job, or location. One short paragraph. Plain text.';
@@ -14171,7 +14250,7 @@ function paintDesignReadout() {
 function applyDesign(on) {
   if (on) document.documentElement.dataset.design = 'on';
   else delete document.documentElement.dataset.design;
-  const button = $('alpha-design');
+  const button = $('debug-design');
   if (button) button.setAttribute('aria-pressed', on ? 'true' : 'false');
   const box = $('design-readout');
   if (box) {
@@ -14302,62 +14381,7 @@ async function checkProfileAi() {
   }
 }
 
-function setDoor(wrap, mark, menu, open) {
-  if (!wrap) return;
-  wrap.classList.toggle('is-open', open);
-  mark?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  menu?.setAttribute('aria-hidden', open ? 'false' : 'true');
-}
-
-function closeAlphaMenu(focus) {
-  const wrap = document.querySelector('.alpha-wrap');
-  if (!wrap?.classList.contains('is-open')) return;
-  setDoor(wrap, document.getElementById('alpha-mark'), document.getElementById('alpha-menu'), false);
-  if (focus) document.getElementById('alpha-mark')?.focus();
-}
-
-function bindSwing(markId, closeOthers, sound) {
-  const mark = document.getElementById(markId);
-  const menuId = mark?.getAttribute('aria-controls') || '';
-  const menu = menuId ? document.getElementById(menuId) : null;
-  const wrap = mark?.parentElement;
-  if (!mark || !wrap || !menu) return;
-  const quiet = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let last = 0;
-  const play = () => {
-    if (!sound || quiet) return;
-    const now = performance.now();
-    if (now - last < 900) return;
-    last = now;
-    try { playAlphaDoor(); } catch { /* this browser kept the chime */ }
-  };
-  mark.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (wrap.classList.contains('is-open')) {
-      closeAlphaMenu();
-      return;
-    }
-    closeOthers();
-    setDoor(wrap, mark, menu, true);
-    play();
-  });
-  menu.addEventListener('click', (event) => {
-    if (event.target.closest('a')) closeAlphaMenu();
-  });
-}
-
-function bindAlphaDoor() {
-  bindSwing('alpha-mark', () => {
-    closeAppMenu();
-    closeMenu();
-  }, true);
-  document.addEventListener('pointerdown', () => {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-    if (!alphaAudio) alphaAudio = new AudioCtx();
-    if (alphaAudio.state === 'suspended') alphaAudio.resume().catch(() => {});
-  }, { capture: true });
-}
+function closeAlphaMenu() {}
 
 function revealProfileBanner() {
   const img = document.querySelector('#view .profile .banner img');
@@ -14456,7 +14480,6 @@ function within(work, ms) {
 }
 
 async function boot() {
-  bindAlphaDoor();
   applyDesign(designOn());
   applyA11y(a11yPrefs());
   setupCall({

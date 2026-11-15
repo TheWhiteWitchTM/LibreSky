@@ -9,7 +9,7 @@
   &nbsp;
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0b2548?style=for-the-badge"></a>
   &nbsp;
-  <a href="CHANGES.md"><img alt="Beta" src="https://img.shields.io/badge/build-beta-49b7ff?style=for-the-badge"></a>
+  <a href="CHANGES.md"><img alt="Release candidate" src="https://img.shields.io/badge/build-release%20candidate-49b7ff?style=for-the-badge"></a>
 </p>
 
 # LibreSky
@@ -130,7 +130,7 @@ The pages and scripts are about 1.5 MB. A service worker stores that shell, so t
 
 ## Yours to read
 
-MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this beta is in [Changes](CHANGES.md).
+MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this release candidate is in [Changes](CHANGES.md).
 
 LibreSky is free. [Support development](https://libresky.sociallydead.me/#/support) keeps the browser client, the desktop apps, and what comes next moving.
 

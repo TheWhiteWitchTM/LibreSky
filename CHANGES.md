@@ -1,8 +1,16 @@
 # Changes
 
-This is the record of the beta you can [open today](https://libresky.sociallydead.me/).
+This is the record of the release candidate you can [open today](https://libresky.sociallydead.me/).
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
+
+## 15 November 2026
+
+- The red beta is gone. Debug is a bug icon beside page config. Design view stays inside that dialog.
+- A failure stays in a dialog with Close. A video that is too long, too large, or rejected by the video service says why. The draft stays in the box.
+- A name shows the @handle behind it, and Available, Away, Uses LibreSky, or Not on LibreSky sits behind that @. Chats, posts, people, and calls use the same line.
+- Home detail defaults to Posts, so a reply shows the post it answers. Notifications detail defaults to Actions, so Reply, Repost, and Like sit on the notice. Full adds pictures and video. Brief is the short line. The choice is in page config.
+- The repost count adds quotes. The reposts list shows the people who reposted and the quote posts.
 
 ## 12 November 2026
 

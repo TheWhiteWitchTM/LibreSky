@@ -1,6 +1,7 @@
 import { activeAi, aiReady } from './ai.js';
 import { icon } from './icons.js';
 import { markdownPlain, renderMarkdown } from './markdown.js';
+import { detailPrefs } from './prefs.js';
 import {
   accountGone,
   compact,
@@ -76,7 +77,7 @@ export function accountIcon(actor, size, extraClass = '') {
 function counts(post) {
   return {
     reply: post.replyCount || 0,
-    repost: post.repostCount || 0,
+    repost: (Number(post.repostCount) || 0) + (Number(post.quoteCount) || 0),
     like: post.likeCount || 0,
   };
 }
@@ -110,13 +111,13 @@ function aiPostAction() {
   return `<button type="button" class="action ai" data-act="ai-post" aria-label="AI Assist">${icon('spark')}<span class="sr-name" aria-hidden="true">AI Assist</span></button>`;
 }
 
-function action(name, label, on, count, listAct) {
+function action(name, label, on, count, listAct, countLabel) {
   const shown = compact(count);
   const glyph = name === 'like' ? 'heart' : name === 'bookmark' ? 'bookmark' : name;
   const button = `<button type="button" class="action ${name}${on ? ' on' : ''}" data-act="${name}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${attr(label)}">${icon(glyph)}<span class="sr-name" aria-hidden="true">${escapeHtml(label)}</span></button>`;
   if (name === 'bookmark' || name === 'share') return button;
   const countHtml = listAct
-    ? `<button type="button" class="count-link" data-act="${listAct}" aria-label="${attr(`${label} count`)}">${shown}</button>`
+    ? `<button type="button" class="count-link" data-act="${listAct}" aria-label="${attr(countLabel || `${label} count`)}">${shown}</button>`
     : `<span class="count">${shown}</span>`;
   return `<span class="action-group ${name}${on ? ' on' : ''}">${button}${countHtml}</span>`;
 }
@@ -256,7 +257,7 @@ function quote(view, linked = true) {
     bag.set(record.uri, { post: { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author } });
     const postHref = postHash({ uri: record.uri, author });
     const face = accountIcon(author, 'sm');
-    const line = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong> <span class="handle">@${escapeHtml(author.handle || '')}</span></span>`;
+    const line = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong>${author.handle ? ` <span class="at">@${escapeHtml(author.handle)}</span>` : ''}${author.did ? presenceLine(author.did) : ''}</span>`;
     const head = linked
       ? `<span class="quote-head">${face}<a href="${attr(postHref)}">${line}</a></span>`
       : `<span class="quote-head">${face}${line}</span>`;
@@ -310,6 +311,76 @@ function warned(post) {
   return (post.labels || []).some((label) => WARN.has(label.val));
 }
 
+function displayNameOf(actor) {
+  if (!actor) return '';
+  if (deletedAccount(actor)) return 'Deleted account';
+  const handle = bareHandle(actor);
+  const display = String(actor.displayName || '').trim().replace(/^@/, '');
+  if (display && handle && display.toLowerCase() === handle.toLowerCase()) return handle.split('.')[0] || handle;
+  if (display) return display;
+  if (handle) return handle.split('.')[0] || handle;
+  return 'Account';
+}
+
+function atHandle(actor) {
+  if (!actor || deletedAccount(actor)) return '';
+  return bareHandle(actor);
+}
+
+export function whoHtml(actor, { presence = undefined, verified = false } = {}) {
+  if (!actor) return '';
+  const name = displayNameOf(actor) || 'Account';
+  const handle = atHandle(actor);
+  const mark = verified ? verifiedMark(actor) : '';
+  const at = handle ? `<span class="at">@${escapeHtml(handle)}</span>` : '';
+  const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did, presence) : '';
+  return `<span class="who"><strong>${escapeHtml(name)}${mark}</strong>${at}${line}</span>`;
+}
+
+function creditText(actor) {
+  const name = displayNameOf(actor);
+  const handle = atHandle(actor);
+  if (handle) return `${name} @${handle}`;
+  return name || 'Someone';
+}
+
+function feedDetail(options) {
+  if (options.detail === 'brief' || options.detail === 'posts' || options.detail === 'full') return options.detail;
+  return detailPrefs().feed;
+}
+
+function parentUnavailable(parent) {
+  const type = String(parent?.$type || '');
+  return parent?.notFound === true || parent?.blocked === true || /notFound|blocked/i.test(type);
+}
+
+function replyingLine(parent) {
+  const author = parent?.author || parent?.post?.author || {};
+  if (!author.handle) return '';
+  return `<a class="replying" href="${profileHash(author)}">Replying to @${escapeHtml(author.handle)}</a>`;
+}
+
+function parentContext(item, level) {
+  const parent = item?.reply?.parent;
+  if (!parent) return '';
+  if (parentUnavailable(parent)) {
+    return level === 'brief' ? replyingLine(parent) : '<div class="reply-context unavailable">Post unavailable</div>';
+  }
+  const post = parent.post?.uri || parent.post?.author ? parent.post : parent;
+  if (!post?.uri) return replyingLine(parent);
+  if (level === 'brief') return replyingLine(post);
+  const author = post.author || {};
+  const record = post.record || post.value || {};
+  const text = typeof record.text === 'string' ? record.text : '';
+  const href = postHash({ uri: post.uri, author });
+  bag.set(post.uri, { post: { ...post, record, uri: post.uri, cid: post.cid, author } });
+  const face = accountIcon(author, 'sm');
+  const who = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong>${author.handle ? ` <span class="at">@${escapeHtml(author.handle)}</span>` : ''}${author.did ? presenceLine(author.did) : ''}</span>`;
+  const body = text ? `<span class="reply-text">${richText(text, record.facets)}</span>` : '';
+  const media = level === 'full' ? embedHtml(post.embed || record.embed) : '';
+  return `<div class="reply-context${level === 'full' ? ' full' : ''}">${face}<a class="reply-card" href="${attr(href)}">${who}${body}</a>${media}</div>`;
+}
+
 export function postHtml(item, options = {}) {
   const post = item?.post || item;
   if (!post?.uri) return '';
@@ -322,7 +393,6 @@ export function postHtml(item, options = {}) {
   const reason = item?.reason;
   const repostBy = reason?.$type?.includes('reasonRepost') ? reason.by : null;
   const pinned = Boolean(options.pinned) || String(reason?.$type || '').includes('reasonPin');
-  const parentHandle = item?.reply?.parent?.author?.handle;
   const number = counts(post);
   const liked = Boolean(post.viewer?.like);
   const reposted = Boolean(post.viewer?.repost);
@@ -331,18 +401,19 @@ export function postHtml(item, options = {}) {
   const blur = warned(post) ? ' blurred' : '';
   return `<article class="post${options.connected ? ' connected' : ''}${options.feed === false ? '' : ' feed-post'}" data-feed="${options.feed === false ? '0' : '1'}" data-uri="${attr(post.uri)}" data-cid="${attr(post.cid)}" data-did="${attr(author.did)}" data-handle="${attr(author.handle)}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-reply-count="${number.reply}" data-bookmarked="${saved ? '1' : '0'}">
     ${pinned ? `<p class="pinned-label">${icon('pin')} Pinned</p>` : ''}
-    ${repostBy ? `<a class="repost-line" href="${profileHash(repostBy)}">${icon('repost')}<span>${escapeHtml(repostBy.displayName || repostBy.handle)} reposted</span></a>` : ''}
+    ${repostBy ? `<a class="repost-line" href="${profileHash(repostBy)}">${icon('repost')}<span>${escapeHtml(creditText(repostBy))} reposted</span></a>` : ''}
     <div class="post-row">
       ${accountIcon(author, '', 'avatar-link')}
       <div class="post-main">
         <div class="post-top">
           <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
+          ${author.did && !deletedAccount(author) ? presenceLine(author.did) : ''}
           <a class="time" href="${postHash(post)}" data-tip="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
           <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read aloud">${icon('speaker')}<span class="sr-name" aria-hidden="true">Read aloud</span></button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}<span class="sr-name" aria-hidden="true">More</span></button></span>
         </div>
-        ${parentHandle ? `<a class="replying" href="${profileHash(parentHandle)}">Replying to @${escapeHtml(parentHandle)}</a>` : ''}
+        ${parentContext(item, feedDetail(options))}
         <div class="content${blur}">
           ${record.text ? `<p class="text">${richText(record.text, record.facets)}</p>` : ''}
           ${embedHtml(post.embed)}
@@ -350,7 +421,7 @@ export function postHtml(item, options = {}) {
         </div>
         <div class="actions">
           ${action('reply', 'Reply', false, number.reply)}
-          ${action('repost', 'Repost', reposted, number.repost, 'reposts')}
+          ${action('repost', 'Repost', reposted, number.repost, 'reposts', 'Reposts and quotes')}
           ${action('like', 'Like', liked, number.like, 'likes')}
           ${action('bookmark', 'Bookmark', saved, 0)}
           ${action('share', 'Share', false, 0)}
@@ -488,8 +559,7 @@ export function profileHtml(profile, options = {}) {
       <div id="profile-action"></div>
     </div>
     <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
-    <div class="handle">@${escapeHtml(profile.handle)}</div>
-    ${presenceLine(profile.did, options.presence)}
+    <div class="handle-row"><div class="handle">@${escapeHtml(profile.handle)}</div>${presenceLine(profile.did, options.presence)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     ${socialToolbarHtml(options.links)}
     ${joinedLine(profile.createdAt)}
@@ -529,13 +599,12 @@ export function articlePageHtml(article, { did = '', actor = '', own = false, pr
     : '';
   const name = profile?.displayName || profile?.handle || actor || '';
   const byline = profile
-    ? `<div class="article-by">${avatar(profile.avatar, name)}<span><strong>${escapeHtml(name)}</strong><span class="handle">@${escapeHtml(profile.handle || actor || '')}</span></span>${when ? `<span class="handle when">${escapeHtml(when)}</span>` : ''}</div>`
+    ? `<div class="article-by">${avatar(profile.avatar, name)}${whoHtml(profile, { presence: undefined, verified: true })}${when ? `<span class="handle when">${escapeHtml(when)}</span>` : ''}</div>`
     : (when ? `<p class="joined">${escapeHtml(when)}</p>` : '');
   return `<article class="article-page">${actions}<p class="dim article-back"><a href="${attr(back)}">Articles</a></p>${cover ? `<img class="article-cover" src="${attr(cover)}" alt="">` : ''}<div class="article-copy"><h2>${escapeHtml(article?.title || 'Article')}</h2>${byline}<div class="article-body">${renderMarkdown(article?.text || '')}</div></div></article>`;
 }
 
 export function actorHtml(actor, options = {}) {
-  const name = actor.displayName || actor.handle;
   const desc = actor.description ? escapeHtml(actor.description).slice(0, 120) : '';
   const following = actor.viewer?.following || '';
   const showFollow = Boolean(options.follow && actor.did && actor.did !== options.self);
@@ -543,7 +612,7 @@ export function actorHtml(actor, options = {}) {
     ? `<button type="button" class="follow${following ? ' on' : ''}" data-act="follow" data-did="${attr(actor.did)}" data-following="${attr(following)}">${following ? 'Following' : 'Follow'}</button>`
     : '';
   const actions = `${follow}${options.extra || ''}`;
-  return `<div class="person">${accountIcon(actor)}<a class="person-link" href="${profileHash(actor)}"><strong>${escapeHtml(name || '')}${verifiedMark(actor)}</strong><span class="handle">@${escapeHtml(actor.handle || '')}</span>${desc ? `<span class="snip">${desc}</span>` : ''}</a>${actions ? `<span class="row-actions">${actions}</span>` : ''}</div>`;
+  return `<div class="person">${accountIcon(actor)}<a class="person-link" href="${profileHash(actor)}">${whoHtml(actor, { verified: true })}${desc ? `<span class="snip">${desc}</span>` : ''}</a>${actions ? `<span class="row-actions">${actions}</span>` : ''}</div>`;
 }
 
 const NOTE_VERB = {
@@ -634,13 +703,24 @@ export function groupNotifications(notes) {
 }
 
 function personLink(actor) {
-  const name = actor?.displayName || actor?.handle || 'Someone';
-  return `<a href="${profileHash(actor)}">${escapeHtml(name)}</a>`;
+  return `<a href="${profileHash(actor)}">${escapeHtml(displayNameOf(actor) || 'Someone')}</a>`;
+}
+
+function atMark(actor) {
+  const handle = atHandle(actor);
+  if (!handle) return '';
+  return `<a class="at" href="${profileHash(actor)}">@${escapeHtml(handle)}</a>`;
+}
+
+function personBits(actor, presence) {
+  const line = presence && actor?.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
+  return `<strong>${personLink(actor)}</strong> ${atMark(actor)}${line}`;
 }
 
 function peopleLabel(authors) {
   const names = (authors || []).filter((actor) => actor && (actor.did || actor.handle));
-  const linked = names.map((actor) => `<strong>${personLink(actor)}</strong>`);
+  const one = names.length === 1;
+  const linked = names.map((actor) => personBits(actor, one));
   if (linked.length <= 1) return linked[0] || '<strong>Someone</strong>';
   if (linked.length === 2) return `${linked[0]} and ${linked[1]}`;
   if (linked.length === 3) return `${linked[0]}, ${linked[1]}, and ${linked[2]}`;
@@ -769,6 +849,7 @@ function noteMediaHtml(post) {
 
 export function notificationSubjects(notes) {
   const uris = [];
+  const detail = detailPrefs().notes;
   const push = (uri) => {
     if (uri && !uris.includes(uri)) uris.push(uri);
   };
@@ -776,10 +857,53 @@ export function notificationSubjects(notes) {
     const reason = note?.reason;
     const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
     const text = typeof note?.record?.text === 'string' && note.record.text.trim();
-    if (spoken && (!text || note?.record?.embed)) push(note.uri);
+    if (spoken && (detail !== 'brief' || !text || note?.record?.embed)) push(note.uri);
     push(subjectUriOf(note));
   });
   return uris;
+}
+
+function noteTarget(note, subjects) {
+  const reason = note?.reason || '';
+  const spoken = reason === 'reply' || reason === 'mention' || reason === 'quote';
+  if (spoken) {
+    const fetched = subjects?.get?.(note.uri);
+    if (fetched?.uri) return fetched;
+    if (!note?.uri) return null;
+    return {
+      uri: note.uri,
+      cid: note.cid || '',
+      author: note.author || {},
+      record: note.record || {},
+      embed: note.record?.embed,
+    };
+  }
+  if (reason === 'follow' || reason === 'starterpack-joined') return null;
+  const subjectUri = subjectUriOf(note);
+  const subject = subjectUri ? subjects?.get?.(subjectUri) : null;
+  return subject?.uri ? subject : null;
+}
+
+function storeNotePost(post) {
+  if (!post?.uri) return;
+  const record = post.record || post.value || {};
+  bag.set(post.uri, { post: { ...post, record } });
+}
+
+function noteData(post) {
+  if (!post?.uri) return '';
+  const number = counts(post);
+  const saved = Boolean(post.viewer?.bookmarked || post.viewer?.bookmark);
+  return ` data-uri="${attr(post.uri)}" data-cid="${attr(post.cid || '')}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-bookmarked="${saved ? '1' : '0'}"`;
+}
+
+function noteActions(post) {
+  if (!post?.uri) return '';
+  const number = counts(post);
+  const liked = Boolean(post.viewer?.like);
+  const reposted = Boolean(post.viewer?.repost);
+  const saved = Boolean(post.viewer?.bookmarked || post.viewer?.bookmark);
+  return `<div class="actions">${action('reply', 'Reply', false, number.reply)}${action('repost', 'Repost', reposted, number.repost, 'reposts', 'Reposts and quotes')}${action('like', 'Like', liked, number.like, 'likes')}${action('bookmark', 'Bookmark', saved, 0)}</div>`;
 }
 
 function notificationGroupHtml(group, subjects) {
@@ -805,16 +929,22 @@ function notificationGroupHtml(group, subjects) {
     ? `${kicker ? `<span class="note-kicker">${kicker}</span>` : ''}<span class="snip">${richText(subject.record.text, subject.record.facets)}</span>`
     : '';
   const snippet = context ? `<span class="note-context">${context}</span>` : '';
+  const level = detailPrefs().notes;
+  const target = level === 'brief' ? null : noteTarget(first, subjects);
+  if (target) storeNotePost(target);
   const mediaPost = spoken
     ? (subjects?.get?.(first.uri) || (first.record?.embed ? { uri: first.uri, author: first.author, record: first.record, embed: first.record.embed } : null))
     : subject;
-  const media = noteMediaHtml(mediaPost);
+  const fullEmbed = level === 'full' && target ? embedHtml(target.embed || target.record?.embed) : '';
+  const media = level === 'full' ? '' : noteMediaHtml(mediaPost);
+  const actions = target ? noteActions(target) : '';
+  const acted = target ? noteData(target) : '';
   const unread = group.some((note) => !note.isRead);
   const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';
   const wanted = notificationSubjects(group);
   const subjectMark = wanted.length ? ` data-subject="${attr(wanted.join(' '))}"` : '';
   const noteKey = attr(`${reason}:${first.uri || first.indexedAt || subjectUri || group.length}`);
-  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open} data-note="${noteKey}"${subjectMark}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${spoken ? media : ''}${snippet}${spoken ? '' : media}</span></article>`;
+  return `<article class="note${unread ? ' unread' : ''} ${attr(reason)}"${open}${acted} data-note="${noteKey}"${subjectMark}><span class="note-icon">${icon(noteGlyph(reason))}</span><span class="note-body">${avatarStack(authors)}<span class="note-line">${peopleLabel(authors)} ${verbHtml} <span class="time">${escapeHtml(timeAgo(first.indexedAt))}</span></span>${saidHtml}${fullEmbed}${spoken ? media : ''}${snippet}${spoken ? '' : media}${actions}</span></article>`;
 }
 
 export function speechText(post) {
@@ -902,8 +1032,8 @@ export function convoHtml(convo, me, options = {}) {
   const remove = gone
     ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
-  const line = !gone && other.did ? presenceLine(other.did) : '';
-  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
+  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other);
+  return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}">${identity}<span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
 }
 
 export function requestPeople(requests, joins, me = '') {
@@ -1003,9 +1133,9 @@ export function callConvoHtml(convo, me) {
   const unread = convoUnread(convo, me);
   const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const tools = !gone && other.did ? callToolsHtml(other.did) : '';
-  const line = !gone && other.did ? presenceLine(other.did) : '';
+  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other);
   const href = convo.id ? `#/messages/${encodeURIComponent(convo.id)}` : '#/messages';
-  return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
+  return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}">${identity}<span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
 }
 
 function bareHandle(actor) {
@@ -1035,8 +1165,11 @@ export function chatTitleNeedsProfile(actor) {
 export function chatHeaderHtml(actor) {
   if (!actor) return '';
   const name = chatTitleName(actor);
+  const href = profileHash(actor);
+  const handle = atHandle(actor);
+  const at = handle ? `<a class="at" href="${attr(href)}">@${escapeHtml(handle)}</a>` : '';
   const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
-  return `${accountIcon(actor)}<a href="${profileHash(actor)}">${escapeHtml(name)}</a>${line}`;
+  return `${accountIcon(actor)}<span class="chat-id"><a class="name" href="${attr(href)}">${escapeHtml(name)}</a>${at}${line}</span>`;
 }
 
 export function hoverCardHtml(profile, self = '') {
@@ -1049,7 +1182,7 @@ export function hoverCardHtml(profile, self = '') {
     : '';
   const bio = profile?.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : '';
   const line = profile?.did ? presenceLine(profile.did) : '';
-  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${line}${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
+  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle-row"><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${line}</div>${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
 }
 
 export function packHtml(pack) {
@@ -1069,8 +1202,8 @@ export function callRequestHtml(offer) {
   const label = offer?.ringing
     ? (video ? 'Incoming video call' : 'Incoming voice call')
     : (video ? 'Video call request' : 'Voice call request');
-  const line = offer?.peerDid ? presenceLine(offer.peerDid) : '';
-  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong>${line}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
+  const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '' }) || `<strong>${escapeHtml(name)}</strong>`;
+  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link">${identity}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 
 export function shareBannerHtml(offer, extra = {}) {

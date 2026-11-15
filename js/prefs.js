@@ -56,6 +56,9 @@ const VOICE_KEY = 'libresky.voice';
 const EMOJI_KEY = 'libresky.emoji';
 const THEME_KEY = 'libresky.theme';
 const A11Y_KEY = 'libresky.a11y';
+const DETAIL_KEY = 'libresky.detail';
+const FEED_DETAILS = new Set(['brief', 'posts', 'full']);
+const NOTE_DETAILS = new Set(['brief', 'actions', 'full']);
 const THEMES = new Set(['light', 'dark', 'contrast-light', 'contrast-dark']);
 const CALL_KEY = 'libresky.calls';
 const CALL_ALLOWS = new Set(['all', 'following', 'none']);
@@ -126,6 +129,25 @@ export function feedView(feedId) {
     hideReposts: flag(saved.hideReposts, false),
     hideQuotePosts: flag(saved.hideQuotePosts, false),
   };
+}
+
+export function detailPrefs() {
+  const saved = readJson(DETAIL_KEY) || {};
+  return {
+    feed: FEED_DETAILS.has(saved.feed) ? saved.feed : 'posts',
+    notes: NOTE_DETAILS.has(saved.notes) ? saved.notes : 'actions',
+  };
+}
+
+export function saveDetailPrefs(partial) {
+  const next = { ...detailPrefs(), ...partial };
+  const saved = {
+    feed: FEED_DETAILS.has(next.feed) ? next.feed : 'posts',
+    notes: NOTE_DETAILS.has(next.notes) ? next.notes : 'actions',
+  };
+  writeJson(DETAIL_KEY, saved);
+  queueClient();
+  return detailPrefs();
 }
 
 export function saveFeedView(feedId, partial) {
@@ -658,6 +680,12 @@ function applyClient(record) {
       notify: typeof record.follows.notify === 'boolean' ? record.follows.notify : true,
     });
   }
+  if (record.detail && typeof record.detail === 'object') {
+    writeJson(DETAIL_KEY, {
+      feed: FEED_DETAILS.has(record.detail.feed) ? record.detail.feed : 'posts',
+      notes: NOTE_DETAILS.has(record.detail.notes) ? record.detail.notes : 'actions',
+    });
+  }
   if (record.a11y && typeof record.a11y === 'object') {
     writeJson(A11Y_KEY, {
       reader: Boolean(record.a11y.reader),
@@ -730,6 +758,7 @@ function clientRecord() {
     emoji: recentEmoji(),
     calls: { allow: callAllow() },
     follows: followDeskPrefs(),
+    detail: detailPrefs(),
   };
 }
 
