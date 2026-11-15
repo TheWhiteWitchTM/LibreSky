@@ -9,7 +9,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 - The red beta is gone. Debug is a bug icon beside page config. Design view stays inside that dialog.
 - A failure stays in a dialog with Close. A video that is too long, too large, or rejected by the video service says why. The draft stays in the box.
 - A name shows the @handle behind it, and Available, Away, Uses LibreSky, or Not on LibreSky sits behind that @. Chats, posts, people, and calls use the same line.
-- Home detail defaults to Posts, so a reply shows the post it answers. Notifications detail defaults to Actions, so Reply, Repost, and Like sit on the notice. Full adds pictures and video. Brief is the short line. The choice is in page config.
+- Home detail defaults to Posts, so a reply shows the post it answers. Notifications detail defaults to Actions, so Reply, Repost, and Like sit on a reply, a mention, or a quote. A like or a repost of your post does not ask you to like or repost it. Full adds pictures and video. Brief is the short line. The choice is in page config.
 - The repost count adds quotes. The reposts list shows the people who reposted and the quote posts.
 
 ## 12 November 2026

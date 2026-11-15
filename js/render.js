@@ -897,8 +897,10 @@ function noteData(post) {
   return ` data-uri="${attr(post.uri)}" data-cid="${attr(post.cid || '')}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-bookmarked="${saved ? '1' : '0'}"`;
 }
 
-function noteActions(post) {
-  if (!post?.uri) return '';
+const QUIET_NOTE = new Set(['like', 'repost', 'like-via-repost', 'repost-via-repost']);
+
+function noteActions(post, reason) {
+  if (!post?.uri || QUIET_NOTE.has(reason)) return '';
   const number = counts(post);
   const liked = Boolean(post.viewer?.like);
   const reposted = Boolean(post.viewer?.repost);
@@ -937,7 +939,7 @@ function notificationGroupHtml(group, subjects) {
     : subject;
   const fullEmbed = level === 'full' && target ? embedHtml(target.embed || target.record?.embed) : '';
   const media = level === 'full' ? '' : noteMediaHtml(mediaPost);
-  const actions = target ? noteActions(target) : '';
+  const actions = target ? noteActions(target, reason) : '';
   const acted = target ? noteData(target) : '';
   const unread = group.some((note) => !note.isRead);
   const open = href ? ` data-href="${attr(href)}" tabindex="0"` : '';

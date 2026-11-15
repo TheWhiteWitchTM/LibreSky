@@ -223,6 +223,8 @@ assert.match(notesHtml, /Cara/);
 assert.match(notesHtml, /Eve/);
 assert.match(notesHtml, /class="facet tag"/);
 assert.match(notesHtml, /replied to you/);
+assert.doesNotMatch(notesHtml, /data-act="like"/);
+assert.doesNotMatch(notesHtml, /data-act="repost"/);
 const spoken = notificationsHtml([
   {
     reason: 'reply',
@@ -251,6 +253,22 @@ assert.match(spoken, /hello/);
 assert.match(spoken, /class="facet tag"/);
 assert.match(spoken, /note-kicker">Related post/);
 assert.match(spoken, /data-href="#\/profile\/d\.bsky\.social\/post\/reply"/);
+assert.match(spoken, /data-act="like"/);
+assert.match(spoken, /data-act="repost"/);
+const repostNote = notificationsHtml([{
+  reason: 'repost',
+  author: { did: 'did:e', handle: 'e.bsky.social', displayName: 'Eve' },
+  reasonSubject: 'at://did:x/app.bsky.feed.post/1',
+  indexedAt: '2026-10-20T00:04:00.000Z',
+  isRead: true,
+}], new Map([['at://did:x/app.bsky.feed.post/1', {
+  uri: 'at://did:x/app.bsky.feed.post/1',
+  cid: 'cid1',
+  author: { did: 'did:x', handle: 'me.bsky.social' },
+  record: { text: 'hello' },
+}]]));
+assert.match(repostNote, /reposted your post/);
+assert.doesNotMatch(repostNote, /class="actions"/);
 assert.match(notesHtml, /data-href=/);
 assert.match(notesHtml, /data-note="like:/);
 assert.match(notesHtml, /data-subject="at:\/\/did:x\/app\.bsky\.feed\.post\/1"/);
