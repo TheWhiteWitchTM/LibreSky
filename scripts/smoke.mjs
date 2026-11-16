@@ -1091,7 +1091,7 @@ for (const zipName of expectedZips) {
     assert.match(part.name, /\.zip\.\d+$/);
     const size = (await stat(path.join(root, 'download', part.name))).size;
     assert.equal(size, part.size, part.name);
-    assert.ok(size < 50_000_000, `${part.name} is too large to push to GitHub`);
+    assert.ok(size <= 20_000_000, `${part.name} is too large for Cloudflare Pages`);
   }
 }
 assert.match(appSource, /<textarea id="chat-text"/);

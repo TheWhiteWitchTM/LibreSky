@@ -3,43 +3,91 @@
     "LibreSky-linux-x64.zip": [
       {
         "name": "LibreSky-linux-x64.zip.01",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-linux-x64.zip.02",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-linux-x64.zip.03",
-        "size": 24444807
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.04",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.05",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.06",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-linux-x64.zip.07",
+        "size": 444807
       }
     ],
     "LibreSky-windows-x64.zip": [
       {
         "name": "LibreSky-windows-x64.zip.01",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-windows-x64.zip.02",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-windows-x64.zip.03",
-        "size": 38870577
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.04",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.05",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.06",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-windows-x64.zip.07",
+        "size": 14870577
       }
     ],
     "LibreSky-mac-x64.zip": [
       {
         "name": "LibreSky-mac-x64.zip.01",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-mac-x64.zip.02",
-        "size": 48000000
+        "size": 20000000
       },
       {
         "name": "LibreSky-mac-x64.zip.03",
-        "size": 25524728
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.04",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.05",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.06",
+        "size": 20000000
+      },
+      {
+        "name": "LibreSky-mac-x64.zip.07",
+        "size": 1524728
       }
     ]
   }

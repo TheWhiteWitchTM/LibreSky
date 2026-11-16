@@ -46,8 +46,9 @@ async function icons() {
 const keepPak = new Set(['en-US.pak', 'en-GB.pak']);
 const keepLproj = new Set(['en.lproj', 'en_GB.lproj', 'Base.lproj']);
 const dropFile = new Set(['dxcompiler.dll', 'dxil.dll']);
-// Stay under GitHub's 50 MB warning and its 100 MB hard block.
-const partBytes = 48_000_000;
+// Cloudflare Pages rejects a file at 25 MiB. 20 MB stays under that
+// and under GitHub's 50 MB warning and 100 MB hard block.
+const partBytes = 20_000_000;
 
 async function prunePack(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -92,7 +93,7 @@ async function splitZip(zipPath) {
       createWriteStream(path.join(download, partName)),
     );
     const written = (await stat(path.join(download, partName))).size;
-    if (written !== length || written >= 50_000_000) throw new Error(`${partName} is ${written} bytes`);
+    if (written !== length || written > partBytes) throw new Error(`${partName} is ${written} bytes`);
     parts.push({ name: partName, size: written });
     offset += length;
     index += 1;
