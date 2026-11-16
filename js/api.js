@@ -40,6 +40,8 @@ export {
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
+const CENSUS_URL = 'https://libresky-server.sociallydead.me/api/checkin';
+const censusSent = new Set();
 export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
 const CHAT_PROXY = 'did:web:api.bsky.chat#bsky_chat';
 const APPVIEW = 'did:web:api.bsky.app#bsky_appview';
@@ -55,6 +57,34 @@ function accessExpired(token) {
     return !json.exp || json.exp * 1000 < Date.now() + 90_000;
   } catch {
     return true;
+  }
+}
+
+/** Tell the LibreSky server this account opened the client. One report per tab session. */
+export function reportUse(did, handle) {
+  const id = String(did || '').trim();
+  if (!id) return;
+  const key = `libresky.census:${id}`;
+  try {
+    if (sessionStorage.getItem(key) === '1' || censusSent.has(id)) return;
+    sessionStorage.setItem(key, '1');
+  } catch {
+    if (censusSent.has(id)) return;
+  }
+  censusSent.add(id);
+  const body = JSON.stringify({
+    did: id,
+    handle: String(handle || '').trim().replace(/^@/, ''),
+  });
+  try {
+    fetch(CENSUS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* the app still opens when the census server is quiet */
   }
 }
 

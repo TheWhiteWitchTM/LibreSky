@@ -576,7 +576,10 @@ async function loadMe() {
   rememberCurrent();
   refreshBadge();
   loadRail();
-  if (did) pulsePresence(true);
+  if (did) {
+    pulsePresence(true);
+    api.reportUse(did, me.profile?.handle || getPassword()?.handle || '');
+  }
   if (did && followDeskPrefs().auto) {
     const owner = did;
     setTimeout(() => { if (myDid() === owner) runFollowBack(false); }, 5000);
