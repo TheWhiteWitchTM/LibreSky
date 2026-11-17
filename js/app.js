@@ -43,6 +43,7 @@ import {
   speechText,
   threadList,
   trendsHtml,
+  setCerts,
   whoHtml,
 } from './render.js';
 import {
@@ -589,6 +590,25 @@ function reportOpen(pulse = false) {
   api.reportUse(did, me.profile?.handle || getPassword()?.handle || '', pulse);
 }
 
+function certsMayRepaint() {
+  const active = document.activeElement;
+  const tag = active?.tagName || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return false;
+  if (document.querySelector('dialog[open]')) return false;
+  if (isInCall()) return false;
+  return true;
+}
+
+async function refreshCerts(repaint = false) {
+  try {
+    const certs = await api.loadCerts();
+    if (!setCerts(certs) || !repaint || !certsMayRepaint()) return;
+    route({ keepScroll: window.scrollY || 0 });
+  } catch {
+    /* the handle and Bluesky checks still paint */
+  }
+}
+
 function rememberCurrent() {
   const did = myDid();
   if (!did) return;
@@ -874,6 +894,7 @@ async function classifyCalls(convos) {
       name: other.displayName || other.handle || 'Someone',
       handle: other.handle || '',
       avatar: other.avatar || '',
+      verification: other.verification,
       requested: convo?.status === 'request',
       key,
     };
@@ -1003,7 +1024,7 @@ function paintIncomingBar(offer) {
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
   const request = offer.requested ? ' data-request="1"' : '';
-  const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '' }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
+  const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '', verification: offer.verification }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
   bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong>${who}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
   showPresence(bar);
   paintBadge('calls-badge', 1);
@@ -6524,7 +6545,7 @@ function gameControls() {
 
 function personRow(row) {
   const pressed = gameMatch.picked === row.convoId ? 'true' : 'false';
-  const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.did });
+  const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.did, verification: row.verification });
   return `<button type="button" class="person" data-act="game-pick" data-convo="${escapeHtml(row.convoId)}" aria-pressed="${pressed}">${avatar(row.avatar, row.name)}<span class="person-link">${who}</span><span class="dim">${row.kind}</span></button>`;
 }
 
@@ -6702,6 +6723,7 @@ async function availablePlayers() {
       name: other.displayName || (other.handle ? `@${other.handle}` : 'Someone'),
       handle: other.handle || '',
       avatar: other.avatar || '',
+      verification: other.verification,
       kind: parseCallMessage(convo.lastMessage?.text) ? 'Call' : 'Chat',
     });
   });
@@ -12544,7 +12566,7 @@ function paintSendChatList() {
     ? `<button type="button" class="person send-chat-row" data-act="send-chat-handle" data-handle="${escapeHtml(handle)}">${avatar('', handle)}<span class="person-link"><strong>@${escapeHtml(handle)}</strong><span class="handle">Send to this handle</span></span></button>`
     : '';
   const rows = people.map((row) => {
-    const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.other.did });
+    const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.other.did, verification: row.other.verification });
     const extra = row.handle ? '' : '<span class="handle">Chat</span>';
     return `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link">${who}${extra}</span></button>`;
   }).join('');
@@ -14547,6 +14569,7 @@ async function boot() {
   try { await within(adoptStoredAccounts(), left()); } catch { /* the account list still shows what was saved */ }
   try { browsing = sessionStorage.getItem('libresky.browse') === '1'; } catch { browsing = false; }
   try { await within(loadMe(), left()); } catch { /* the feed can still open */ }
+  try { await within(refreshCerts(false), 2000); } catch { /* checks still follow the handle */ }
   reportOpen();
   clearBoot();
   route();
@@ -14557,6 +14580,7 @@ async function boot() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       refreshBadge();
+      refreshCerts(true);
       if (signedIn() && followDeskPrefs().auto) runFollowBack(false);
     }
     pulsePresence(false);
@@ -14566,6 +14590,7 @@ async function boot() {
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 4000);
   setInterval(() => { pulsePresence(false); }, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') showPresence(document); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible') refreshCerts(true); }, 5 * 60 * 1000);
   window.addEventListener('resize', placeOpenLayers);
   window.addEventListener('scroll', placeOpenLayers, true);
   window.visualViewport?.addEventListener('resize', placeOpenLayers);

@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
-import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, presenceHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
+import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, presenceHtml, requestEntryHtml, requestPeople, resetPosts, setCerts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
 import { applySavedFeeds, censusCall, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
@@ -1133,29 +1133,89 @@ assert.match(await readFile(path.join(root, 'desktop/main.cjs'), 'utf8'), /\/loc
 assert.match(index, /id="head-support"/);
 assert.match(appSource, /callStartHtml\(\)/);
 assert.match(appSource, /listRecords\('app\.bsky\.graph\.follow'/);
-const domainProfile = profileHtml({ handle: 'app.sociallydead.me', displayName: 'sociallydead.me', did: 'did:plc:test' });
-assert.match(domainProfile, /aria-label="Verified domain"/);
+const domainProfile = profileHtml({ handle: 'nytimes.com', displayName: 'The New York Times', did: 'did:plc:nyt' });
+assert.match(domainProfile, /aria-label="Domain verified"/);
 assert.match(domainProfile, /class="verified domain"/);
 assert.doesNotMatch(domainProfile, /verified official/);
+assert.doesNotMatch(domainProfile, /verified admin/);
+const adminProfile = profileHtml({ handle: 'app.sociallydead.me', displayName: 'sociallydead.me', did: 'did:plc:test' });
+assert.match(adminProfile, /aria-label="Admin"/);
+assert.match(adminProfile, /class="verified admin"/);
+assert.doesNotMatch(adminProfile, /Domain verified/);
+assert.doesNotMatch(adminProfile, /verified official/);
 const plainProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' });
 assert.doesNotMatch(plainProfile, /verified/);
 const badgeProfile = profileHtml({
   handle: 'ada.bsky.social',
   displayName: 'Ada',
   did: 'did:plc:ada',
-  verification: { verifiedStatus: 'valid' },
+  verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'none', verifications: [] },
 });
-assert.match(badgeProfile, /aria-label="Verified"/);
+assert.match(badgeProfile, /aria-label="Verified by Bluesky"/);
 assert.match(badgeProfile, /class="verified official"/);
-assert.doesNotMatch(badgeProfile, /Verified domain/);
+assert.doesNotMatch(badgeProfile, /Domain verified/);
+assert.doesNotMatch(badgeProfile, / seal"/);
 const bothProfile = profileHtml({
   handle: 'app.sociallydead.me',
   displayName: 'Both',
   did: 'did:plc:both',
-  verification: { verifiedStatus: 'valid' },
+  verification: { verifiedStatus: 'valid', trustedVerifierStatus: 'valid', verifications: [{ issuer: 'did:plc:z72i7hdynmk6r22z27h6tvur', issuerDisplayName: 'Bluesky', isValid: true }] },
 });
-assert.match(bothProfile, /class="verified official"/);
-assert.match(bothProfile, /class="verified domain"/);
+assert.match(bothProfile, /class="verified official seal"/);
+assert.match(bothProfile, /Bluesky trusted verifier/);
+assert.match(bothProfile, /class="verified admin"/);
+assert.doesNotMatch(bothProfile, /Domain verified/);
+const otherProfile = profileHtml({
+  handle: 'ada.bsky.social',
+  displayName: 'Ada',
+  did: 'did:plc:other',
+  verification: {
+    verifiedStatus: 'none',
+    trustedVerifierStatus: 'none',
+    verifications: [{ issuer: 'did:plc:eclio37ymobqex2ncko63h4r', issuerDisplayName: 'The New York Times', isValid: true }],
+  },
+});
+assert.match(otherProfile, /aria-label="Verified by The New York Times"/);
+assert.match(otherProfile, /class="verified other"/);
+setCerts({ 'did:plc:ada': 1, 'did:plc:sup': 5 });
+const basicProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' });
+assert.match(basicProfile, /aria-label="Basic"/);
+assert.match(basicProfile, /class="verified basic"/);
+const supporterProfile = profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:sup' });
+assert.match(supporterProfile, /aria-label="Supporter"/);
+assert.match(supporterProfile, /class="verified supporter"/);
+setCerts({});
+assert.doesNotMatch(profileHtml({ handle: 'ada.bsky.social', displayName: 'Ada', did: 'did:plc:ada' }), /Basic|Supporter/);
+const adminChat = convoHtml({
+  id: 'admin',
+  members: [
+    { did: 'did:me', handle: 'me.bsky.social' },
+    { did: 'did:sd', handle: 'miratechtm.sociallydead.me', displayName: 'Mira', verification: { verifiedStatus: 'none', verifications: [] } },
+  ],
+}, 'did:me');
+assert.match(adminChat, /class="verified admin"/);
+assert.doesNotMatch(adminChat, /Domain verified/);
+const adminCall = callConvoHtml({
+  id: 'admin-call',
+  members: [
+    { did: 'did:me', handle: 'me.bsky.social' },
+    { did: 'did:sd', handle: 'miratechtm.sociallydead.me', displayName: 'Mira' },
+  ],
+}, 'did:me');
+assert.match(adminCall, /class="verified admin"/);
+const adminRequest = callRequestHtml({ name: 'Mira', handle: 'miratechtm.sociallydead.me', peerDid: 'did:sd', media: 'video', rkey: 'r', convoId: 'c' });
+assert.match(adminRequest, /class="verified admin"/);
+const adminHead = chatHeaderHtml({ did: 'did:sd', handle: 'nytimes.com', displayName: 'NYT' });
+assert.match(adminHead, /aria-label="Domain verified"/);
+assert.doesNotMatch(adminHead, /verified admin/);
+const adminNote = notificationsHtml([{
+  reason: 'follow',
+  author: { did: 'did:sd', handle: 'miratechtm.sociallydead.me', displayName: 'Mira' },
+  indexedAt: '2026-10-20T00:00:00.000Z',
+  isRead: true,
+}]);
+assert.match(adminNote, /aria-label="Admin"/);
+assert.doesNotMatch(adminNote, /Domain verified/);
 const invalidProfile = profileHtml({ handle: 'handle.invalid', displayName: 'Gone', did: 'did:plc:gone' });
 assert.doesNotMatch(invalidProfile, /verified/);
 assert.match(appSource, /soundRow\('chat', 'New chat messages'/);
@@ -1384,6 +1444,7 @@ const ownChat = convoHtml({
   lastMessage: { text: 'hello from me', sender: { did: 'did:me' } },
 }, 'did:me');
 assert.doesNotMatch(ownChat, /class="pill"/);
+assert.doesNotMatch(ownChat, /class="verified/);
 const signalChat = convoHtml({
   id: 'ring',
   unreadCount: 3,

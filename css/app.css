@@ -17,6 +17,11 @@
   --green: #1a9c14;
   --danger: #d61f3a;
   --orange: #fb923c;
+  --mark-gold: #f0c14a;
+  --mark-green: #00ba7c;
+  --mark-red: #f4212e;
+  --mark-blue: #1d9bf0;
+  --mark-orange: #fb923c;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
   --on-blue: #fff;
   --post-scale: 1;
@@ -45,6 +50,11 @@
   --incoming: #e5f2ff;
   --incoming-border: #8ebfed;
   --orange: #f97316;
+  --mark-gold: #c88800;
+  --mark-green: #008f5d;
+  --mark-red: #f4212e;
+  --mark-blue: #0085ff;
+  --mark-orange: #e8590c;
   --shadow: 0 8px 28px rgba(15, 20, 25, 0.16);
   --on-blue: #fff;
   --scroll: #b7c2cc;
@@ -68,6 +78,11 @@
   --incoming-border: #3d7eb8;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
   --orange: #fb923c;
+  --mark-gold: #f0c14a;
+  --mark-green: #00ba7c;
+  --mark-red: #f4212e;
+  --mark-blue: #1d9bf0;
+  --mark-orange: #fb923c;
   --scroll: #3a424a;
   --scroll-hover: #6e7b88;
 }
@@ -92,6 +107,11 @@
   --green: #085c00;
   --danger: #9b0024;
   --orange: #7a2e00;
+  --mark-gold: var(--gold);
+  --mark-green: var(--green);
+  --mark-red: var(--danger);
+  --mark-blue: var(--blue);
+  --mark-orange: var(--orange);
   --shadow: none;
   --scroll: #000;
   --scroll-hover: #000;
@@ -117,6 +137,11 @@
   --green: #8dff8a;
   --danger: #ff9aa8;
   --orange: #ffc56b;
+  --mark-gold: var(--gold);
+  --mark-green: var(--green);
+  --mark-red: var(--danger);
+  --mark-blue: var(--blue);
+  --mark-orange: var(--orange);
   --shadow: none;
   --scroll: #fff;
   --scroll-hover: #fff;
@@ -943,9 +968,12 @@ button.avatar-btn:focus-visible {
 .action.bookmark.on { color: var(--blue); }
 .action.bookmark.on .ico { fill: currentColor; }
 .action.bookmark:hover, .action.share:hover { color: var(--blue); background: rgba(0, 133, 255, 0.14); }
-.verified { width: 16px; height: 16px; margin-left: 4px; vertical-align: -2px; color: var(--blue); }
-.verified.official { color: var(--gold); }
-.verified.domain { color: var(--blue); }
+.verified { width: 16px; height: 16px; margin-left: 4px; vertical-align: -2px; color: var(--mark-blue); }
+.verified.official { color: var(--mark-gold); }
+.verified.domain, .verified.basic, .verified.level { color: var(--mark-green); }
+.verified.admin { color: var(--mark-red); }
+.verified.other { color: var(--mark-blue); }
+.verified.supporter { color: var(--mark-orange); }
 
 .gallery { display: grid; gap: 3px; margin-top: 10px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
 .gallery.n2, .gallery.n4 { grid-template-columns: 1fr 1fr; }

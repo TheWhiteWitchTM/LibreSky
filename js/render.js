@@ -82,27 +82,103 @@ function counts(post) {
   };
 }
 
+const ADMIN_DOMAIN = 'sociallydead.me';
+const BSKY_VERIFIER_DID = 'did:plc:z72i7hdynmk6r22z27h6tvur';
+const SEAL = 'M8 2.95L8.44 2.46L8.9 2.3L9.3 2.59L9.56 3.2L9.74 3.8L9.97 4.14L10.37 4.13L10.97 3.91L11.61 3.77L12.08 3.92L12.23 4.39L12.09 5.03L11.87 5.63L11.86 6.03L12.2 6.26L12.8 6.44L13.41 6.7L13.7 7.1L13.54 7.56L13.05 8L12.53 8.36L12.28 8.68L12.42 9.06L12.8 9.56L13.14 10.13L13.14 10.62L12.74 10.9L12.09 10.97L11.45 10.95L11.06 11.06L10.95 11.45L10.97 12.09L10.9 12.74L10.62 13.14L10.13 13.14L9.56 12.8L9.06 12.42L8.68 12.28L8.36 12.53L8 13.05L7.56 13.54L7.1 13.7L6.7 13.41L6.44 12.8L6.26 12.2L6.03 11.86L5.63 11.87L5.03 12.09L4.39 12.23L3.92 12.08L3.77 11.61L3.91 10.97L4.13 10.37L4.14 9.97L3.8 9.74L3.2 9.56L2.59 9.3L2.3 8.9L2.46 8.44L2.95 8L3.47 7.64L3.72 7.32L3.58 6.94L3.2 6.44L2.86 5.87L2.86 5.38L3.26 5.1L3.91 5.03L4.55 5.05L4.94 4.94L5.05 4.55L5.03 3.91L5.1 3.26L5.38 2.86L5.87 2.86L6.44 3.2L6.94 3.58L7.32 3.72L7.64 3.47L8 2.95Z';
+
+const certs = new Map();
+
+/** LibreSky certification from the server. 1 is Basic. 5 is Supporter. */
+export function setCerts(record) {
+  const next = new Map();
+  if (record && typeof record === 'object') {
+    Object.entries(record).forEach(([did, level]) => {
+      const value = Number(level);
+      if (String(did).startsWith('did:') && (value === 1 || value === 2 || value === 3 || value === 4 || value === 5)) {
+        next.set(did, value);
+      }
+    });
+  }
+  let changed = next.size !== certs.size;
+  if (!changed) {
+    next.forEach((level, did) => {
+      if (certs.get(did) !== level) changed = true;
+    });
+  }
+  certs.clear();
+  next.forEach((level, did) => certs.set(did, level));
+  return changed;
+}
+
+function handleOf(actor) {
+  return String(actor?.handle || '').trim().replace(/^@/, '').toLowerCase();
+}
+
 function domainVerified(actor) {
-  const handle = String(actor?.handle || '').trim().toLowerCase();
+  const handle = handleOf(actor);
   if (!handle || handle.endsWith('.bsky.social') || handle.endsWith('.invalid') || handle === 'handle.invalid') return false;
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(handle);
 }
 
-function checkMark(label, kind) {
-  return `<svg class="verified ${kind}" viewBox="0 0 16 16" role="img" aria-label="${label}"><title>${label}</title><circle cx="8" cy="8" r="8" fill="currentColor"/><path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
+function adminHandle(actor) {
+  const handle = handleOf(actor);
+  return handle === ADMIN_DOMAIN || handle.endsWith(`.${ADMIN_DOMAIN}`);
 }
 
+function checkMark(label, kind, seal = false) {
+  const shape = seal
+    ? `<path d="${SEAL}" fill="currentColor"/>`
+    : `<circle cx="8" cy="8" r="8" fill="currentColor"/>`;
+  const classes = `verified ${kind}${seal ? ' seal' : ''}`;
+  return `<svg class="${classes}" viewBox="0 0 16 16" role="img" aria-label="${attr(label)}"><title>${attr(label)}</title>${shape}<path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
+}
+
+function otherVerifiers(actor) {
+  const list = Array.isArray(actor?.verification?.verifications) ? actor.verification.verifications : [];
+  const names = [];
+  list.forEach((row) => {
+    if (!row || row.isValid !== true) return;
+    if (row.issuer === BSKY_VERIFIER_DID) return;
+    const name = String(row.issuerDisplayName || row.issuerHandle || 'Verified').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (name && !names.includes(name)) names.push(name);
+  });
+  return names;
+}
+
+function certLevel(actor) {
+  const direct = Number(actor?.cert);
+  if (direct === 1 || direct === 2 || direct === 3 || direct === 4 || direct === 5) return direct;
+  if (!actor?.did) return 0;
+  return certs.get(actor.did) || 0;
+}
+
+/**
+ * Same checks as the LibreSky server list.
+ * Gold is Bluesky, scalloped when that account is a trusted verifier.
+ * Red is a sociallydead.me admin, and that red check replaces the green domain check.
+ * Green is any other verified domain. Blue is any other verifier.
+ * Basic is green. Supporter is orange.
+ */
 function verifiedMark(actor) {
-  const verification = actor?.verification || {};
-  const bluesky = verification.verifiedStatus === 'valid' || verification.trustedVerifierStatus === 'valid';
-  const domain = domainVerified(actor);
-  if (!bluesky && !domain) return '';
+  if (!actor) return '';
+  const verification = actor.verification || {};
+  const trusted = verification.trustedVerifierStatus === 'valid';
+  const bluesky = trusted || verification.verifiedStatus === 'valid';
+  const admin = adminHandle(actor);
+  const domain = !admin && domainVerified(actor);
+  const others = otherVerifiers(actor);
+  const cert = certLevel(actor);
   const parts = [];
   if (bluesky) {
-    const label = verification.verifiedStatus === 'valid' ? 'Verified' : 'Trusted verifier';
-    parts.push(checkMark(label, 'official'));
+    parts.push(checkMark(trusted ? 'Bluesky trusted verifier' : 'Verified by Bluesky', 'official', trusted));
   }
-  if (domain) parts.push(checkMark('Verified domain', 'domain'));
+  if (admin) parts.push(checkMark('Admin', 'admin'));
+  if (domain) parts.push(checkMark('Domain verified', 'domain'));
+  if (others.length === 1) parts.push(checkMark(`Verified by ${others[0]}`, 'other'));
+  else if (others.length > 1) parts.push(checkMark(`Verified by ${others.join(', ')}`, 'other'));
+  if (cert === 5) parts.push(checkMark('Supporter', 'supporter'));
+  else if (cert === 1) parts.push(checkMark('Basic', 'basic'));
+  else if (cert >= 2 && cert <= 4) parts.push(checkMark(`Level ${cert}`, 'level'));
   return parts.join('');
 }
 
@@ -327,7 +403,7 @@ function atHandle(actor) {
   return bareHandle(actor);
 }
 
-export function whoHtml(actor, { presence = undefined, verified = false } = {}) {
+export function whoHtml(actor, { presence = undefined, verified = true } = {}) {
   if (!actor) return '';
   const name = displayNameOf(actor) || 'Account';
   const handle = atHandle(actor);
@@ -703,7 +779,7 @@ export function groupNotifications(notes) {
 }
 
 function personLink(actor) {
-  return `<a href="${profileHash(actor)}">${escapeHtml(displayNameOf(actor) || 'Someone')}</a>`;
+  return `<a href="${profileHash(actor)}">${escapeHtml(displayNameOf(actor) || 'Someone')}${verifiedMark(actor)}</a>`;
 }
 
 function atMark(actor) {
@@ -1171,7 +1247,7 @@ export function chatHeaderHtml(actor) {
   const handle = atHandle(actor);
   const at = handle ? `<a class="at" href="${attr(href)}">@${escapeHtml(handle)}</a>` : '';
   const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
-  return `${accountIcon(actor)}<span class="chat-id"><a class="name" href="${attr(href)}">${escapeHtml(name)}</a>${at}${line}</span>`;
+  return `${accountIcon(actor)}<span class="chat-id"><a class="name" href="${attr(href)}">${escapeHtml(name)}${verifiedMark(actor)}</a>${at}${line}</span>`;
 }
 
 export function hoverCardHtml(profile, self = '') {
@@ -1204,7 +1280,7 @@ export function callRequestHtml(offer) {
   const label = offer?.ringing
     ? (video ? 'Incoming video call' : 'Incoming voice call')
     : (video ? 'Video call request' : 'Voice call request');
-  const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '' }) || `<strong>${escapeHtml(name)}</strong>`;
+  const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '', verification: offer?.verification }) || `<strong>${escapeHtml(name)}</strong>`;
   return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link">${identity}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 

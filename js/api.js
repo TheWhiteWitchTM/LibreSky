@@ -41,6 +41,7 @@ export {
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
 export const CENSUS_URL = 'https://libresky-server.sociallydead.me/api/checkin';
+export const CERTS_URL = 'https://libresky-server.sociallydead.me/api/certs';
 const CENSUS_WINDOW_MS = 15_000;
 const censusAt = new Map();
 export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
@@ -72,6 +73,14 @@ export function censusCall(did, handle, sentAt = 0, now = Date.now()) {
     handle: String(handle || '').trim().replace(/^@/, ''),
     at: now,
   };
+}
+
+/** Certification levels the server list writes. Empty when the server cannot be read. */
+export async function loadCerts() {
+  const res = await fetch(`${CERTS_URL}?t=${Date.now()}`, { cache: 'no-store' });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok || !body.certs || typeof body.certs !== 'object') throw new Error('certs');
+  return body.certs;
 }
 
 /** Tell the LibreSky server this account opened the client. Launch and sign-in count a visit. A pulse runs when Available or Away is written. */
