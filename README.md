@@ -132,7 +132,7 @@ The pages and scripts are about 1.5 MB. A service worker stores that shell, so t
 
 MIT license. The source is [on GitHub](https://github.com/TheWhiteWitchTM/LibreSky). Read it, file an issue, or fork it. The record of this release candidate is in [Changes](CHANGES.md).
 
-LibreSky is free. Get verified, in the menu and beside Debug, opens a dialog. Basic verification is a green check. Supporter is an orange check. Each one is once, on the account you are signed in to, and it stays.
+LibreSky is free. Get verified, in the menu and beside Debug, opens a dialog. Basic verification is $1, a green check. Supporter is $20, an orange check. Your amount is the third choice. More than $1 is the green check. More than $20 is the orange check. Each check is once, on the account you are signed in to, and it stays.
 
 Mira builds LibreSky.
 

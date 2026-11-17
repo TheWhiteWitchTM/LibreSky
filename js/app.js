@@ -7339,17 +7339,58 @@ function paintVerify(html) {
   body.innerHTML = html;
 }
 
+function giftCents(raw) {
+  const text = String(raw ?? '').trim();
+  const match = text.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match || match[1].length > 6) return null;
+  const frac = match[2] || '';
+  if (frac.length > 2 && /[1-9]/.test(frac.slice(2))) return null;
+  return Number(match[1]) * 100 + Number((frac + '00').slice(0, 2));
+}
+
+function giftAmount(raw) {
+  const cents = giftCents(raw);
+  if (cents == null) return '';
+  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`;
+}
+
+function paintGiftTier(input) {
+  if (!input) return;
+  const card = input.closest('.verify-choice');
+  const tier = card?.querySelector('[data-gift-tier]');
+  if (!card || !tier) return;
+  const cents = giftCents(input.value);
+  card.classList.remove('basic', 'supporter');
+  if (cents != null && cents > 2000) {
+    card.classList.add('supporter');
+    tier.textContent = 'More than $20. Supporter, the orange check.';
+    return;
+  }
+  if (cents != null && cents > 100) {
+    card.classList.add('basic');
+    tier.textContent = 'More than $1. Basic verification, the green check.';
+    return;
+  }
+  if (String(input.value || '').trim()) tier.textContent = 'Give more than $1.';
+}
+
 function verifyChoice(product, choice) {
+  if (product?.id === 'custom' || product?.custom) {
+    const available = !choice || choice.available !== false;
+    const hint = choice?.reason || 'More than $1 is a green check. More than $20 is an orange check.';
+    return `<div class="verify-choice custom"><strong>Your amount</strong><label class="gift-line"><span class="price">$</span><input id="verify-amount" name="amount" inputmode="decimal" autocomplete="off" enterkeyhint="done" placeholder="0.00" aria-label="Amount in dollars"${available ? '' : ' disabled'}></label><span data-gift-tier>${escapeHtml(hint)}</span><button type="button" class="primary" data-act="verify-gift"${available ? '' : ' disabled'}>Pay this amount</button></div>`;
+  }
   const id = product?.id === 'supporter' ? 'supporter' : 'basic';
   const available = !choice || choice.available !== false;
   const reason = choice?.reason ? `<span>${escapeHtml(choice.reason)}</span>` : `<span>${id === 'supporter' ? 'An orange check. Once.' : 'A green check. Once.'}</span>`;
-  const amount = escapeHtml(String(product?.amount || (id === 'supporter' ? '5.00' : '1.00')));
+  const amount = escapeHtml(String(product?.amount || (id === 'supporter' ? '20.00' : '1.00')));
   const name = escapeHtml(product?.name || (id === 'supporter' ? 'Supporter' : 'Basic verification'));
   return `<button type="button" class="verify-choice ${id}" data-act="verify-buy" data-product="${id}"${available ? '' : ' disabled'}><strong>${name}</strong><span class="price">$${amount}</span>${reason}</button>`;
 }
 
 function paintVerifyProducts(offer, note = '') {
-  const products = Array.isArray(offer?.products) ? offer.products : [];
+  const products = Array.isArray(offer?.products) ? offer.products.slice() : [];
+  if (!products.some((item) => item?.id === 'custom' || item?.custom)) products.push({ id: 'custom', name: 'Your amount', custom: true });
   const choices = Array.isArray(offer?.account?.choices) ? offer.account.choices : [];
   const handle = offer?.account?.handle || me.profile?.handle || getPassword()?.handle || '';
   const who = handle ? `<p class="dim">Signed in as @${escapeHtml(String(handle).replace(/^@/, ''))}. That account receives the check.</p>` : '';
@@ -7461,11 +7502,13 @@ function onPayMessage(event) {
   paintVerify(`${verifyLead()}<p class="form-error">${escapeHtml(data.message || 'That payment was not finished.')}</p><p><button type="button" class="primary" data-act="verify">Try again</button></p>`);
 }
 
-function startVerify(product, popup) {
+function startVerify(product, popup, amount) {
   const token = verifyGen;
   payDone = false;
-  paintVerifyWaiting(product);
-  api.payStart(product).then((order) => {
+  const waiting = product === 'custom' ? (giftCents(amount) > 2000 ? 'supporter' : 'basic') : product;
+  paintVerifyWaiting(waiting);
+  const started = product === 'custom' ? api.payStart('custom', amount) : api.payStart(product);
+  started.then((order) => {
     if (token !== verifyGen) {
       try { popup?.close(); } catch { /* closed with the dialog */ }
       return;
@@ -7473,7 +7516,7 @@ function startVerify(product, popup) {
     payOrderId = order.orderId || '';
     if (!order.approveUrl) throw new Error('PayPal did not open.');
     if (!popup || popup.closed) {
-      paintVerifyWaiting(product, order.approveUrl);
+      paintVerifyWaiting(waiting, order.approveUrl);
       return;
     }
     popup.location.href = order.approveUrl;
@@ -11749,6 +11792,23 @@ async function onClick(event) {
     startVerify(product, popup);
     return;
   }
+  if (act === 'verify-gift') {
+    event.preventDefault();
+    const input = $('verify-amount');
+    const cents = giftCents(input?.value);
+    if (cents == null || cents <= 100) {
+      paintGiftTier(input);
+      return;
+    }
+    if (!signedIn()) {
+      $('verify')?.close();
+      requireSignIn();
+      return;
+    }
+    const popup = window.open('about:blank', 'libresky-pay', 'popup=yes,width=480,height=760');
+    startVerify('custom', popup, giftAmount(input.value));
+    return;
+  }
   if (act === 'design') {
     event.preventDefault();
     applyDesign(!designOn());
@@ -13535,6 +13595,14 @@ function bind() {
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('help-close')?.addEventListener('click', () => $('help')?.close());
   $('verify-close')?.addEventListener('click', () => $('verify')?.close());
+  $('verify')?.addEventListener('input', (event) => {
+    if (event.target?.id === 'verify-amount') paintGiftTier(event.target);
+  });
+  $('verify')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.target?.id !== 'verify-amount') return;
+    event.preventDefault();
+    event.target.closest('.verify-choice')?.querySelector('[data-act="verify-gift"]')?.click();
+  });
   $('verify')?.addEventListener('close', () => {
     verifyGen += 1;
     if (payDone) paintPaidCheck();

@@ -137,8 +137,10 @@ export function payOffer() {
 }
 
 /** Starts a PayPal order for the signed-in account. The body does not name an account. */
-export function payStart(product) {
-  return payFetch('', { method: 'POST', body: { product } });
+export function payStart(product, amount) {
+  const body = { product };
+  if (amount) body.amount = amount;
+  return payFetch('', { method: 'POST', body });
 }
 
 /** Tell the LibreSky server this account opened the client. Launch and sign-in count a visit. A pulse runs when Available or Away is written. */

@@ -7,6 +7,7 @@ Dates follow the days the work landed in the repository. The next pass is due af
 ## 17 November 2026
 
 - Get verified replaces Support development in the menu and beside Debug. It shows for every account, including an admin. The dialog lists the two checks, waits while PayPal finishes, then thanks you. Close stays on the dialog.
+- Supporter is $20. Your amount is the third choice. More than $1 is the green check. More than $20 is the orange check.
 
 ## 15 November 2026
 

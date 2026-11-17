@@ -1093,6 +1093,8 @@ assert.match(sitemap, /https:\/\/thewhitewitchtm\.github\.io\/LibreSky\//);
 const appSource = await readFile(path.join(root, 'js/app.js'), 'utf8');
 assert.match(await readFile(path.join(root, 'js/api.js'), 'utf8'), /https:\/\/libresky-server\.sociallydead\.me\/api\/pay/);
 assert.match(appSource, /Thank you\. Basic verification is on this account/);
+assert.match(appSource, /Your amount/);
+assert.match(appSource, /More than \$20/);
 assert.doesNotMatch(appSource, /paypal\.com\/ncp\/payment/);
 assert.match(appSource, /data-act="desktop-download"/);
 assert.doesNotMatch(appSource, /href="\.\/download\//);

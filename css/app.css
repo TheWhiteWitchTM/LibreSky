@@ -2352,6 +2352,22 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .verify-choice .price { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; color: var(--text); }
 .verify-choice.basic strong { color: var(--mark-green); }
 .verify-choice.supporter strong { color: var(--mark-orange); }
+.verify-choice.custom { cursor: default; }
+.verify-choice.custom .primary { margin-top: 8px; }
+.gift-line { display: flex; align-items: baseline; gap: 2px; }
+.gift-line input {
+  width: 7.5rem;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  padding: 0 0 2px;
+}
+.gift-line input:focus { outline: none; border-bottom-color: var(--text); }
 .support-pay { display: inline-flex; align-items: center; margin: 4px 0 12px; text-decoration: none; }
 .ua-banner {
   width: min(100%, 280px);
