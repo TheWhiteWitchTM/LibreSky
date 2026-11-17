@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AI_PROVIDERS, activeAi, adoptLocalFromCloud, aiFromPreference, aiPreference, aiReady, aiSource, chatExtras, claimLegacyAi, clearAi, clearLocalAi, cloudProviders, draftRewriteMessages, fallbackAi, fitDraft, listRemoteAi, loadAi, loadLocalAi, localModelNames, localProbes, localRuntimeName, prepareAi, removeRemoteAi, replyText, resolveAi, responsesBody, rewriteLocalUrl, saveAi, saveLocalAi, setActiveRemote, setAiSource } from '../js/ai.js';
 import { actorHtml, assistantHtml, callBannerHtml, callConvoHtml, callRequestHtml, callStartHtml, callToolsHtml, chatHeaderHtml, collectionCardHtml, convoHtml, feedHtml, hoverCardHtml, joinRequestHtml, linkPreviewHtml, messageHtml, notificationSubjects, notificationsHtml, packHtml, postHtml, profileHtml, articleCardHtml, articlePageHtml, presenceHtml, requestEntryHtml, requestPeople, resetPosts, shareBannerHtml, shareFileHtml, speechText, trendsHtml } from '../js/render.js';
-import { applySavedFeeds, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
+import { applySavedFeeds, censusCall, facetsFor, inspectLink, savedFeedItems } from '../js/api.js';
 import { accountGone, aiTag, applyShortLinks, assembleCallSdp, assembleShareSdp, bskyPostParts, caretToken, caretWord, convoUnread, firstUrl, followCleanupMatch, followSpam, forceStyles, graphemeLength, messagesForConvo, normalizeConvoItem, normalizeSentMessage, omitTrailingPostLink, ownUnread, pageCard as pageSummary, parseCallMessage, parseShareMessage, partitionConvos, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl, xStatusParts } from '../js/util.js';
 import { emojiGroups, flagEmoji, POPULAR_EMOJI } from '../js/emoji.js';
 import { postInLanguages } from '../js/lang.js';
@@ -16,6 +16,14 @@ import { incomingShare, prettySize } from '../js/share.js';
 import { completeWord, learnedWordList, rememberWords, typoWords } from '../js/words.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+const censusNow = Date.parse('2026-11-17T00:00:00.000Z');
+const census = censusCall(' did:plc:aaaaaaaaaaaaaaaaaaaaaa ', '@Ada.bsky.social', 0, censusNow);
+assert.equal(census.did, 'did:plc:aaaaaaaaaaaaaaaaaaaaaa');
+assert.equal(census.handle, 'Ada.bsky.social');
+assert.equal(censusCall(census.did, census.handle, census.at, censusNow + 10_000), null);
+assert.equal(censusCall(census.did, census.handle, census.at, censusNow + 15_000).at, censusNow + 15_000);
+assert.equal(censusCall('', 'ada.bsky.social', 0, censusNow), null);
 
 const text = 'Hello @jay.bsky.team';
 const encoder = new TextEncoder();

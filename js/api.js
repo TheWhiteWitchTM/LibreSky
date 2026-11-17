@@ -40,8 +40,9 @@ export {
 
 const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
-const CENSUS_URL = 'https://libresky-server.sociallydead.me/api/checkin';
-const censusSent = new Set();
+export const CENSUS_URL = 'https://libresky-server.sociallydead.me/api/checkin';
+const CENSUS_WINDOW_MS = 15_000;
+const censusAt = new Map();
 export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
 const CHAT_PROXY = 'did:web:api.bsky.chat#bsky_chat';
 const APPVIEW = 'did:web:api.bsky.app#bsky_appview';
@@ -60,32 +61,43 @@ function accessExpired(token) {
   }
 }
 
-/** Tell the LibreSky server this account opened the client. One report per tab session. */
-export function reportUse(did, handle) {
+/** One check-in body, or null when this open was already sent inside the start window. */
+export function censusCall(did, handle, sentAt = 0, now = Date.now()) {
   const id = String(did || '').trim();
-  if (!id) return;
-  const key = `libresky.census:${id}`;
-  try {
-    if (sessionStorage.getItem(key) === '1' || censusSent.has(id)) return;
-    sessionStorage.setItem(key, '1');
-  } catch {
-    if (censusSent.has(id)) return;
-  }
-  censusSent.add(id);
-  const body = JSON.stringify({
+  if (!id) return null;
+  const last = Number(sentAt) || 0;
+  if (last > 0 && now >= last && now - last < CENSUS_WINDOW_MS) return null;
+  return {
     did: id,
     handle: String(handle || '').trim().replace(/^@/, ''),
+    at: now,
+  };
+}
+
+/** Tell the LibreSky server this account opened the client. Launch and login. */
+export function reportUse(did, handle) {
+  const call = censusCall(did, handle, censusAt.get(String(did || '').trim()) || 0);
+  if (!call) return;
+  censusAt.set(call.did, call.at);
+  const body = JSON.stringify({ did: call.did, handle: call.handle });
+  const send = () => fetch(CENSUS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+  }).then((res) => {
+    if (!res.ok) throw new Error('census');
   });
-  try {
-    fetch(CENSUS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(() => {});
-  } catch {
-    /* the app still opens when the census server is quiet */
-  }
+  const forget = (at) => {
+    if (censusAt.get(call.did) === at) censusAt.delete(call.did);
+  };
+  send().catch(() => {
+    forget(call.at);
+    const again = censusCall(call.did, call.handle, 0);
+    if (!again) return;
+    censusAt.set(again.did, again.at);
+    send().catch(() => { forget(again.at); });
+  });
 }
 
 export async function ensurePasswordSession() {

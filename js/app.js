@@ -576,14 +576,17 @@ async function loadMe() {
   rememberCurrent();
   refreshBadge();
   loadRail();
-  if (did) {
-    pulsePresence(true);
-    api.reportUse(did, me.profile?.handle || getPassword()?.handle || '');
-  }
+  if (did) pulsePresence(true);
   if (did && followDeskPrefs().auto) {
     const owner = did;
     setTimeout(() => { if (myDid() === owner) runFollowBack(false); }, 5000);
   }
+}
+
+function reportOpen() {
+  const did = myDid();
+  if (!did) return;
+  api.reportUse(did, me.profile?.handle || getPassword()?.handle || '');
 }
 
 function rememberCurrent() {
@@ -12851,6 +12854,7 @@ async function startPassword() {
     $('login-password').value = '';
     closeGate();
     await loadMe();
+    reportOpen();
     if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = '#/';
     route();
     toast(`Signed in as @${getPassword().handle}`);
@@ -12886,6 +12890,7 @@ async function useAccount(entry) {
   }
   setActiveDid(entry.did);
   await loadMe();
+  reportOpen();
 }
 
 async function switchAccount(did) {
@@ -14540,6 +14545,7 @@ async function boot() {
   try { await within(adoptStoredAccounts(), left()); } catch { /* the account list still shows what was saved */ }
   try { browsing = sessionStorage.getItem('libresky.browse') === '1'; } catch { browsing = false; }
   try { await within(loadMe(), left()); } catch { /* the feed can still open */ }
+  reportOpen();
   clearBoot();
   route();
   syncToTop();
