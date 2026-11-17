@@ -110,6 +110,16 @@ export function setCerts(record) {
   return changed;
 }
 
+/** One check, written when the verification dialog finishes, before the next full list. */
+export function noteCert(did, level) {
+  const value = Number(level);
+  const id = String(did || '');
+  if (!id.startsWith('did:') || ![1, 2, 3, 4, 5].includes(value)) return false;
+  if (certs.get(id) === value) return false;
+  certs.set(id, value);
+  return true;
+}
+
 function handleOf(actor) {
   return String(actor?.handle || '').trim().replace(/^@/, '').toLowerCase();
 }

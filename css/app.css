@@ -2326,6 +2326,32 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 .support-page { padding: 8px 16px 32px; }
 .support-page p { margin: 0 0 12px; }
+#verify { width: min(480px, calc(100vw - 24px)); overflow: auto; }
+#verify form { padding: 8px 16px 18px; }
+#verify h2 { margin: 8px 0; }
+#verify p { margin: 0 0 10px; }
+.verify-choices { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.verify-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.verify-choice:hover:not(:disabled) { background: var(--hover); }
+.verify-choice:disabled { opacity: 0.65; }
+.verify-choice strong { font-size: 16px; }
+.verify-choice span { color: var(--text-2); font-size: 14px; }
+.verify-choice .price { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; color: var(--text); }
+.verify-choice.basic strong { color: var(--mark-green); }
+.verify-choice.supporter strong { color: var(--mark-orange); }
 .support-pay { display: inline-flex; align-items: center; margin: 4px 0 12px; text-decoration: none; }
 .ua-banner {
   width: min(100%, 280px);
@@ -4038,6 +4064,8 @@ kbd { font-family: ui-monospace, monospace; border: 1px solid var(--border); bor
 :root[data-theme="contrast-dark"] .to-top,
 :root[data-theme="contrast-light"] .head-support,
 :root[data-theme="contrast-dark"] .head-support,
+:root[data-theme="contrast-light"] .verify-choice,
+:root[data-theme="contrast-dark"] .verify-choice,
 :root[data-theme="contrast-light"] .head-config,
 :root[data-theme="contrast-dark"] .head-config,
 :root[data-theme="contrast-light"] .head-post,

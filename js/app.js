@@ -43,6 +43,7 @@ import {
   speechText,
   threadList,
   trendsHtml,
+  noteCert,
   setCerts,
   whoHtml,
 } from './render.js';
@@ -4839,7 +4840,7 @@ function openTune(kind, feedId) {
       lists: 'Lists',
       packs: 'Starter packs',
       downloads: 'Downloads',
-      support: 'Support',
+      support: 'Get verified',
       ukraine: 'Ukraine',
       likes: 'Likes',
       reposts: 'Reposts and quotes',
@@ -7321,10 +7322,174 @@ function showGames() {
   paintPageInvites();
 }
 
+let verifyGen = 0;
+let payPopup = null;
+let payWatch = 0;
+let payOrderId = '';
+let payDone = false;
+let verifyQuiet = false;
+
+function verifyLead() {
+  return `<p>Basic verification is a green check beside your name. Supporter is an orange check. You pay once. The check stays on the account you are signed in to. It does not expire, and it cannot be given away or moved.</p><p>A Bluesky check, a domain, and an admin mark are different. This one is the LibreSky check. It is offered to every signed-in account.</p>`;
+}
+
+function paintVerify(html) {
+  const body = $('verify-body');
+  if (!body || !$('verify')?.open) return;
+  body.innerHTML = html;
+}
+
+function verifyChoice(product, choice) {
+  const id = product?.id === 'supporter' ? 'supporter' : 'basic';
+  const available = !choice || choice.available !== false;
+  const reason = choice?.reason ? `<span>${escapeHtml(choice.reason)}</span>` : `<span>${id === 'supporter' ? 'An orange check. Once.' : 'A green check. Once.'}</span>`;
+  const amount = escapeHtml(String(product?.amount || (id === 'supporter' ? '5.00' : '1.00')));
+  const name = escapeHtml(product?.name || (id === 'supporter' ? 'Supporter' : 'Basic verification'));
+  return `<button type="button" class="verify-choice ${id}" data-act="verify-buy" data-product="${id}"${available ? '' : ' disabled'}><strong>${name}</strong><span class="price">$${amount}</span>${reason}</button>`;
+}
+
+function paintVerifyProducts(offer, note = '') {
+  const products = Array.isArray(offer?.products) ? offer.products : [];
+  const choices = Array.isArray(offer?.account?.choices) ? offer.account.choices : [];
+  const handle = offer?.account?.handle || me.profile?.handle || getPassword()?.handle || '';
+  const who = handle ? `<p class="dim">Signed in as @${escapeHtml(String(handle).replace(/^@/, ''))}. That account receives the check.</p>` : '';
+  const rows = products.map((product) => verifyChoice(product, choices.find((item) => item.id === product.id))).join('');
+  const problem = note ? `<p class="form-error">${escapeHtml(note)}</p>` : '';
+  paintVerify(`${verifyLead()}${who}${problem}<div class="verify-choices">${rows}</div>`);
+}
+
+function paintVerifySignedOut() {
+  paintVerify(`${verifyLead()}<p>Sign in first. The check goes on the account that is signed in.</p><p><button type="button" class="primary" data-act="verify-signin">Sign in</button></p>`);
+}
+
+function paintVerifyWaiting(product, approveUrl = '') {
+  const name = product === 'supporter' ? 'Supporter' : 'Basic verification';
+  const link = approveUrl
+    ? `<p><a class="primary support-pay" href="${escapeHtml(approveUrl)}" target="_blank" rel="noopener noreferrer">Open PayPal</a></p>`
+    : '';
+  paintVerify(`<div class="verify-wait"><p>${escapeHtml(name)} is waiting on PayPal. Finish the payment there. This dialog stays here.</p>${link}<p class="dim">Close leaves this dialog. A payment you already approved can still finish.</p></div>`);
+}
+
+function paintVerifyThanks(product) {
+  const orange = product === 'supporter';
+  const line = orange
+    ? 'Thank you. Supporter is on this account. The orange check stays. You can close this.'
+    : 'Thank you. Basic verification is on this account. The green check stays. You can close this.';
+  paintVerify(`<div class="verify-thanks"><p>${line}</p><p class="dim">The check does not expire. It stays on this account.</p></div>`);
+}
+
+function openVerify() {
+  const dialog = $('verify');
+  if (!dialog) return;
+  payDone = false;
+  if (!dialog.open) dialog.showModal();
+  paintVerify('<p class="dim">Loading the checks…</p>');
+  const token = ++verifyGen;
+  loadVerify(token);
+}
+
+async function loadVerify(token) {
+  if (!signedIn()) {
+    paintVerifySignedOut();
+    return;
+  }
+  try {
+    const offer = await api.payOffer();
+    if (token !== verifyGen) return;
+    if (signedIn() && !offer.account) {
+      paintVerify(`${verifyLead()}<p class="form-error">LibreSky could not confirm this sign-in. Sign in again, then try the check.</p>`);
+      return;
+    }
+    paintVerifyProducts(offer);
+  } catch (error) {
+    if (token !== verifyGen) return;
+    paintVerify(`${verifyLead()}<p class="form-error">${escapeHtml(error?.message || 'Could not load verification.')}</p><p><button type="button" class="primary" data-act="verify">Try again</button></p>`);
+  }
+}
+
+function watchPayPopup(popup) {
+  clearInterval(payWatch);
+  payPopup = popup;
+  payWatch = setInterval(() => {
+    if (!popup || !popup.closed) return;
+    clearInterval(payWatch);
+    const order = payOrderId;
+    setTimeout(() => {
+      if (payDone || payOrderId !== order) return;
+      if ($('verify')?.open) {
+        paintVerify(`${verifyLead()}<p class="form-error">PayPal closed before the payment finished.</p><p><button type="button" class="primary" data-act="verify">Try again</button></p>`);
+      }
+    }, 700);
+  }, 400);
+}
+
+function paintPaidCheck() {
+  if (!certsMayRepaint()) return;
+  verifyQuiet = true;
+  try {
+    route({ keepScroll: window.scrollY || 0 });
+  } finally {
+    verifyQuiet = false;
+  }
+}
+
+function onPayMessage(event) {
+  if (event.origin !== 'https://libresky-server.sociallydead.me') return;
+  const data = event.data;
+  if (!data || data.source !== 'libresky-pay') return;
+  if (payOrderId && data.orderId && data.orderId !== payOrderId && !data.ok) return;
+  clearInterval(payWatch);
+  try { payPopup?.close(); } catch { /* the PayPal window may already be gone */ }
+  if (data.ok) {
+    payDone = true;
+    payOrderId = '';
+    const did = data.did;
+    const level = data.cert;
+    if (did && level) noteCert(did, level);
+    if ($('verify')?.open) paintVerifyThanks(data.product);
+    else {
+      toast(data.product === 'supporter' ? 'Thank you. Supporter is on this account.' : 'Thank you. Basic verification is on this account.');
+      paintPaidCheck();
+    }
+    refreshCerts(false).then(() => {
+      if (!(did && level) || !noteCert(did, level) || $('verify')?.open) return;
+      paintPaidCheck();
+    });
+    return;
+  }
+  if (!$('verify')?.open) return;
+  paintVerify(`${verifyLead()}<p class="form-error">${escapeHtml(data.message || 'That payment was not finished.')}</p><p><button type="button" class="primary" data-act="verify">Try again</button></p>`);
+}
+
+function startVerify(product, popup) {
+  const token = verifyGen;
+  payDone = false;
+  paintVerifyWaiting(product);
+  api.payStart(product).then((order) => {
+    if (token !== verifyGen) {
+      try { popup?.close(); } catch { /* closed with the dialog */ }
+      return;
+    }
+    payOrderId = order.orderId || '';
+    if (!order.approveUrl) throw new Error('PayPal did not open.');
+    if (!popup || popup.closed) {
+      paintVerifyWaiting(product, order.approveUrl);
+      return;
+    }
+    popup.location.href = order.approveUrl;
+    watchPayPopup(popup);
+  }).catch((error) => {
+    try { popup?.close(); } catch { /* the blank window can already be gone */ }
+    if (token !== verifyGen || !$('verify')?.open) return;
+    paintVerify(`${verifyLead()}<p class="form-error">${escapeHtml(error?.message || 'Could not start that payment.')}</p><p><button type="button" class="primary" data-act="verify">Try again</button></p>`);
+  });
+}
+
 function showSupport() {
   generation += 1;
-  setChrome({ title: 'Support', nav: 'support', back: true });
-  $('view').innerHTML = `<div class="support-page"><h2>Support development</h2><p>LibreSky is free. A payment helps the work continue: the browser client, the desktop apps, and what comes next.</p><p><a class="primary support-pay" href="https://www.paypal.com/ncp/payment/BVY3E2H2E2VWA" target="_blank" rel="noopener noreferrer">PayPal</a></p><p class="dim">PayPal opens in a new tab. LibreSky does not see the payment.</p></div>`;
+  setChrome({ title: 'Get verified', nav: 'support', back: true });
+  $('view').innerHTML = `<div class="support-page"><h2>Get verified</h2><p>The check is bought in the dialog, on the account you are signed in to.</p><p><button type="button" class="primary" data-act="verify">Get verified</button></p></div>`;
+  if (!verifyQuiet) openVerify();
 }
 
 function showUkraine() {
@@ -7570,7 +7735,7 @@ function tourStepList() {
     {
       kicker: 'Menu',
       title: 'Help, config, and this tour',
-      copy: 'The menu holds Help, Config, About, Downloads, this tour, and Support development.',
+      copy: 'The menu holds Help, Config, About, Downloads, this tour, and Get verified.',
       targets: ['#app-menu-btn'],
     },
     {
@@ -11560,6 +11725,30 @@ async function onClick(event) {
     openDebug();
     return;
   }
+  if (act === 'verify') {
+    event.preventDefault();
+    openVerify();
+    return;
+  }
+  if (act === 'verify-signin') {
+    event.preventDefault();
+    $('verify')?.close();
+    requireSignIn();
+    return;
+  }
+  if (act === 'verify-buy') {
+    event.preventDefault();
+    const product = event.target.closest('[data-product]')?.dataset.product;
+    if (product !== 'basic' && product !== 'supporter') return;
+    if (!signedIn()) {
+      $('verify')?.close();
+      requireSignIn();
+      return;
+    }
+    const popup = window.open('about:blank', 'libresky-pay', 'popup=yes,width=480,height=760');
+    startVerify(product, popup);
+    return;
+  }
   if (act === 'design') {
     event.preventDefault();
     applyDesign(!designOn());
@@ -13345,6 +13534,12 @@ function bind() {
   });
   $('about-close')?.addEventListener('click', () => $('about')?.close());
   $('help-close')?.addEventListener('click', () => $('help')?.close());
+  $('verify-close')?.addEventListener('click', () => $('verify')?.close());
+  $('verify')?.addEventListener('close', () => {
+    verifyGen += 1;
+    if (payDone) paintPaidCheck();
+  });
+  window.addEventListener('message', onPayMessage);
   $('lanes-close')?.addEventListener('click', () => $('lanes')?.close());
   $('searches-close')?.addEventListener('click', () => $('searches')?.close());
   $('searches')?.querySelector('form')?.addEventListener('submit', (event) => event.preventDefault());

@@ -42,6 +42,9 @@ const PUBLIC = 'https://public.api.bsky.app';
 const PUBLIC_ALT = 'https://api.bsky.app';
 export const CENSUS_URL = 'https://libresky-server.sociallydead.me/api/checkin';
 export const CERTS_URL = 'https://libresky-server.sociallydead.me/api/certs';
+export const PAY_URL = 'https://libresky-server.sociallydead.me/api/pay';
+const PAY_AUD = 'did:web:libresky-server.sociallydead.me';
+const PAY_LXM = 'app.libresky.server.pay';
 const CENSUS_WINDOW_MS = 15_000;
 const censusAt = new Map();
 export const WHATS_HOT = 'at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot';
@@ -81,6 +84,61 @@ export async function loadCerts() {
   const body = await res.json().catch(() => null);
   if (!res.ok || !body?.ok || !body.certs || typeof body.certs !== 'object') throw new Error('certs');
   return body.certs;
+}
+
+/**
+ * The token the verification dialog sends. An app password uses its access token.
+ * OAuth asks Bluesky for a short service token, because the access token is DPoP-bound.
+ */
+export async function payAccessToken() {
+  if (getPassword()?.accessJwt) {
+    const ok = await ensurePasswordSession();
+    if (!ok) return '';
+    return getPassword()?.accessJwt || '';
+  }
+  if (!getOauth()) return '';
+  try {
+    const exp = Math.floor(Date.now() / 1000) + 90;
+    const data = await xrpc('com.atproto.server.getServiceAuth', {
+      auth: 'required',
+      params: { aud: PAY_AUD, lxm: PAY_LXM, exp },
+    });
+    if (data?.token) return String(data.token);
+  } catch {
+    /* the access token is the fallback when Bluesky will not sign one */
+  }
+  try {
+    const set = await getOauth().getTokenSet('auto');
+    return set?.access_token || '';
+  } catch {
+    return '';
+  }
+}
+
+async function payFetch(path, options = {}) {
+  const headers = { Accept: 'application/json' };
+  const token = await payAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`${PAY_URL}${path}`, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok) throw new Error(body?.error || 'Could not reach verification.');
+  return body;
+}
+
+/** Products, and the signed-in account when the token is present. */
+export function payOffer() {
+  return payFetch('');
+}
+
+/** Starts a PayPal order for the signed-in account. The body does not name an account. */
+export function payStart(product) {
+  return payFetch('', { method: 'POST', body: { product } });
 }
 
 /** Tell the LibreSky server this account opened the client. Launch and sign-in count a visit. A pulse runs when Available or Away is written. */

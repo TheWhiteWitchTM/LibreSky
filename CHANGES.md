@@ -4,6 +4,10 @@ This is the record of the release candidate you can [open today](https://libresk
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 17 November 2026
+
+- Get verified replaces Support development in the menu and beside Debug. It shows for every account, including an admin. The dialog lists the two checks, waits while PayPal finishes, then thanks you. Close stays on the dialog.
+
 ## 15 November 2026
 
 - The red beta is gone. Debug is a bug icon beside page config. Design view stays inside that dialog.
