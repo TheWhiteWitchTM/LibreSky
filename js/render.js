@@ -143,6 +143,16 @@ function checkMark(label, kind, seal = false) {
   return `<svg class="${classes}" viewBox="0 0 16 16" role="img" aria-label="${attr(label)}"><title>${attr(label)}</title>${shape}<path fill="var(--bg)" d="M6.6 11.2 3.8 8.4l1.1-1.1 1.7 1.7 4.4-4.4 1.1 1.1z"/></svg>`;
 }
 
+/** The same checks, kept outside the name so a long handle cannot clip them. */
+export function marksHtml(actor) {
+  if (!actor || deletedAccount(actor)) return '';
+  return verifiedMark(actor);
+}
+
+function nameMark(label, actor) {
+  return `<span class="name-text">${escapeHtml(label || 'Account')}</span>${marksHtml(actor)}`;
+}
+
 function otherVerifiers(actor) {
   const list = Array.isArray(actor?.verification?.verifications) ? actor.verification.verifications : [];
   const names = [];
@@ -206,6 +216,22 @@ function action(name, label, on, count, listAct, countLabel) {
     ? `<button type="button" class="count-link" data-act="${listAct}" aria-label="${attr(countLabel || `${label} count`)}">${shown}</button>`
     : `<span class="count">${shown}</span>`;
   return `<span class="action-group ${name}${on ? ' on' : ''}">${button}${countHtml}</span>`;
+}
+
+function engageHtml(post) {
+  if (!post?.uri || !post?.cid) return '';
+  const number = counts(post);
+  const liked = Boolean(post.viewer?.like);
+  const reposted = Boolean(post.viewer?.repost);
+  const saved = Boolean(post.viewer?.bookmarked || post.viewer?.bookmark);
+  return `<div class="actions embed-actions">${action('reply', 'Reply', false, number.reply)}${action('repost', 'Repost', reposted, number.repost, 'reposts', 'Reposts and quotes')}${action('like', 'Like', liked, number.like, 'likes')}${action('bookmark', 'Bookmark', saved, 0)}</div>`;
+}
+
+function embedAttrs(post) {
+  if (!post?.uri) return '';
+  const number = counts(post);
+  const saved = Boolean(post.viewer?.bookmarked || post.viewer?.bookmark);
+  return ` data-uri="${attr(post.uri)}" data-cid="${attr(post.cid || '')}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-reply-count="${number.reply}" data-bookmarked="${saved ? '1' : '0'}"`;
 }
 
 function gallery(images) {
@@ -340,15 +366,19 @@ function quote(view, linked = true) {
     const author = record.author || {};
     const text = record.value?.text ?? record.record?.text ?? '';
     const facets = record.value?.facets || record.record?.facets;
-    bag.set(record.uri, { post: { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author } });
+    const quoted = { ...record, record: record.value || record.record, uri: record.uri, cid: record.cid, author };
+    bag.set(record.uri, { post: quoted });
     const postHref = postHash({ uri: record.uri, author });
     const face = accountIcon(author, 'sm');
-    const line = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong>${author.handle ? ` <span class="at">@${escapeHtml(author.handle)}</span>` : ''}${author.did ? presenceLine(author.did) : ''}</span>`;
+    const at = author.handle ? `<span class="at">@${escapeHtml(author.handle)}</span>` : '';
+    const line = `<span class="line"><strong class="name">${nameMark(author.displayName || author.handle || 'Post', author)}</strong>${at}</span>`;
     const head = linked
       ? `<span class="quote-head">${face}<a href="${attr(postHref)}">${line}</a></span>`
       : `<span class="quote-head">${face}${line}</span>`;
     const data = linked ? ` data-href="${attr(postHref)}"` : '';
-    return `<div class="quote"${data}>${head}<span class="quote-text">${richText(text, facets)}</span></div>`;
+    const actions = linked ? engageHtml(quoted) : '';
+    const attrs = linked ? embedAttrs(quoted) : '';
+    return `<div class="quote${linked ? ' embed-post' : ''}"${data}${attrs}>${head}<span class="quote-text">${richText(text, facets)}</span>${actions}</div>`;
   }
   const who = record.creator || record.author;
   if (record.displayName && who) {
@@ -413,14 +443,14 @@ function atHandle(actor) {
   return bareHandle(actor);
 }
 
-export function whoHtml(actor, { presence = undefined, verified = true } = {}) {
+export function whoHtml(actor, { presence = undefined, verified = true, live = false } = {}) {
   if (!actor) return '';
   const name = displayNameOf(actor) || 'Account';
   const handle = atHandle(actor);
-  const mark = verified ? verifiedMark(actor) : '';
+  const mark = verified ? marksHtml(actor) : '';
   const at = handle ? `<span class="at">@${escapeHtml(handle)}</span>` : '';
-  const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did, presence) : '';
-  return `<span class="who"><strong>${escapeHtml(name)}${mark}</strong>${at}${line}</span>`;
+  const line = live && actor.did && !deletedAccount(actor) ? presenceLine(actor.did, presence) : '';
+  return `<span class="who"><strong><span class="name-text">${escapeHtml(name)}</span>${mark}</strong>${at}${line}</span>`;
 }
 
 function creditText(actor) {
@@ -443,7 +473,7 @@ function parentUnavailable(parent) {
 function replyingLine(parent) {
   const author = parent?.author || parent?.post?.author || {};
   if (!author.handle) return '';
-  return `<a class="replying" href="${profileHash(author)}">Replying to @${escapeHtml(author.handle)}</a>`;
+  return `<a class="replying name" href="${profileHash(author)}"><span class="name-text">Replying to @${escapeHtml(author.handle)}</span>${marksHtml(author)}</a>`;
 }
 
 function parentContext(item, level) {
@@ -461,7 +491,8 @@ function parentContext(item, level) {
   const href = postHash({ uri: post.uri, author });
   bag.set(post.uri, { post: { ...post, record, uri: post.uri, cid: post.cid, author } });
   const face = accountIcon(author, 'sm');
-  const who = `<span class="line"><strong>${escapeHtml(author.displayName || author.handle || 'Post')}</strong>${author.handle ? ` <span class="at">@${escapeHtml(author.handle)}</span>` : ''}${author.did ? presenceLine(author.did) : ''}</span>`;
+  const at = author.handle ? `<span class="at">@${escapeHtml(author.handle)}</span>` : '';
+  const who = `<span class="line"><strong class="name">${nameMark(author.displayName || author.handle || 'Post', author)}</strong>${at}</span>`;
   const body = text ? `<span class="reply-text">${richText(text, record.facets)}</span>` : '';
   const media = level === 'full' ? embedHtml(post.embed || record.embed) : '';
   return `<div class="reply-context${level === 'full' ? ' full' : ''}">${face}<a class="reply-card" href="${attr(href)}">${who}${body}</a>${media}</div>`;
@@ -487,14 +518,13 @@ export function postHtml(item, options = {}) {
   const blur = warned(post) ? ' blurred' : '';
   return `<article class="post${options.connected ? ' connected' : ''}${options.feed === false ? '' : ' feed-post'}" data-feed="${options.feed === false ? '0' : '1'}" data-uri="${attr(post.uri)}" data-cid="${attr(post.cid)}" data-did="${attr(author.did)}" data-handle="${attr(author.handle)}" data-like="${attr(post.viewer?.like || '')}" data-repost="${attr(post.viewer?.repost || '')}" data-like-count="${number.like}" data-repost-count="${number.repost}" data-reply-count="${number.reply}" data-bookmarked="${saved ? '1' : '0'}">
     ${pinned ? `<p class="pinned-label">${icon('pin')} Pinned</p>` : ''}
-    ${repostBy ? `<a class="repost-line" href="${profileHash(repostBy)}">${icon('repost')}<span>${escapeHtml(creditText(repostBy))} reposted</span></a>` : ''}
+    ${repostBy ? `<a class="repost-line name" href="${profileHash(repostBy)}">${icon('repost')}<span class="name-text">${escapeHtml(creditText(repostBy))}</span>${marksHtml(repostBy)}<span> reposted</span></a>` : ''}
     <div class="post-row">
       ${accountIcon(author, '', 'avatar-link')}
       <div class="post-main">
         <div class="post-top">
-          <a class="name" href="${profileHash(author)}">${escapeHtml(author.displayName || author.handle || 'User')}${verifiedMark(author)}</a>
+          <a class="name" href="${profileHash(author)}">${nameMark(author.displayName || author.handle || 'User', author)}</a>
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
-          ${author.did && !deletedAccount(author) ? presenceLine(author.did) : ''}
           <a class="time" href="${postHash(post)}" data-tip="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
           <span class="post-tools"><button type="button" class="icon-btn speak" data-act="speak" aria-pressed="false" aria-label="Read aloud">${icon('speaker')}<span class="sr-name" aria-hidden="true">Read aloud</span></button><button type="button" class="icon-btn more" data-act="more" aria-label="More">${icon('more')}<span class="sr-name" aria-hidden="true">More</span></button></span>
@@ -644,7 +674,7 @@ export function profileHtml(profile, options = {}) {
       ${avatar(profile.avatar, name, 'xl')}
       <div id="profile-action"></div>
     </div>
-    <h2>${escapeHtml(name)}${verifiedMark(profile)}</h2>
+    <h2>${nameMark(name, profile)}</h2>
     <div class="handle-row"><div class="handle">@${escapeHtml(profile.handle)}</div>${presenceLine(profile.did, options.presence)}</div>
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     ${socialToolbarHtml(options.links)}
@@ -789,7 +819,7 @@ export function groupNotifications(notes) {
 }
 
 function personLink(actor) {
-  return `<a href="${profileHash(actor)}">${escapeHtml(displayNameOf(actor) || 'Someone')}${verifiedMark(actor)}</a>`;
+  return `<a class="name" href="${profileHash(actor)}">${nameMark(displayNameOf(actor) || 'Someone', actor)}</a>`;
 }
 
 function atMark(actor) {
@@ -798,15 +828,13 @@ function atMark(actor) {
   return `<a class="at" href="${profileHash(actor)}">@${escapeHtml(handle)}</a>`;
 }
 
-function personBits(actor, presence) {
-  const line = presence && actor?.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
-  return `<strong>${personLink(actor)}</strong> ${atMark(actor)}${line}`;
+function personBits(actor) {
+  return `<strong>${personLink(actor)}</strong> ${atMark(actor)}`;
 }
 
 function peopleLabel(authors) {
   const names = (authors || []).filter((actor) => actor && (actor.did || actor.handle));
-  const one = names.length === 1;
-  const linked = names.map((actor) => personBits(actor, one));
+  const linked = names.map((actor) => personBits(actor));
   if (linked.length <= 1) return linked[0] || '<strong>Someone</strong>';
   if (linked.length === 2) return `${linked[0]} and ${linked[1]}`;
   if (linked.length === 3) return `${linked[0]}, ${linked[1]}, and ${linked[2]}`;
@@ -1120,7 +1148,7 @@ export function convoHtml(convo, me, options = {}) {
   const remove = gone
     ? `<button type="button" class="danger mini" data-act="leave-convo" data-convo="${attr(convo.id)}">Remove</button>`
     : '';
-  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other);
+  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other, { live: true });
   return `<div class="person convo${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}">${identity}<span class="handle">${escapeHtml(text).slice(0, 140)}</span></a><span class="row-actions">${pill}${request || remove}</span></div>`;
 }
 
@@ -1221,7 +1249,7 @@ export function callConvoHtml(convo, me) {
   const unread = convoUnread(convo, me);
   const pill = unread ? `<b class="pill">${unread}</b>` : '';
   const tools = !gone && other.did ? callToolsHtml(other.did) : '';
-  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other);
+  const identity = gone ? `<strong>${escapeHtml(name)}</strong>` : whoHtml(other, { live: true });
   const href = convo.id ? `#/messages/${encodeURIComponent(convo.id)}` : '#/messages';
   return `<div class="person call-row${gone ? ' gone' : ''}${unread ? ' unread' : ''}">${avatar(other.avatar, name)}<a class="person-link" href="${href}">${identity}<span class="handle">${escapeHtml(String(text).slice(0, 140))}</span></a><span class="row-actions">${pill}${tools}</span></div>`;
 }
@@ -1257,7 +1285,7 @@ export function chatHeaderHtml(actor) {
   const handle = atHandle(actor);
   const at = handle ? `<a class="at" href="${attr(href)}">@${escapeHtml(handle)}</a>` : '';
   const line = actor.did && !deletedAccount(actor) ? presenceLine(actor.did) : '';
-  return `${accountIcon(actor)}<span class="chat-id"><a class="name" href="${attr(href)}">${escapeHtml(name)}${verifiedMark(actor)}</a>${at}${line}</span>`;
+  return `${accountIcon(actor)}<span class="chat-id"><a class="name" href="${attr(href)}">${nameMark(name, actor)}</a>${at}${line}</span>`;
 }
 
 export function hoverCardHtml(profile, self = '') {
@@ -1270,7 +1298,7 @@ export function hoverCardHtml(profile, self = '') {
     : '';
   const bio = profile?.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : '';
   const line = profile?.did ? presenceLine(profile.did) : '';
-  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${escapeHtml(name)}${verifiedMark(profile || {})}</strong></a><div class="handle-row"><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${line}</div>${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
+  return `<div class="hover-banner">${banner ? `<img src="${attr(banner)}" alt="" onerror="this.remove()">` : ''}</div><div class="hover-body"><div class="hover-top">${avatar(profile?.avatar, name, 'xl')}${follow}</div><a class="hover-name" href="${profileHash(profile)}"><strong>${nameMark(name, profile || {})}</strong></a><div class="handle-row"><div class="handle">@${escapeHtml(profile?.handle || '')}</div>${line}</div>${bio}<p class="counts"><span><strong>${fullCount(profile?.followsCount)}</strong> following</span><span><strong>${fullCount(profile?.followersCount)}</strong> followers</span></p></div>`;
 }
 
 export function packHtml(pack) {
@@ -1290,7 +1318,7 @@ export function callRequestHtml(offer) {
   const label = offer?.ringing
     ? (video ? 'Incoming video call' : 'Incoming voice call')
     : (video ? 'Video call request' : 'Voice call request');
-  const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '', verification: offer?.verification }) || `<strong>${escapeHtml(name)}</strong>`;
+  const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '', verification: offer?.verification }, { live: true }) || `<strong>${escapeHtml(name)}</strong>`;
   return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link">${identity}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
 }
 

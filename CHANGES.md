@@ -6,6 +6,9 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 17 November 2026
 
+- A check stays on the name. Posts, quotes, replies, the signed-in account, and Mira's handle use the same marks. A long handle no longer clips the mark off the end of the name.
+- Available, Away, Uses LibreSky, and Not on LibreSky stay on a profile, a chat, a voice or video call, and a game. They no longer sit behind every post.
+- A quoted post has Reply, Repost, Like, and Bookmark, the same actions as the post around it.
 - Get verified replaces Support development in the menu and beside Debug. It shows for every account, including an admin. The dialog lists the two checks, waits while PayPal finishes, then thanks you. Close stays on the dialog.
 - Supporter is $20. Your amount is the third choice. More than $1 is the green check. More than $20 is the orange check.
 

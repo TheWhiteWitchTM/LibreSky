@@ -1224,6 +1224,40 @@ const adminNote = notificationsHtml([{
 }]);
 assert.match(adminNote, /aria-label="Admin"/);
 assert.doesNotMatch(adminNote, /Domain verified/);
+assert.doesNotMatch(adminNote, /data-presence/);
+const miraPost = postHtml({
+  post: {
+    uri: 'at://did:sd/app.bsky.feed.post/mira',
+    cid: 'bafyreimira',
+    author: { did: 'did:sd', handle: 'miratechtm.sociallydead.me', displayName: 'Mira' },
+    record: { text: 'Hello from Mira', createdAt: '2026-10-20T00:00:00.000Z' },
+    indexedAt: '2026-10-20T00:00:00.000Z',
+    embed: {
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        $type: 'app.bsky.embed.record#viewRecord',
+        uri: 'at://did:sd/app.bsky.feed.post/quoted',
+        cid: 'bafyreiquote',
+        author: { did: 'did:sd', handle: 'miratechtm.sociallydead.me', displayName: 'Mira' },
+        value: { text: 'A verified post' },
+        likeCount: 2,
+        replyCount: 1,
+        repostCount: 3,
+      },
+    },
+  },
+});
+const miraQuote = miraPost.slice(miraPost.indexOf('class="quote'));
+assert.match(miraPost, /class="name-text">Mira</);
+assert.match(miraPost, /aria-label="Admin"/);
+assert.doesNotMatch(miraPost, /data-presence/);
+assert.match(miraQuote, /aria-label="Admin"/);
+assert.match(miraQuote, /data-act="reply"/);
+assert.match(miraQuote, /data-act="repost"/);
+assert.match(miraQuote, /data-act="like"/);
+assert.match(miraQuote, /class="quote embed-post"/);
+assert.match(appSource, /marksHtml\(profile\)/);
+assert.match(adminChat, /data-presence="did:sd"/);
 const invalidProfile = profileHtml({ handle: 'handle.invalid', displayName: 'Gone', did: 'did:plc:gone' });
 assert.doesNotMatch(invalidProfile, /verified/);
 assert.match(appSource, /soundRow\('chat', 'New chat messages'/);
@@ -1823,6 +1857,7 @@ assert.doesNotMatch(personLink[0], /data-act="follow"/);
 assert.doesNotMatch(personLink[0], /data-act="account-card"/);
 assert.match(personRow, /data-act="account-card"/);
 assert.match(personRow, /data-act="follow"/);
+assert.doesNotMatch(personRow, /data-presence/);
 assert.match(appSource, /function avatarHoverTarget/);
 assert.match(appSource, /document.addEventListener\('pointerover', scheduleHover\)/);
 assert.doesNotMatch(appSource, /closest\?\.\('a\[href\^="#\/profile\/"\]'\)/);

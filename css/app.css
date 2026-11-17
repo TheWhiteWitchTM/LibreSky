@@ -337,9 +337,9 @@ img { max-width: 100%; }
 .headline h1:has(.presence-line) > a,
 .headline h1 .chat-id .name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
 }
+.headline h1 .chat-id .name { display: inline-flex; align-items: center; flex: 1 1 auto; }
 .headline h1 .presence-line { flex: none; margin-top: 0; }
 .chat-id {
   display: flex;
@@ -471,9 +471,11 @@ img { max-width: 100%; }
 }
 .account:hover { background: var(--hover); }
 .account-text { display: flex; flex-direction: column; min-width: 0; }
-.account-text strong, .account-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-text #account-handle,
+.account-text .handle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-text span, .handle, .dim, .domain, .time, .replying { color: var(--text-2); }
-.account-text strong { font-size: 15px; }
+.account-text strong { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; overflow: visible; font-size: 15px; color: var(--text); }
+.account-text strong .name-text { color: var(--text); }
 
 .center { min-width: 0; min-height: calc(100vh - var(--top-h, 52px)); border-left: 1px solid var(--border); border-right: 1px solid var(--border); grid-column: 2; }
 .sticky-head {
@@ -813,7 +815,16 @@ img { max-width: 100%; }
 .post-row > .avatar-btn { align-self: start; }
 .post-top { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
 .name { font-weight: 700; }
-.name, .handle, .time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.handle, .time, .name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  flex: 0 1 auto;
+}
+.verified { flex: none; }
 .time { margin-left: 2px; }
 .time::before { content: "· "; }
 .more { align-self: center; }
@@ -841,6 +852,12 @@ img { max-width: 100%; }
   min-width: 0;
 }
 .reply-context .line strong,
+.reply-context .line .name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: visible;
+}
 .reply-context .at {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -968,7 +985,7 @@ button.avatar-btn:focus-visible {
 .action.bookmark.on { color: var(--blue); }
 .action.bookmark.on .ico { fill: currentColor; }
 .action.bookmark:hover, .action.share:hover { color: var(--blue); background: rgba(0, 133, 255, 0.14); }
-.verified { width: 16px; height: 16px; margin-left: 4px; vertical-align: -2px; color: var(--mark-blue); }
+.verified { width: 16px; height: 16px; margin-left: 4px; flex: none; vertical-align: -2px; color: var(--mark-blue); }
 .verified.official { color: var(--mark-gold); }
 .verified.domain, .verified.basic, .verified.level { color: var(--mark-green); }
 .verified.admin { color: var(--mark-red); }
@@ -1011,6 +1028,9 @@ button.avatar-btn:focus-visible {
 .quote-text, .desc, .snip { color: var(--text); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: calc(15px * var(--post-scale)); }
 .card-body strong { display: block; }
 .quote .line { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.quote .line .name { flex: 0 1 auto; }
+.quote .actions { margin-top: 2px; }
+.quote .action, .quote .count-link { padding-top: 4px; padding-bottom: 4px; }
 .unavailable, .missing { margin-top: 8px; color: var(--text-2); }
 .video {
   position: relative;
@@ -1300,8 +1320,14 @@ button.avatar-btn:focus-visible {
   max-width: 100%;
 }
 .person .who strong,
-.article-by .who strong { display: inline; }
-.who strong,
+.article-by .who strong { display: inline-flex; align-items: center; }
+.who strong {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+}
 .who .at {
   min-width: 0;
   overflow: hidden;
@@ -1605,7 +1631,10 @@ a.person.request-entry { width: 100%; }
 }
 .banner img.is-in { opacity: 1; }
 .profile-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; padding: 0 16px; }
-.profile h2 { margin: 10px 16px 0; font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+.profile h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 10px 16px 0; font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+.profile h2 .name-text { min-width: 0; }
+.game-opponent { margin: 0 0 8px; }
+.game-opponent .who { max-width: 100%; }
 .profile .handle, .bio, .counts, .joined { margin: 2px 16px; }
 .joined { margin-top: 8px; color: var(--text-2); }
 .profile-more {

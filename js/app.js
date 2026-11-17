@@ -45,6 +45,7 @@ import {
   trendsHtml,
   noteCert,
   setCerts,
+  marksHtml,
   whoHtml,
 } from './render.js';
 import {
@@ -533,7 +534,8 @@ function updateAccount() {
   const profile = account();
   const name = profile?.displayName || profile?.handle || 'Sign in';
   const handle = profile?.handle ? `@${profile.handle}` : 'Bluesky account';
-  $('account-name').textContent = name;
+  const named = $('account-name');
+  if (named) named.innerHTML = `<span class="name-text">${escapeHtml(name)}</span>${profile?.handle || profile?.did ? marksHtml(profile) : ''}`;
   $('account-handle').textContent = handle;
   const avatar = $('account-avatar');
   avatar.dataset.initial = (name.trim().charAt(0) || 'L').toUpperCase();
@@ -1025,7 +1027,7 @@ function paintIncomingBar(offer) {
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
   const request = offer.requested ? ' data-request="1"' : '';
-  const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '', verification: offer.verification }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
+  const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '', verification: offer.verification }, { live: true }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
   bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong>${who}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
   showPresence(bar);
   paintBadge('calls-badge', 1);
@@ -2592,6 +2594,7 @@ function fillChatTitle(actor, token) {
       handle: profile.handle || actor.handle,
       displayName: profile.displayName,
       avatar: actor.avatar || profile.avatar || '',
+      verification: profile.verification || actor.verification,
     });
   }).catch(() => {});
 }
@@ -4171,7 +4174,7 @@ function accountListHtml() {
     const initial = (name.trim().charAt(0) || 'L').toUpperCase();
     const photo = entry.avatar ? `<img src="${escapeHtml(entry.avatar)}" alt="">` : '';
     const removeLabel = on ? 'Sign out' : 'Remove';
-    return `<div class="account-line"><button type="button" class="account-switch${on ? ' on' : ''}" data-act="switch-account" data-did="${escapeHtml(entry.did)}"><span class="avatar" data-initial="${escapeHtml(initial)}">${photo}</span><span><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)} · ${kind}${on ? ' · Current' : ''}</span></span></button><button type="button" class="text-btn mini" data-act="remove-account" data-did="${escapeHtml(entry.did)}">${removeLabel}</button></div>`;
+    return `<div class="account-line"><button type="button" class="account-switch${on ? ' on' : ''}" data-act="switch-account" data-did="${escapeHtml(entry.did)}"><span class="avatar" data-initial="${escapeHtml(initial)}">${photo}</span><span><strong class="name"><span class="name-text">${escapeHtml(name)}</span>${marksHtml(entry)}</strong><span class="handle">${escapeHtml(handle)} · ${kind}${on ? ' · Current' : ''}</span></span></button><button type="button" class="text-btn mini" data-act="remove-account" data-did="${escapeHtml(entry.did)}">${removeLabel}</button></div>`;
   }).join('');
 }
 
@@ -6546,7 +6549,7 @@ function gameControls() {
 
 function personRow(row) {
   const pressed = gameMatch.picked === row.convoId ? 'true' : 'false';
-  const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.did, verification: row.verification });
+  const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.did, verification: row.verification }, { live: true });
   return `<button type="button" class="person" data-act="game-pick" data-convo="${escapeHtml(row.convoId)}" aria-pressed="${pressed}">${avatar(row.avatar, row.name)}<span class="person-link">${who}</span><span class="dim">${row.kind}</span></button>`;
 }
 
@@ -6586,7 +6589,16 @@ function playHtml() {
   });
   const promo = gameMatch.promos?.length ? promoHtml(gameMatch.promos) : '';
   const side = youLabel();
-  return `<div class="game-play"><div class="game-board">${promo}${board}</div><aside class="game-panel"><p class="game-status">${escapeHtml(statusLine())}</p>${side ? `<p class="dim game-you">You play ${escapeHtml(side)}</p>` : ''}${sideHtml()}${logHtml(gameMatch.state)}<div class="game-foot">${gameControls()}</div></aside></div>`;
+  const opponent = gameMatch.mode === 'net' && gameMatch.peerDid
+    ? whoHtml({
+      displayName: gameMatch.opponent,
+      handle: gameMatch.peerHandle || '',
+      did: gameMatch.peerDid,
+      verification: gameMatch.peerVerification,
+    }, { live: true })
+    : '';
+  const facing = opponent ? `<div class="game-opponent">${opponent}</div>` : '';
+  return `<div class="game-play"><div class="game-board">${promo}${board}</div><aside class="game-panel">${facing}<p class="game-status">${escapeHtml(statusLine())}</p>${side ? `<p class="dim game-you">You play ${escapeHtml(side)}</p>` : ''}${sideHtml()}${logHtml(gameMatch.state)}<div class="game-foot">${gameControls()}</div></aside></div>`;
 }
 
 function paintMatch() {
@@ -6595,7 +6607,7 @@ function paintMatch() {
   const full = $('game')?.classList.contains('is-full');
   const name = gameById(gameMatch.game).name;
   stage.innerHTML = `<div class="game-head"><h2 id="game-title">${escapeHtml(name)}</h2><div class="game-head-actions"><button type="button" class="text-btn" data-act="game-full">${full ? 'Exit full screen' : 'Full screen'}</button><button type="button" class="text-btn" data-act="game-close">Close</button></div></div>${gameMatch.mode === 'pick' ? pickerHtml() : playHtml()}`;
-  if (gameMatch.mode === 'pick') showPresence(stage);
+  if (gameMatch.mode === 'pick' || gameMatch.mode === 'net') showPresence(stage);
   paintGameChrome();
 }
 
@@ -6685,6 +6697,7 @@ function peerOf(convoId, preferDid) {
     name: other?.displayName || (other?.handle ? `@${other.handle}` : 'Someone'),
     avatar: other?.avatar || '',
     handle: other?.handle || '',
+    verification: other?.verification,
   };
 }
 
@@ -6695,6 +6708,9 @@ function beginNet(replay, convoId) {
     state: replay.state,
     you: replay.you,
     opponent: peer.name,
+    peerDid: peer.did,
+    peerHandle: peer.handle,
+    peerVerification: peer.verification,
     convoId,
     rkey: replay.rkey,
     accepted: replay.accepted,
@@ -8178,10 +8194,20 @@ function route(options = {}) {
 }
 
 function postFrom(node) {
+  const embedded = node?.closest?.('.embed-post[data-uri]');
+  if (embedded) {
+    const item = posts.get(embedded.dataset.uri);
+    if (item) return { article: embedded, item, post: item.post || item };
+  }
   const article = node?.closest?.('.post') || node?.closest?.('article.note[data-uri]');
   if (!article) return null;
   const item = posts.get(article.dataset.uri);
   return { article, item, post: item?.post || item };
+}
+
+function ownAction(root, name) {
+  if (!root?.querySelectorAll) return null;
+  return [...root.querySelectorAll(`.action.${name}`)].find((button) => button.closest('[data-uri]') === root) || null;
 }
 
 function gifEmbed(external) {
@@ -12677,7 +12703,8 @@ async function toggleLike(found) {
   if (!signedIn()) return requireSignIn();
   const article = found.article;
   const existing = article.dataset.like;
-  const button = article.querySelector('.action.like');
+  const button = ownAction(article, 'like');
+  if (!button) return;
   const previous = Number(article.dataset.likeCount || 0);
   const nextOn = !existing;
   article.dataset.like = nextOn ? 'pending' : '';
@@ -12711,7 +12738,8 @@ async function toggleRepost(found) {
   if (!signedIn()) return requireSignIn();
   const article = found.article;
   const existing = article.dataset.repost;
-  const button = article.querySelector('.action.repost');
+  const button = ownAction(article, 'repost');
+  if (!button) return;
   const previous = Number(article.dataset.repostCount || 0);
   const nextOn = !existing;
   const nextCount = Math.max(0, previous + (nextOn ? 1 : -1));
@@ -12815,7 +12843,7 @@ function paintSendChatList() {
     ? `<button type="button" class="person send-chat-row" data-act="send-chat-handle" data-handle="${escapeHtml(handle)}">${avatar('', handle)}<span class="person-link"><strong>@${escapeHtml(handle)}</strong><span class="handle">Send to this handle</span></span></button>`
     : '';
   const rows = people.map((row) => {
-    const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.other.did, verification: row.other.verification });
+    const who = whoHtml({ displayName: row.name, handle: row.handle, did: row.other.did, verification: row.other.verification }, { live: true });
     const extra = row.handle ? '' : '<span class="handle">Chat</span>';
     return `<button type="button" class="person send-chat-row" data-act="send-chat-to" data-convo="${escapeHtml(row.convo.id)}">${avatar(row.other.avatar, row.name)}<span class="person-link">${who}${extra}</span></button>`;
   }).join('');
@@ -13458,11 +13486,11 @@ function onKey(event) {
   }
   const current = postsOnPage()[selected];
   if (!current) return;
-  if (event.key === 'l') current.querySelector('.action.like')?.click();
-  if (event.key === 'r') current.querySelector('.action.reply')?.click();
-  if (event.key === 't') current.querySelector('.action.repost')?.click();
-  if (event.key === 'b') current.querySelector('.action.bookmark')?.click();
-  if (event.key === 's') current.querySelector('.action.share')?.click();
+  if (event.key === 'l') ownAction(current, 'like')?.click();
+  if (event.key === 'r') ownAction(current, 'reply')?.click();
+  if (event.key === 't') ownAction(current, 'repost')?.click();
+  if (event.key === 'b') ownAction(current, 'bookmark')?.click();
+  if (event.key === 's') ownAction(current, 'share')?.click();
   if (event.key === 'Enter') current.querySelector('.time')?.click();
 }
 
