@@ -74,7 +74,7 @@ export function censusCall(did, handle, sentAt = 0, now = Date.now()) {
   };
 }
 
-/** Tell the LibreSky server this account opened the client. Launch, login, and once a minute while it stays open. */
+/** Tell the LibreSky server this account opened the client. Launch and sign-in count a visit. A pulse runs when Available or Away is written. */
 export function reportUse(did, handle, pulse = false) {
   const call = censusCall(did, handle, censusAt.get(String(did || '').trim()) || 0);
   if (!call) return;

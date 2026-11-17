@@ -576,7 +576,7 @@ async function loadMe() {
   rememberCurrent();
   refreshBadge();
   loadRail();
-  if (did) pulsePresence(true);
+  if (did) pulsePresence(true, '', false);
   if (did && followDeskPrefs().auto) {
     const owner = did;
     setTimeout(() => { if (myDid() === owner) runFollowBack(false); }, 5000);
@@ -2506,7 +2506,7 @@ async function showPresence(root) {
   fillPresence(scope);
 }
 
-async function pulsePresence(force = false, override = '') {
+async function pulsePresence(force = false, override = '', report = true) {
   const did = myDid();
   if (!signedIn() || !did) return;
   if (did !== presenceDid) {
@@ -2521,6 +2521,7 @@ async function pulsePresence(force = false, override = '') {
   if (!force && !api.presencePulseDue(known, status)) return;
   if (presenceBusy) return;
   presenceBusy = true;
+  if (report) reportOpen(true);
   try {
     const view = await api.writePresence(status);
     if (myDid() !== did) return;
@@ -12946,6 +12947,7 @@ async function removeAccount(did) {
 async function signOut() {
   const did = myDid();
   if (did) {
+    reportOpen(true);
     try {
       await Promise.race([
         api.writePresence('away'),
@@ -14564,7 +14566,6 @@ async function boot() {
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 4000);
   setInterval(() => { pulsePresence(false); }, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') showPresence(document); }, 60000);
-  setInterval(() => { if (document.visibilityState === 'visible') reportOpen(true); }, 60000);
   window.addEventListener('resize', placeOpenLayers);
   window.addEventListener('scroll', placeOpenLayers, true);
   window.visualViewport?.addEventListener('resize', placeOpenLayers);

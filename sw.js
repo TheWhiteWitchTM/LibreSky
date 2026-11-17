@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-11-17-census';
+const CACHE = 'libresky-2026-11-17-online';
 
 const SHELL = [
   './',
@@ -59,15 +59,21 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.includes('/download/')) return;
 
   event.respondWith((async () => {
+    const cached = await caches.match(req);
     try {
       const fresh = await fetch(req, { cache: 'no-cache' });
       if (fresh && fresh.ok && fresh.type === 'basic') {
         const cache = await caches.open(CACHE);
         cache.put(req, fresh.clone());
+        return fresh;
+      }
+      if (cached) return cached;
+      if (req.mode === 'navigate') {
+        const home = await caches.match('./');
+        if (home) return home;
       }
       return fresh;
     } catch (err) {
-      const cached = await caches.match(req);
       if (cached) return cached;
       if (req.mode === 'navigate') {
         const home = await caches.match('./');
