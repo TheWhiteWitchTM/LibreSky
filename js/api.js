@@ -74,12 +74,12 @@ export function censusCall(did, handle, sentAt = 0, now = Date.now()) {
   };
 }
 
-/** Tell the LibreSky server this account opened the client. Launch and login. */
-export function reportUse(did, handle) {
+/** Tell the LibreSky server this account opened the client. Launch, login, and once a minute while it stays open. */
+export function reportUse(did, handle, pulse = false) {
   const call = censusCall(did, handle, censusAt.get(String(did || '').trim()) || 0);
   if (!call) return;
   censusAt.set(call.did, call.at);
-  const body = JSON.stringify({ did: call.did, handle: call.handle });
+  const body = JSON.stringify({ did: call.did, handle: call.handle, pulse: Boolean(pulse) });
   const send = () => fetch(CENSUS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

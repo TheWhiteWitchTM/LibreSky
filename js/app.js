@@ -583,10 +583,10 @@ async function loadMe() {
   }
 }
 
-function reportOpen() {
+function reportOpen(pulse = false) {
   const did = myDid();
   if (!did) return;
-  api.reportUse(did, me.profile?.handle || getPassword()?.handle || '');
+  api.reportUse(did, me.profile?.handle || getPassword()?.handle || '', pulse);
 }
 
 function rememberCurrent() {
@@ -14564,6 +14564,7 @@ async function boot() {
   setInterval(() => { if (document.visibilityState === 'visible') refreshBadge(); }, 4000);
   setInterval(() => { pulsePresence(false); }, 30000);
   setInterval(() => { if (document.visibilityState === 'visible') showPresence(document); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible') reportOpen(true); }, 60000);
   window.addEventListener('resize', placeOpenLayers);
   window.addEventListener('scroll', placeOpenLayers, true);
   window.visualViewport?.addEventListener('resize', placeOpenLayers);
