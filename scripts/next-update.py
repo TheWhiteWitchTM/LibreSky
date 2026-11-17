@@ -30,7 +30,7 @@ PROMPT_PATH = ROOT / "scripts" / "next-update-prompt.txt"
 def spend_held() -> str:
     import importlib.util
 
-    path = Path("/home/andreas/Projects/bots/credits.py")
+    path = Path("/home/whitewitch/Projects/bots/credits.py")
     try:
         spec = importlib.util.spec_from_file_location("hearth_credits", path)
         if spec is None or spec.loader is None:

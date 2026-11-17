@@ -1,4 +1,4 @@
-You are improving LibreSky at /home/andreas/Projects/LibreSky. This is an unattended update on a small credit budget. Finish in one pass, or stop without publishing.
+You are improving LibreSky at /home/whitewitch/Projects/LibreSky. This is an unattended update on a small credit budget. Finish in one pass, or stop without publishing.
 
 Read CHANGES.md, then js/ai.js and js/call.js. Do not search the repository. Do not open other directories. Do not start a subagent. Do not use the web.
 

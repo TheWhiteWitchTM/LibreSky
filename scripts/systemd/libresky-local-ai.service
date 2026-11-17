@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/home/andreas/.nvm/versions/node/v24.14.0/bin/node /home/andreas/Projects/LibreSky/scripts/local-bridge.mjs
+ExecStart=/home/andreas/.nvm/versions/node/v24.14.0/bin/node /home/whitewitch/Projects/LibreSky/scripts/local-bridge.mjs
 Restart=on-failure
 RestartSec=2
 Environment=HOME=%h
