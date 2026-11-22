@@ -6,6 +6,8 @@ Dates follow the days the work landed in the repository. The next pass is due af
 
 ## 22 November 2026
 
+- A voice or video call rings through the server when the chat line is late. The room keeps the offer until the other browser can read it, and a missed note is tried again.
+- Pong moves while Up or Down is held. The paddle stops when the key is released.
 - Follow all back on Notifications stays disabled until a follower scan finds someone you do not already follow. A follow notification does not turn the button on by itself.
 - Voice and video can open a room on libresky-server. The room carries the connection details. The audio and video still go between the browsers. A group chat has Voice and Video. People in the chat join the same room.
 - Games adds Pong and Snakes. Each can be played against the computer, or in a room with one other LibreSky player. A room code joins the game. The host keeps the score.

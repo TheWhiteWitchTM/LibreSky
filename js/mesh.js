@@ -1,5 +1,5 @@
 import { iceConfig } from './ice.js';
-import { signalCode, signalPost } from './signal.js';
+import { signalCode, signalPost, signalSend } from './signal.js';
 
 let mesh = null;
 
@@ -41,7 +41,7 @@ function ensureLink(id) {
   const known = mesh.links.get(id);
   if (known) return known;
   const pc = new RTCPeerConnection(mesh.config);
-  const link = { id, pc, channel: null, pending: [] };
+  const link = { id, pc, channel: null, pending: [], sentOffer: false, opened: Date.now() };
   mesh.stream?.getTracks?.().forEach((track) => {
     if (track.readyState === 'ended') return;
     pc.addTrack(track, mesh.stream);
@@ -49,14 +49,7 @@ function ensureLink(id) {
   pc.onicecandidate = (event) => {
     if (!mesh || mesh.stopped || !event.candidate) return;
     const body = JSON.stringify(event.candidate.toJSON ? event.candidate.toJSON() : event.candidate);
-    signalPost({
-      op: 'push',
-      room: mesh.room,
-      peer: mesh.peer,
-      to: id,
-      kind: 'ice',
-      body,
-    }).catch(() => {});
+    queueIce(id, body);
   };
   pc.ontrack = (event) => {
     if (!mesh || mesh.stopped) return;
@@ -72,80 +65,173 @@ function ensureLink(id) {
   return link;
 }
 
+function queueIce(to, body) {
+  if (!mesh || mesh.stopped) return;
+  mesh.ice.push({ to, body });
+  if (mesh.iceTimer) return;
+  mesh.iceTimer = setTimeout(() => { flushIcePosts().catch(() => {}); }, 280);
+}
+
+async function flushIcePosts() {
+  if (!mesh) return;
+  mesh.iceTimer = 0;
+  const batch = mesh.ice.splice(0, 12);
+  for (let index = 0; index < batch.length; index += 1) {
+    const item = batch[index];
+    if (!mesh || mesh.stopped) return;
+    try {
+      await signalSend({
+        op: 'push',
+        room: mesh.room,
+        peer: mesh.peer,
+        to: item.to,
+        kind: 'ice',
+        body: item.body,
+      });
+    } catch {
+      if (!mesh) return;
+      mesh.ice.unshift(...batch.slice(index));
+      mesh.iceTimer = setTimeout(() => { flushIcePosts().catch(() => {}); }, 900);
+      return;
+    }
+  }
+  if (mesh?.ice.length) mesh.iceTimer = setTimeout(() => { flushIcePosts().catch(() => {}); }, 280);
+}
+
 async function offerTo(other) {
   if (!mesh || mesh.stopped || !other?.id || mesh.peer <= other.id) return;
+  const existing = mesh.links.get(other.id);
+  if (existing?.sentOffer && existing.pc.signalingState === 'have-local-offer') return;
+  if (existing && existing.pc.signalingState !== 'stable') dropLink(other.id);
   const link = ensureLink(other.id);
   if (!link || link.pc.signalingState !== 'stable') return;
   wireChannel(link, link.pc.createDataChannel('play'));
   const offer = await link.pc.createOffer();
   await link.pc.setLocalDescription(offer);
-  await signalPost({
-    op: 'push',
-    room: mesh.room,
-    peer: mesh.peer,
-    to: other.id,
-    kind: 'offer',
-    body: JSON.stringify({ type: 'offer', sdp: offer.sdp }),
-  });
-}
-
-async function handleMail(item) {
-  if (!mesh || !item || mesh.seen.has(item.id)) return;
-  mesh.seen.add(item.id);
-  if (item.kind === 'leave') {
-    dropLink(item.from);
-    return;
-  }
-  if (item.kind === 'game') {
-    mesh.onData?.(item.from, item.body || '');
-    return;
-  }
-  if (item.kind !== 'offer' && item.kind !== 'answer' && item.kind !== 'ice') return;
-  const link = ensureLink(item.from);
-  if (!link) return;
-  let body = null;
-  try { body = JSON.parse(item.body || ''); } catch { body = null; }
-  if (!body) return;
-  if (item.kind === 'ice') {
-    if (!link.pc.remoteDescription) link.pending.push(body);
-    else link.pc.addIceCandidate(body).catch(() => {});
-    return;
-  }
-  if (item.kind === 'offer') {
-    if (mesh.peer > item.from) return;
-    if (link.pc.signalingState === 'have-local-offer') {
-      await link.pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
-    }
-    if (link.pc.signalingState !== 'stable' && link.pc.signalingState !== 'have-remote-offer') return;
-    await link.pc.setRemoteDescription(body);
-    flushIce(link);
-    const answer = await link.pc.createAnswer();
-    await link.pc.setLocalDescription(answer);
-    await signalPost({
+  const body = JSON.stringify({ type: 'offer', sdp: link.pc.localDescription?.sdp || offer.sdp });
+  try {
+    await signalSend({
       op: 'push',
       room: mesh.room,
       peer: mesh.peer,
-      to: item.from,
-      kind: 'answer',
-      body: JSON.stringify({ type: 'answer', sdp: answer.sdp }),
+      to: other.id,
+      kind: 'offer',
+      body,
     });
-    return;
+    link.sentOffer = true;
+  } catch (error) {
+    dropLink(other.id);
+    throw error;
   }
-  if (link.pc.signalingState !== 'have-local-offer') return;
-  await link.pc.setRemoteDescription(body);
-  flushIce(link);
+}
+
+async function handleMail(item) {
+  if (!mesh || !item) return true;
+  if (mesh.seen.has(item.id)) return true;
+  const fail = () => {
+    const count = (mesh.fails.get(item.id) || 0) + 1;
+    mesh.fails.set(item.id, count);
+    if (count >= 3) {
+      mesh.seen.add(item.id);
+      return true;
+    }
+    return false;
+  };
+  try {
+    if (item.kind === 'leave') {
+      dropLink(item.from);
+      mesh.seen.add(item.id);
+      return true;
+    }
+    if (item.kind === 'game') {
+      mesh.onData?.(item.from, item.body || '');
+      mesh.seen.add(item.id);
+      return true;
+    }
+    if (item.kind !== 'offer' && item.kind !== 'answer' && item.kind !== 'ice') {
+      mesh.seen.add(item.id);
+      return true;
+    }
+    const link = ensureLink(item.from);
+    if (!link) return fail();
+    let body = null;
+    try { body = JSON.parse(item.body || ''); } catch { body = null; }
+    if (!body) {
+      mesh.seen.add(item.id);
+      return true;
+    }
+    if (item.kind === 'ice') {
+      if (!link.pc.remoteDescription) link.pending.push(body);
+      else await link.pc.addIceCandidate(body).catch(() => {});
+      mesh.seen.add(item.id);
+      return true;
+    }
+    if (item.kind === 'offer') {
+      if (mesh.peer > item.from) {
+        mesh.seen.add(item.id);
+        return true;
+      }
+      if (link.pc.signalingState === 'have-local-offer') {
+        await link.pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
+      }
+      if (link.pc.signalingState !== 'stable' && link.pc.signalingState !== 'have-remote-offer') return fail();
+      await link.pc.setRemoteDescription(body);
+      flushIce(link);
+      const answer = await link.pc.createAnswer();
+      await link.pc.setLocalDescription(answer);
+      await signalSend({
+        op: 'push',
+        room: mesh.room,
+        peer: mesh.peer,
+        to: item.from,
+        kind: 'answer',
+        body: JSON.stringify({ type: 'answer', sdp: link.pc.localDescription?.sdp || answer.sdp }),
+      });
+      mesh.seen.add(item.id);
+      return true;
+    }
+    if (link.pc.signalingState !== 'have-local-offer') {
+      mesh.seen.add(item.id);
+      return true;
+    }
+    await link.pc.setRemoteDescription(body);
+    flushIce(link);
+    mesh.seen.add(item.id);
+    return true;
+  } catch {
+    return fail();
+  }
+}
+
+function noteCursor(item) {
+  if (!mesh || !item) return;
+  const at = Number(item.at) || 0;
+  const id = String(item.id || '');
+  if (at > mesh.after || (at === mesh.after && id > mesh.afterId)) {
+    mesh.after = at;
+    mesh.afterId = id;
+  }
 }
 
 async function poll() {
   if (!mesh || mesh.busy || mesh.stopped) return;
   mesh.busy = true;
   try {
-    const data = await signalPost({ op: 'pull', room: mesh.room, peer: mesh.peer, after: mesh.after });
+    const data = await signalPost({
+      op: 'pull',
+      room: mesh.room,
+      peer: mesh.peer,
+      after: mesh.after,
+      afterId: mesh.afterId,
+    });
     if (!mesh || mesh.stopped) return;
-    const mail = data.mail || [];
+    mesh.misses = 0;
+    const mail = (data.mail || []).slice().sort((a, b) => (Number(a.at) - Number(b.at)) || String(a.id).localeCompare(String(b.id)));
     for (const item of mail) {
-      if (item.at > mesh.after) mesh.after = item.at;
-      await handleMail(item);
+      const ok = await handleMail(item);
+      if (!mesh || mesh.stopped) return;
+      if (!ok) break;
+      noteCursor(item);
     }
     const peers = data.peers || [];
     mesh.onPeers?.(peers);
@@ -154,12 +240,18 @@ async function poll() {
       if (!ids.has(id)) dropLink(id);
     });
     for (const other of peers) {
-      if (mesh.peer > other.id && !mesh.links.has(other.id)) {
-        await offerTo(other);
-      }
+      if (!(mesh.peer > other.id)) continue;
+      const link = mesh.links.get(other.id);
+      const state = link?.pc?.connectionState || '';
+      const dead = state === 'failed' || state === 'closed';
+      const slow = Boolean(link) && state !== 'connected' && Date.now() - link.opened > 20000;
+      if (link && (dead || slow || !link.sentOffer)) dropLink(other.id);
+      if (!mesh.links.has(other.id)) await offerTo(other);
     }
   } catch (error) {
-    mesh?.onStatus?.(error?.message || 'The call server did not answer.');
+    if (!mesh) return;
+    mesh.misses = (mesh.misses || 0) + 1;
+    if (mesh.misses >= 3) mesh.onStatus?.(error?.message || 'The call server did not answer.');
   } finally {
     if (mesh) mesh.busy = false;
   }
@@ -168,7 +260,7 @@ async function poll() {
 function pulse() {
   if (!mesh || mesh.stopped || Date.now() - mesh.pulsed < 20000) return;
   mesh.pulsed = Date.now();
-  signalPost({ op: 'push', room: mesh.room, peer: mesh.peer, kind: 'here', body: '' }).catch(() => {});
+  signalSend({ op: 'push', room: mesh.room, peer: mesh.peer, kind: 'here', body: '' }).catch(() => {});
 }
 
 export async function startMesh({ room, name, stream, onTrack, onData, onGone, onPeers, onStatus }) {
@@ -184,7 +276,12 @@ export async function startMesh({ room, name, stream, onTrack, onData, onGone, o
     config,
     links: new Map(),
     seen: new Set(),
+    fails: new Map(),
+    ice: [],
+    iceTimer: 0,
     after: 0,
+    afterId: '',
+    misses: 0,
     pulsed: Date.now(),
     stopped: false,
     busy: false,
@@ -195,7 +292,8 @@ export async function startMesh({ room, name, stream, onTrack, onData, onGone, o
     onPeers,
     onStatus,
   };
-  await signalPost({ op: 'join', room, peer, name: mesh.name });
+  await signalSend({ op: 'join', room, peer, name: mesh.name });
+  if (!mesh || mesh.stopped || mesh.peer !== peer) return { room, peer };
   await poll();
   if (!mesh || mesh.stopped || mesh.peer !== peer) return { room, peer };
   mesh.timer = setInterval(() => {
@@ -219,7 +317,7 @@ export function sendMesh(text, to = '') {
     }
   });
   if (!sent) {
-    signalPost({
+    signalSend({
       op: 'push',
       room: mesh.room,
       peer: mesh.peer,
@@ -237,7 +335,8 @@ export async function stopMesh() {
   if (!current) return;
   current.stopped = true;
   if (current.timer) clearInterval(current.timer);
+  if (current.iceTimer) clearTimeout(current.iceTimer);
   current.links.forEach((link) => link.pc.close());
   current.links.clear();
-  signalPost({ op: 'leave', room: current.room, peer: current.peer }).catch(() => {});
+  signalSend({ op: 'leave', room: current.room, peer: current.peer }).catch(() => {});
 }

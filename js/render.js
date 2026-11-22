@@ -1432,7 +1432,8 @@ export function callRequestHtml(offer) {
     ? (video ? 'Incoming video call' : 'Incoming voice call')
     : (video ? 'Video call request' : 'Voice call request');
   const identity = whoHtml({ displayName: offer?.name || '', handle: offer?.handle || '', did: offer?.peerDid || '', verification: offer?.verification }, { live: true }) || `<strong>${escapeHtml(name)}</strong>`;
-  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link">${identity}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}">Decline</button></span></div>`;
+  const room = attr(offer?.room || '');
+  return `<div class="person call-row request-row">${avatar(offer?.avatar, name)}<span class="person-link">${identity}<span class="handle">${label}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="call-accept" data-rkey="${attr(offer?.rkey || '')}" data-media="${attr(offer?.media || 'audio')}" data-convo="${attr(offer?.convoId || '')}" data-peer="${attr(offer?.peerDid || '')}" data-room="${room}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${attr(offer?.rkey || '')}" data-convo="${attr(offer?.convoId || '')}" data-room="${room}">Decline</button></span></div>`;
 }
 
 export function shareBannerHtml(offer, extra = {}) {
@@ -1478,7 +1479,7 @@ export function callBannerHtml(offer, extra = {}) {
   const grouped = group ? ' data-group="1"' : '';
   const line = peerDid ? presenceLine(peerDid) : '';
   const verb = group ? 'Join' : 'Accept';
-  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span>${line}<button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${attr(peerDid)}" data-room="${room}"${grouped}>${verb}</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
+  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span>${line}<button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${attr(peerDid)}" data-room="${room}"${grouped}>${verb}</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}" data-room="${room}">Decline</button></div>`;
 }
 
 export function threadList(node) {

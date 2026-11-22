@@ -25,3 +25,24 @@ export async function signalPost(body) {
   }
   return data;
 }
+
+function signalWait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Try again when the call server is busy or out of reach. A bad request is not tried again. */
+export async function signalSend(body, tries = 4) {
+  let last;
+  const times = Math.max(1, Math.min(6, Number(tries) || 4));
+  for (let attempt = 0; attempt < times; attempt += 1) {
+    try {
+      return await signalPost(body);
+    } catch (error) {
+      last = error;
+      const status = Number(error?.status) || 0;
+      if (status === 400 || status === 401 || status === 404 || status === 429) throw error;
+      if (attempt + 1 < times) await signalWait(250 * (attempt + 1));
+    }
+  }
+  throw last;
+}

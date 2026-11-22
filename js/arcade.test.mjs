@@ -51,6 +51,18 @@ test('a snake cannot reverse and two seeds place the same food', () => {
   queuePong(startPong(1), 'left', -1);
 });
 
+test('pong moves while the paddle is held and stops when it is released', () => {
+  const state = startPong(1);
+  const start = state.left;
+  queuePong(state, 'left', -1);
+  stepPong(state);
+  assert.ok(state.left < start);
+  const held = state.left;
+  queuePong(state, 'left', 0);
+  stepPong(state);
+  assert.equal(state.left, held);
+});
+
 test('the games page keeps the marble board and adds pong and snakes', () => {
   const html = gamesPageHtml();
   assert.ok(html.includes('marble'));

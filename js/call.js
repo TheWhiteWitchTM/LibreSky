@@ -1,7 +1,7 @@
 import * as api from './api.js';
 import { iceConfig, waitForIce } from './ice.js';
 import { startMesh, stopMesh } from './mesh.js';
-import { signalCode } from './signal.js';
+import { signalCode, signalSend } from './signal.js';
 import { assembleCallSdp, messageSender, parseCallMessage } from './util.js';
 
 const COLLECTION = 'com.libresky.call';
@@ -12,6 +12,7 @@ const CHUNK = 900;
 let notify = () => {};
 let onStage = () => {};
 let onClear = () => {};
+let who = () => ({ did: '', name: 'Call' });
 let session = null;
 let epoch = 0;
 
@@ -19,6 +20,7 @@ export function setupCall(hooks) {
   notify = hooks.toast || notify;
   onStage = hooks.onStage || onStage;
   onClear = hooks.onClear || onClear;
+  who = hooks.me || who;
 }
 
 export function canCall() {
@@ -38,12 +40,13 @@ export function incomingCall(messages, me, peer) {
     const parsed = row.parsed;
     const sender = messageSender(row.message);
     const sentAt = row.message.sentAt || '';
-    if (sender !== me && sender !== peer) continue;
-    if (parsed.kind === 'offer' && sender === peer && parsed.rkey) {
+    if (sender && sender !== me && sender !== peer) continue;
+    const fromPeer = sender === peer || !sender;
+    if (parsed.kind === 'offer' && fromPeer && parsed.rkey) {
       offer = { kind: 'offer', media: parsed.media === 'video' ? 'video' : 'audio', rkey: parsed.rkey, room: parsed.room || '', sentAt };
       continue;
     }
-    if (parsed.kind === 'data' && sender === peer && parsed.rkey) {
+    if (parsed.kind === 'data' && fromPeer && parsed.rkey) {
       const media = parsed.media === 'video' ? 'video' : 'audio';
       if (!offer || offer.rkey !== parsed.rkey) offer = { kind: 'offer', media, rkey: parsed.rkey, room: parsed.room || '', sentAt };
       else offer = { ...offer, media: parsed.media ? media : offer.media, room: parsed.room || offer.room || '', sentAt: sentAt || offer.sentAt };
@@ -65,6 +68,71 @@ function $(id) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function caller() {
+  const row = who() || {};
+  const did = typeof row.did === 'string' ? row.did : '';
+  const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 24) : 'Call';
+  return { did, name };
+}
+
+async function sendLine(convoId, text) {
+  if (!convoId || !text) return false;
+  let last;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await api.sendMessage(convoId, text);
+      api.markConvoRead(convoId).catch(() => {});
+      return true;
+    } catch (error) {
+      last = error;
+      if (attempt < 2) await sleep(400 * (attempt + 1));
+    }
+  }
+  throw last;
+}
+
+async function publishRing(room, targets, media, rkey, group) {
+  const me = caller();
+  const toDids = [...new Set((Array.isArray(targets) ? targets : [targets]).filter((did) => typeof did === 'string' && did.startsWith('did:') && did !== me.did))];
+  if (!room || !toDids.length || !me.did) return false;
+  try {
+    await signalSend({
+      op: 'ring',
+      room,
+      toDids,
+      fromDid: me.did,
+      name: me.name,
+      media: media === 'video' ? 'video' : 'audio',
+      group: Boolean(group),
+      rkey,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function withdrawRing(room) {
+  if (!room) return;
+  signalSend({ op: 'unring', room, fromDid: caller().did }).catch(() => {});
+}
+
+async function pokeInvite() {
+  if (!session?.room) return;
+  if (!session.rang) {
+    const targets = session.targets?.length ? session.targets : (session.peerDid ? [session.peerDid] : []);
+    if (targets.length) session.rang = await publishRing(session.room, targets, session.media, session.rkey, session.group);
+  }
+  if (!session?.announced && session?.convoId && session.invite) {
+    try {
+      await sendLine(session.convoId, sentence(session.invite, session.media, session.rkey, session.room));
+      if (session) session.announced = true;
+    } catch {
+      /* the next poll sends the line again */
+    }
+  }
 }
 
 function sentence(kind, media, rkey, room = '') {
@@ -365,13 +433,12 @@ async function announce(convoId, kind, media, sdp) {
   }
   try {
     const lines = chunkSdp(rkey, sdp, media);
-    for (const line of lines) await api.sendMessage(convoId, line);
-    await api.sendMessage(convoId, sentence(kind === 'offer' ? 'offer' : 'answer', media, rkey));
+    for (const line of lines) await sendLine(convoId, line);
+    await sendLine(convoId, sentence(kind === 'offer' ? 'offer' : 'answer', media, rkey));
   } catch (error) {
     if (uri) api.deleteRecord(uri).catch(() => {});
     throw error;
   }
-  api.markConvoRead(convoId).catch(() => {});
   return { uri, rkey };
 }
 
@@ -383,6 +450,9 @@ async function watch(token, convoId, peerDid, media, wantAnswer) {
     if (meshWatch && spins > 1800) return;
     await sleep(meshWatch ? 2000 : 1500);
     if (token !== epoch || !session) return;
+    if (session.invite && (!session.rang || !session.announced)) await pokeInvite();
+    if (token !== epoch || !session) return;
+    if (!convoId) continue;
     let data;
     try { data = await api.getConvo(convoId); } catch { continue; }
     for (const message of data.messages || []) {
@@ -453,6 +523,9 @@ function blankSession(extra) {
     startedAt: Date.now(),
     muted: false,
     cameraOff: false,
+    rang: false,
+    invite: '',
+    targets: [],
     ...extra,
   };
 }
@@ -472,7 +545,7 @@ export async function startCall({ convoId, peerDid, media }) {
     const room = signalCode(12);
     const rkey = randomRkey();
     // The first poll can deliver a track before this function returns.
-    session = blankSession({ mesh: true, room, stream, convoId, peerDid, media, rkey });
+    session = blankSession({ mesh: true, room, stream, convoId, peerDid, media, rkey, invite: 'offer', targets: [peerDid] });
     let meshed = false;
     try {
       await openMesh(room, stream, media, false);
@@ -493,10 +566,14 @@ export async function startCall({ convoId, peerDid, media }) {
       if (local && media === 'video') local.srcObject = stream;
       showStage(media, false);
       setStatus(media === 'video' ? 'Starting video call…' : 'Calling…');
-      await api.sendMessage(convoId, sentence('offer', media, rkey, room));
+      session.rang = await publishRing(room, [peerDid], media, rkey, false);
+      try {
+        await sendLine(convoId, sentence('offer', media, rkey, room));
+        if (session) session.announced = true;
+      } catch {
+        /* watch sends the line again */
+      }
       if (token !== epoch || !session) return;
-      session.announced = true;
-      api.markConvoRead(convoId).catch(() => {});
       setStatus('Ringing…');
       watch(token, convoId, peerDid, media, false);
       return;
@@ -524,10 +601,12 @@ export async function startCall({ convoId, peerDid, media }) {
     setStatus('Ringing…');
     watch(token, convoId, peerDid, media, true);
   } catch (error) {
+    const room = session?.room || '';
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
     if (session?.mesh) await stopMesh();
     session = null;
+    withdrawRing(room);
     stopClock();
     paintCallControls();
     const dialog = $('call');
@@ -549,7 +628,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media, room }) {
   if (room && /^[a-z2-9]{8,24}$/.test(room)) {
     try {
       stream = await mediaStream(chosen);
-      session = blankSession({ mesh: true, room, stream, convoId, peerDid, media: chosen, rkey });
+      session = blankSession({ mesh: true, room, stream, convoId, peerDid, media: chosen, rkey, invite: 'answer', rang: true });
       await openMesh(room, stream, chosen, false);
       if (token !== epoch) {
         stream.getTracks().forEach((track) => track.stop());
@@ -561,10 +640,13 @@ export async function acceptCall({ convoId, peerDid, rkey, media, room }) {
       if (local && chosen === 'video') local.srcObject = stream;
       showStage(chosen, false);
       setStatus('Connecting…');
-      await api.sendMessage(convoId, sentence('answer', chosen, rkey, room));
+      try {
+        if (convoId) await sendLine(convoId, sentence('answer', chosen, rkey, room));
+        if (session) session.announced = true;
+      } catch {
+        /* watch sends the line again */
+      }
       if (token !== epoch || !session) return;
-      session.announced = true;
-      api.markConvoRead(convoId).catch(() => {});
       watch(token, convoId, peerDid, chosen, false);
       return;
     } catch {
@@ -632,8 +714,10 @@ export async function acceptCall({ convoId, peerDid, rkey, media, room }) {
   } catch (error) {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
+    const room = session?.room || '';
     if (session?.mesh) await stopMesh();
     session = null;
+    withdrawRing(room);
     stopClock();
     paintCallControls();
     const dialog = $('call');
@@ -642,7 +726,7 @@ export async function acceptCall({ convoId, peerDid, rkey, media, room }) {
   }
 }
 
-export async function startGroupCall({ convoId, media }) {
+export async function startGroupCall({ convoId, media, dids }) {
   if (!canCall()) {
     notify('Calls need a secure page and a browser that can use the microphone.');
     return;
@@ -657,7 +741,8 @@ export async function startGroupCall({ convoId, media }) {
     stream = await mediaStream(chosen);
     const room = signalCode(12);
     const rkey = randomRkey();
-    session = blankSession({ mesh: true, group: true, room, stream, convoId, media: chosen, rkey });
+    const targets = (Array.isArray(dids) ? dids : []).filter((did) => typeof did === 'string' && did.startsWith('did:'));
+    session = blankSession({ mesh: true, group: true, room, stream, convoId, media: chosen, rkey, invite: 'group', targets });
     await openMesh(room, stream, chosen, true);
     if (token !== epoch) {
       stream.getTracks().forEach((track) => track.stop());
@@ -669,16 +754,22 @@ export async function startGroupCall({ convoId, media }) {
     if (local && chosen === 'video') local.srcObject = stream;
     showStage(chosen, true);
     setStatus('Opening the room…');
-    await api.sendMessage(convoId, sentence('group', chosen, rkey, room));
+    session.rang = await publishRing(room, targets, chosen, rkey, true);
+    try {
+      await sendLine(convoId, sentence('group', chosen, rkey, room));
+      if (session) session.announced = true;
+    } catch {
+      /* watch sends the line again */
+    }
     if (token !== epoch || !session) return;
-    session.announced = true;
-    api.markConvoRead(convoId).catch(() => {});
     setStatus('Waiting for people…');
     watch(token, convoId, '', chosen, false);
   } catch (error) {
+    const room = session?.room || '';
     stream?.getTracks?.().forEach((track) => track.stop());
     await stopMesh();
     session = null;
+    withdrawRing(room);
     stopClock();
     const dialog = $('call');
     if (dialog?.open) dialog.close();
@@ -726,12 +817,11 @@ export async function joinGroupCall({ convoId, rkey, media, room }) {
   }
 }
 
-export async function declineCall(convoId, rkey) {
-  if (!convoId) return false;
+export async function declineCall(convoId, rkey, room = '') {
+  withdrawRing(room);
+  if (!convoId) return Boolean(room);
   try {
-    const text = sentence('decline', '', rkey);
-    await api.sendMessage(convoId, text);
-    api.markConvoRead(convoId).catch(() => {});
+    await sendLine(convoId, sentence('decline', '', rkey));
     return true;
   } catch (error) {
     notify(error.message);
@@ -746,6 +836,7 @@ export async function hangUp(tell = true) {
   current?.stream?.getTracks?.().forEach((track) => track.stop());
   current?.pc?.close();
   if (current?.mesh) stopMesh();
+  if (current?.room) withdrawRing(current.room);
   const remote = $('call-remote');
   const local = $('call-local');
   const audio = $('call-audio');
@@ -769,10 +860,8 @@ export async function hangUp(tell = true) {
   paintCallControls();
   const dialog = $('call');
   if (dialog?.open) dialog.close();
-  if (tell && current?.announced && current.convoId) {
-    const text = sentence('end', current.media, current.rkey);
-    api.sendMessage(current.convoId, text).catch(() => {});
-    api.markConvoRead(current.convoId).catch(() => {});
+  if (tell && current?.convoId && (current.announced || current.rang || current.mesh)) {
+    sendLine(current.convoId, sentence('end', current.media, current.rkey)).catch(() => {});
   }
   if (current?.recordUri) api.deleteRecord(current.recordUri).catch(() => {});
   onClear();
