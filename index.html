@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261122a">
+  <link rel="stylesheet" href="./css/app.css?v=20261122b">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -663,7 +663,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
         <p>If you sign in with an app password, that session stays in this browser’s local storage as libresky.passwordSession until you sign out. Opening the app password list with your account password keeps that server session in this tab only, and it is dropped when you sign out. The session cannot follow you: an app password is shown once and is not a vault, and an OAuth sign-in is tied to this browser. Home feed choices, thread order, and muted words are saved with Bluesky’s private preferences, so the official app can use the feed and thread choices and the muted words. Muted words also have a copy in this browser as libresky.mutedWords. Sounds, volumes, read-aloud, search settings, saved searches, languages, theme, text size, screen reader layout, and recent emoji are saved on your account in an app.libresky.settings record, and a copy stays in this browser so the app can open before the network answers.</p>
         <p>While LibreSky is open it writes a public last-seen record, app.libresky.actor.presence, on the account. Other LibreSky windows read it to show Available, Away, or Uses LibreSky. The time itself is not shown. An account with no record shows as Not on LibreSky.</p>
         <p>Opening LibreSky while signed in, and signing in, sends the account DID and handle to libresky-server.sociallydead.me so that server can count who uses the client. While the app is open, that same check-in is sent again when Available or Away is updated. The password and the session stay in this browser.</p>
-        <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call, and a direct session, send the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the session ends. The audio, video, and file go between the two browsers. They are not sent to LibreSky’s site. If the direct path is blocked, a public TURN relay can forward the encrypted packets. The relay cannot read them.</p>
+        <p>Posts, chats, profiles, lists, feeds, and starter packs are loaded from Bluesky. A voice or video call, and a direct session, send the connection details in the chat. When the account server allows it, LibreSky also stores them in a short-lived record on your account and deletes that record when the session ends. The same call, and a Pong or Snakes room, can also send those connection details to libresky-server.sociallydead.me so the browsers can find each other. That server keeps the room only while it is in use, then removes it. It does not keep the audio, the video, or the game picture. The audio, video, and file go between the browsers. If the direct path is blocked, a public TURN relay can forward the encrypted packets. The relay cannot read them.</p>
         <p>An unsent post draft (libresky.draft), words you finish with Tab (libresky.words), and account AI keys (libresky.ai) are saved on your account as private preferences, with a copy for the signed-in account in this browser. Private preferences travel with the login. They are not public posts. Local AI (libresky.localAi) stays in this browser, on this computer. A key is sent only to the provider you choose, and only when you ask with @ai, @si, the AI page, Check, Rewrite in the post box, or AI Assist on a profile or post. Debug keeps those replies and errors in this tab. It does not keep the key.</p>
         <p>This site uses Google Analytics (G-13S6Z9KCX9) to count visits. Contact: <a href="mailto:thewhitewitchtm@sociallydead.me">thewhitewitchtm@sociallydead.me</a>.</p>
       </article>
@@ -688,6 +688,7 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M8 4.6h2.1l1 2.3-1.5 1a9 9 0 0 0 4.4 4.4l1-1.5 2.3 1V14a1.5 1.5 0 0 1-1.6 1.5A12.2 12.2 0 0 1 6.5 6.2 1.5 1.5 0 0 1 8 4.6z"/></svg>
         </div>
         <video id="call-remote" autoplay playsinline hidden></video>
+        <div id="call-peers" class="call-peers" hidden></div>
         <video id="call-local" autoplay playsinline muted hidden></video>
       </div>
       <audio id="call-audio" autoplay></audio>
@@ -846,6 +847,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261122a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261122b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

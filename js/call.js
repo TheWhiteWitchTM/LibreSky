@@ -1,5 +1,7 @@
 import * as api from './api.js';
 import { iceConfig, waitForIce } from './ice.js';
+import { startMesh, stopMesh } from './mesh.js';
+import { signalCode } from './signal.js';
 import { assembleCallSdp, messageSender, parseCallMessage } from './util.js';
 
 const COLLECTION = 'com.libresky.call';
@@ -9,12 +11,14 @@ const CHUNK = 900;
 
 let notify = () => {};
 let onStage = () => {};
+let onClear = () => {};
 let session = null;
 let epoch = 0;
 
 export function setupCall(hooks) {
   notify = hooks.toast || notify;
   onStage = hooks.onStage || onStage;
+  onClear = hooks.onClear || onClear;
 }
 
 export function canCall() {
@@ -36,13 +40,13 @@ export function incomingCall(messages, me, peer) {
     const sentAt = row.message.sentAt || '';
     if (sender !== me && sender !== peer) continue;
     if (parsed.kind === 'offer' && sender === peer && parsed.rkey) {
-      offer = { kind: 'offer', media: parsed.media === 'video' ? 'video' : 'audio', rkey: parsed.rkey, sentAt };
+      offer = { kind: 'offer', media: parsed.media === 'video' ? 'video' : 'audio', rkey: parsed.rkey, room: parsed.room || '', sentAt };
       continue;
     }
     if (parsed.kind === 'data' && sender === peer && parsed.rkey) {
       const media = parsed.media === 'video' ? 'video' : 'audio';
-      if (!offer || offer.rkey !== parsed.rkey) offer = { kind: 'offer', media, rkey: parsed.rkey, sentAt };
-      else offer = { ...offer, media: parsed.media ? media : offer.media, sentAt: sentAt || offer.sentAt };
+      if (!offer || offer.rkey !== parsed.rkey) offer = { kind: 'offer', media, rkey: parsed.rkey, room: parsed.room || '', sentAt };
+      else offer = { ...offer, media: parsed.media ? media : offer.media, room: parsed.room || offer.room || '', sentAt: sentAt || offer.sentAt };
       continue;
     }
     if (!offer) continue;
@@ -63,11 +67,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function sentence(kind, media, rkey) {
+function sentence(kind, media, rkey, room = '') {
   const key = RKEY.test(String(rkey || '')) ? ` ${rkey}` : '';
+  const place = /^[a-z2-9]{8,24}$/.test(String(room || '')) ? ` room ${room}` : '';
+  if (kind === 'group') {
+    const mode = media === 'video' ? 'video' : 'audio';
+    return `!ls call group ${mode}${key}${place}`;
+  }
   if (kind === 'offer' || kind === 'answer') {
     const mode = media === 'video' ? 'video' : 'audio';
-    return `!ls call ${kind} ${mode}${key}`;
+    return `!ls call ${kind} ${mode}${key}${place}`;
   }
   if (kind === 'decline') return `!ls call decline${key}`;
   return `!ls call end${key}`;
@@ -163,18 +172,58 @@ export function toggleCallCamera() {
   return session.cameraOff;
 }
 
-function showStage(media) {
+function playRemote(stream, media) {
+  const remote = $('call-remote');
+  const audio = $('call-audio');
+  if (media === 'video' && remote) {
+    remote.hidden = false;
+    remote.srcObject = stream;
+    remote.play().catch(() => {});
+  }
+  if (audio) {
+    audio.srcObject = stream;
+    audio.play().catch(() => {});
+  }
+  setStatus('Connected');
+  startClock();
+}
+
+function mountPeer(id, stream) {
+  const box = $('call-peers');
+  if (!box) return playRemote(stream, session?.media);
+  box.hidden = false;
+  const escapeId = window.CSS?.escape || ((value) => String(value).replace(/"/g, '\\"'));
+  let tile = box.querySelector(`[data-peer="${escapeId(id)}"]`);
+  if (!tile) {
+    tile = document.createElement('video');
+    tile.autoplay = true;
+    tile.playsInline = true;
+    tile.dataset.peer = id;
+    box.append(tile);
+  }
+  tile.srcObject = stream;
+  tile.play().catch(() => {});
+  setStatus('Connected');
+  startClock();
+}
+
+function showStage(media, group = false) {
   const dialog = $('call');
   const remote = $('call-remote');
   const local = $('call-local');
   const voice = $('call-voice');
   const title = $('call-title');
+  const peers = $('call-peers');
   const video = media === 'video';
-  if (remote) remote.hidden = !video;
+  if (peers) {
+    peers.hidden = !group;
+    if (!group) peers.replaceChildren();
+  }
+  if (remote) remote.hidden = group || !video;
   if (local) local.hidden = !video;
-  if (voice) voice.hidden = video;
-  if (title) title.textContent = video ? 'Video call' : 'Voice call';
-  if (dialog) dialog.dataset.media = video ? 'video' : 'audio';
+  if (voice) voice.hidden = group || video;
+  if (title) title.textContent = group ? (video ? 'Group video' : 'Group voice') : (video ? 'Video call' : 'Voice call');
+  if (dialog) dialog.dataset.media = group ? 'group' : (video ? 'video' : 'audio');
   const presence = $('call-presence');
   if (presence) {
     presence.dataset.presence = session?.peerDid || '';
@@ -327,25 +376,32 @@ async function announce(convoId, kind, media, sdp) {
 }
 
 async function watch(token, convoId, peerDid, media, wantAnswer) {
-  for (let i = 0; i < 40 && token === epoch && session; i += 1) {
-    await sleep(1500);
+  const meshWatch = Boolean(session?.mesh);
+  let spins = 0;
+  while (token === epoch && session && (meshWatch || spins < 40)) {
+    spins += 1;
+    if (meshWatch && spins > 1800) return;
+    await sleep(meshWatch ? 2000 : 1500);
     if (token !== epoch || !session) return;
     let data;
     try { data = await api.getConvo(convoId); } catch { continue; }
     for (const message of data.messages || []) {
-      if (messageSender(message) !== peerDid) continue;
+      const sender = messageSender(message);
+      if (peerDid && sender !== peerDid) continue;
       const parsed = parseCallMessage(message.text);
       if (!parsed) continue;
       const sent = new Date(message.sentAt || 0).getTime();
       if (!Number.isFinite(sent) || sent + 20000 < (session.startedAt || 0)) continue;
       if (parsed.kind === 'decline' || parsed.kind === 'end') {
-        if (!session.rkey || parsed.rkey !== session.rkey) continue;
+        if (session.rkey && parsed.rkey && parsed.rkey !== session.rkey) continue;
+        if (session.group && parsed.kind !== 'end') continue;
         return finish(parsed.kind === 'decline' ? 'Call declined' : 'Call ended', false);
       }
+      if (session.mesh || !session.pc) continue;
       if (wantAnswer && !session.pc.remoteDescription && parsed.kind === 'answer' && parsed.rkey && parsed.media === media) {
         try {
           const sdp = await readSdp(peerDid, parsed.rkey, convoId, data.messages);
-          if (sdp) {
+          if (sdp && session?.pc) {
             await session.pc.setRemoteDescription({ type: 'answer', sdp });
             setStatus('Connecting…');
             wantAnswer = false;
@@ -356,15 +412,49 @@ async function watch(token, convoId, peerDid, media, wantAnswer) {
       }
     }
   }
-  if (token === epoch && session && wantAnswer && !session.pc.currentRemoteDescription && !session.pc.remoteDescription) {
+  if (token === epoch && session && wantAnswer && session.pc && !session.pc.currentRemoteDescription && !session.pc.remoteDescription) {
     notify('No answer');
     hangUp(true);
   }
 }
 
+async function openMesh(room, stream, media, group) {
+  await startMesh({
+    room,
+    name: group ? 'group' : 'call',
+    stream,
+    onTrack: (_id, remote) => {
+      if (!session) return;
+      if (session.group) mountPeer(_id, remote);
+      else playRemote(remote, media);
+    },
+  });
+  return true;
+}
+
 function finish(status, tell) {
   setStatus(status);
   hangUp(tell);
+}
+
+function blankSession(extra) {
+  return {
+    pc: null,
+    stream: null,
+    convoId: '',
+    peerDid: '',
+    media: 'audio',
+    announced: false,
+    recordUri: '',
+    rkey: '',
+    room: '',
+    mesh: false,
+    group: false,
+    startedAt: Date.now(),
+    muted: false,
+    cameraOff: false,
+    ...extra,
+  };
 }
 
 export async function startCall({ convoId, peerDid, media }) {
@@ -374,12 +464,45 @@ export async function startCall({ convoId, peerDid, media }) {
   }
   if (!convoId || !peerDid) return;
   if (session) await hangUp(true);
+  else onClear();
   const token = ++epoch;
   let stream;
   try {
     stream = await mediaStream(media);
+    const room = signalCode(12);
+    const rkey = randomRkey();
+    // The first poll can deliver a track before this function returns.
+    session = blankSession({ mesh: true, room, stream, convoId, peerDid, media, rkey });
+    let meshed = false;
+    try {
+      await openMesh(room, stream, media, false);
+      meshed = true;
+    } catch {
+      await stopMesh();
+      if (session?.room === room) session = null;
+      meshed = false;
+    }
+    if (token !== epoch) {
+      stream.getTracks().forEach((track) => track.stop());
+      await stopMesh();
+      if (session?.room === room) session = null;
+      return;
+    }
+    if (meshed && session) {
+      const local = $('call-local');
+      if (local && media === 'video') local.srcObject = stream;
+      showStage(media, false);
+      setStatus(media === 'video' ? 'Starting video call…' : 'Calling…');
+      await api.sendMessage(convoId, sentence('offer', media, rkey, room));
+      if (token !== epoch || !session) return;
+      session.announced = true;
+      api.markConvoRead(convoId).catch(() => {});
+      setStatus('Ringing…');
+      watch(token, convoId, peerDid, media, false);
+      return;
+    }
     const pc = new RTCPeerConnection(await iceConfig());
-    session = { pc, stream, convoId, peerDid, media, announced: false, recordUri: '', rkey: '', startedAt: Date.now(), muted: false, cameraOff: false };
+    session = blankSession({ pc, stream, convoId, peerDid, media });
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
     if (local && media === 'video') local.srcObject = stream;
@@ -403,6 +526,7 @@ export async function startCall({ convoId, peerDid, media }) {
   } catch (error) {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
+    if (session?.mesh) await stopMesh();
     session = null;
     stopClock();
     paintCallControls();
@@ -412,14 +536,45 @@ export async function startCall({ convoId, peerDid, media }) {
   }
 }
 
-export async function acceptCall({ convoId, peerDid, rkey, media }) {
+export async function acceptCall({ convoId, peerDid, rkey, media, room }) {
   if (!canCall()) {
     notify('Calls need a secure page and a browser that can use the microphone.');
     return;
   }
   if (session) await hangUp(false);
+  else onClear();
   const token = ++epoch;
   let stream;
+  const chosen = media === 'video' ? 'video' : 'audio';
+  if (room && /^[a-z2-9]{8,24}$/.test(room)) {
+    try {
+      stream = await mediaStream(chosen);
+      session = blankSession({ mesh: true, room, stream, convoId, peerDid, media: chosen, rkey });
+      await openMesh(room, stream, chosen, false);
+      if (token !== epoch) {
+        stream.getTracks().forEach((track) => track.stop());
+        await stopMesh();
+        if (session?.room === room) session = null;
+        return;
+      }
+      const local = $('call-local');
+      if (local && chosen === 'video') local.srcObject = stream;
+      showStage(chosen, false);
+      setStatus('Connecting…');
+      await api.sendMessage(convoId, sentence('answer', chosen, rkey, room));
+      if (token !== epoch || !session) return;
+      session.announced = true;
+      api.markConvoRead(convoId).catch(() => {});
+      watch(token, convoId, peerDid, chosen, false);
+      return;
+    } catch {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      stream = null;
+      await stopMesh();
+      if (session?.room === room) session = null;
+      if (token !== epoch) return;
+    }
+  }
   try {
     let createdAt = '';
     let sdp = '';
@@ -452,10 +607,9 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
     if (!sdp) throw new Error('That call is missing its details.');
     const age = Date.now() - new Date(createdAt).getTime();
     if (!Number.isFinite(age) || age > FRESH_MS) throw new Error('That call has ended.');
-    stream = await mediaStream(media || 'audio');
-    const chosen = media === 'video' ? 'video' : 'audio';
+    stream = await mediaStream(chosen);
     const pc = new RTCPeerConnection(await iceConfig());
-    session = { pc, stream, convoId, peerDid, media: chosen, announced: false, recordUri: '', rkey, startedAt: Date.now(), muted: false, cameraOff: false };
+    session = blankSession({ pc, stream, convoId, peerDid, media: chosen, rkey });
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     const local = $('call-local');
     if (local && chosen === 'video') local.srcObject = stream;
@@ -478,12 +632,97 @@ export async function acceptCall({ convoId, peerDid, rkey, media }) {
   } catch (error) {
     stream?.getTracks?.().forEach((track) => track.stop());
     if (session?.pc) session.pc.close();
+    if (session?.mesh) await stopMesh();
     session = null;
     stopClock();
     paintCallControls();
     const dialog = $('call');
     if (dialog?.open) dialog.close();
     notify(error?.message || 'The call could not be answered.');
+  }
+}
+
+export async function startGroupCall({ convoId, media }) {
+  if (!canCall()) {
+    notify('Calls need a secure page and a browser that can use the microphone.');
+    return;
+  }
+  if (!convoId) return;
+  if (session) await hangUp(true);
+  else onClear();
+  const token = ++epoch;
+  const chosen = media === 'video' ? 'video' : 'audio';
+  let stream;
+  try {
+    stream = await mediaStream(chosen);
+    const room = signalCode(12);
+    const rkey = randomRkey();
+    session = blankSession({ mesh: true, group: true, room, stream, convoId, media: chosen, rkey });
+    await openMesh(room, stream, chosen, true);
+    if (token !== epoch) {
+      stream.getTracks().forEach((track) => track.stop());
+      await stopMesh();
+      if (session?.room === room) session = null;
+      return;
+    }
+    const local = $('call-local');
+    if (local && chosen === 'video') local.srcObject = stream;
+    showStage(chosen, true);
+    setStatus('Opening the room…');
+    await api.sendMessage(convoId, sentence('group', chosen, rkey, room));
+    if (token !== epoch || !session) return;
+    session.announced = true;
+    api.markConvoRead(convoId).catch(() => {});
+    setStatus('Waiting for people…');
+    watch(token, convoId, '', chosen, false);
+  } catch (error) {
+    stream?.getTracks?.().forEach((track) => track.stop());
+    await stopMesh();
+    session = null;
+    stopClock();
+    const dialog = $('call');
+    if (dialog?.open) dialog.close();
+    notify(error?.message || 'The group call could not start.');
+  }
+}
+
+export async function joinGroupCall({ convoId, rkey, media, room }) {
+  if (!canCall()) {
+    notify('Calls need a secure page and a browser that can use the microphone.');
+    return;
+  }
+  if (!room) {
+    notify('That group call has no room.');
+    return;
+  }
+  if (session) await hangUp(false);
+  else onClear();
+  const token = ++epoch;
+  const chosen = media === 'video' ? 'video' : 'audio';
+  let stream;
+  try {
+    stream = await mediaStream(chosen);
+    session = blankSession({ mesh: true, group: true, room, stream, convoId, media: chosen, rkey, announced: false });
+    await openMesh(room, stream, chosen, true);
+    if (token !== epoch) {
+      stream.getTracks().forEach((track) => track.stop());
+      await stopMesh();
+      if (session?.room === room) session = null;
+      return;
+    }
+    const local = $('call-local');
+    if (local && chosen === 'video') local.srcObject = stream;
+    showStage(chosen, true);
+    setStatus('Joining…');
+    watch(token, convoId, '', chosen, false);
+  } catch (error) {
+    stream?.getTracks?.().forEach((track) => track.stop());
+    await stopMesh();
+    session = null;
+    stopClock();
+    const dialog = $('call');
+    if (dialog?.open) dialog.close();
+    notify(error?.message || 'The group call could not be joined.');
   }
 }
 
@@ -506,9 +745,15 @@ export async function hangUp(tell = true) {
   session = null;
   current?.stream?.getTracks?.().forEach((track) => track.stop());
   current?.pc?.close();
+  if (current?.mesh) stopMesh();
   const remote = $('call-remote');
   const local = $('call-local');
   const audio = $('call-audio');
+  const peers = $('call-peers');
+  if (peers) {
+    peers.replaceChildren();
+    peers.hidden = true;
+  }
   if (remote) remote.srcObject = null;
   if (local) {
     local.srcObject = null;
@@ -530,6 +775,7 @@ export async function hangUp(tell = true) {
     api.markConvoRead(current.convoId).catch(() => {});
   }
   if (current?.recordUri) api.deleteRecord(current.recordUri).catch(() => {});
+  onClear();
 }
 
 if (typeof document !== 'undefined') {

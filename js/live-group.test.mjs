@@ -6,6 +6,7 @@ import {
   liveStatusActive,
   liveUriAllowed,
   livestreamView,
+  followBackDue,
   needsFollowBack,
   notesHaveFollowBack,
   streamPlayer,
@@ -26,6 +27,11 @@ test('follow back is only for people you do not already follow', () => {
   assert.equal(notesHaveFollowBack(notes, self), false);
   notes.push({ reason: 'follow', author: { did: 'did:plc:c', viewer: {} } });
   assert.equal(notesHaveFollowBack(notes, self), true);
+  const actor = { did: 'did:plc:c', viewer: {} };
+  assert.equal(followBackDue(actor, self, null), true);
+  assert.equal(followBackDue(actor, self, new Set(['did:plc:c'])), false);
+  assert.equal(followBackDue({ did: 'did:plc:c', viewer: { following: 'at://x' } }, self, null), false);
+  assert.equal(followBackDue({ did: 'did:plc:c' }, self, null), false);
 });
 
 test('a live badge stays up until it expires and only for a stream host', () => {

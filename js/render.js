@@ -19,6 +19,7 @@ import {
   messageSender,
   parseCallMessage,
   parseGameMessage,
+  parsePlayMessage,
   parseShareMessage,
   richText,
   safeUrl,
@@ -1189,7 +1190,11 @@ function messagePreview(message) {
     if (gameLine.kind === 'invite') return `${name} invite`;
     return name;
   }
-  if (parseCallMessage(message.text)) return '';
+  const play = parsePlayMessage(message.text);
+  if (play) return play.game === 'snakes' ? 'Snakes invite' : 'Pong invite';
+  const call = parseCallMessage(message.text);
+  if (call?.kind === 'group') return call.media === 'video' ? 'Group video call' : 'Group voice call';
+  if (call) return '';
   const share = parseShareMessage(message.text);
   if (share) return share.kind === 'data' || share.name ? 'File' : 'Direct session';
   if (message.text) return message.text;
@@ -1289,7 +1294,7 @@ export function messageHtml(message, me, options = {}) {
   const mine = Boolean(sender && sender === me);
   const text = message?.text || nested?.text || '';
   const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-  if (parseCallMessage(text) || parseShareMessage(text) || parseGameMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
+  if (parseCallMessage(text) || parsePlayMessage(text) || parseShareMessage(text) || parseGameMessage(text)) return `<div class="msg-signal"${id} hidden></div>`;
   const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';
@@ -1443,13 +1448,17 @@ export function shareFileHtml(file, { mine = false } = {}) {
 
 export function callBannerHtml(offer, extra = {}) {
   const video = offer?.media === 'video';
-  const label = video ? 'Incoming video call' : 'Incoming voice call';
+  const group = offer?.kind === 'group';
+  const label = group ? (video ? 'Group video call' : 'Group voice call') : (video ? 'Incoming video call' : 'Incoming voice call');
   const rkey = attr(offer?.rkey || '');
   const media = attr(offer?.media || 'audio');
   const convo = attr(extra.convoId || '');
-  const peer = attr(extra.peerDid || '');
-  const line = extra.peerDid ? presenceLine(extra.peerDid) : '';
-  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span>${line}<button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${peer}">Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
+  const peerDid = extra.peerDid || offer?.sender || '';
+  const room = attr(offer?.room || '');
+  const grouped = group ? ' data-group="1"' : '';
+  const line = peerDid ? presenceLine(peerDid) : '';
+  const verb = group ? 'Join' : 'Accept';
+  return `<div class="call-banner${video ? ' video' : ' audio'}" role="status">${icon(video ? 'video' : 'phone')}<span>${label}</span>${line}<button type="button" class="primary small" data-act="call-accept" data-rkey="${rkey}" data-media="${media}" data-convo="${convo}" data-peer="${attr(peerDid)}" data-room="${room}"${grouped}>${verb}</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${rkey}" data-convo="${convo}">Decline</button></div>`;
 }
 
 export function threadList(node) {

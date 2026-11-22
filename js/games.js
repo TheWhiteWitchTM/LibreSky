@@ -1,3 +1,4 @@
+import { arcadeCardsHtml, arcadeJoinHtml } from './arcade.js';
 import { escapeHtml, messageSender, parseGameMessage } from './util.js';
 
 // Square 0 is a8. Rank 1 sits on index 56. A dark square has an odd file+rank sum.
@@ -1234,7 +1235,7 @@ export function sampleState(id) {
 
 export function gamesPageHtml() {
   const cards = GAMES.map((game) => `<article class="game-card"><div class="game-sample">${boardHtml(sampleState(game.id), { quiet: true })}</div><div class="game-copy"><h3>${escapeHtml(game.name)}</h3><p>${escapeHtml(game.blurb)}</p><div class="game-actions"><button type="button" class="primary small" data-act="game-ai" data-game="${game.id}">Play AI</button><button type="button" class="game-alt" data-act="game-person" data-game="${game.id}">LibreSky player</button></div></div></article>`).join('');
-  return `<div class="games-page"><div id="game-invites"></div><header class="games-lead"><h2>Games</h2><p>A marble board. Play a simple AI, or push an invite to someone who is available in your chats or calls.</p></header><div class="game-grid">${cards}</div></div>`;
+  return `<div class="games-page"><div id="game-invites"></div><header class="games-lead"><h2>Games</h2><p>A marble board. Play a simple AI, or push an invite to someone who is available in your chats or calls.</p></header><div class="game-grid">${cards}${arcadeCardsHtml()}</div>${arcadeJoinHtml()}</div>`;
 }
 
 export function promoHtml(moves) {

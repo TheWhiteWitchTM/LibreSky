@@ -510,6 +510,13 @@ export function notesHaveFollowBack(notes, selfDid = '') {
   return (notes || []).some((note) => note?.reason === 'follow' && needsFollowBack(note.author, selfDid));
 }
 
+/** A follower still needs a follow. A known follow list overrides a stale viewer object. */
+export function followBackDue(actor, selfDid = '', following = null) {
+  if (!needsFollowBack(actor, selfDid)) return false;
+  if (following && typeof following.has === 'function' && following.has(actor.did)) return false;
+  return true;
+}
+
 const LIVE_HOSTS = ['twitch.tv', 'youtube.com', 'youtu.be', 'stream.place', 'bluecast.app', 'substack.com', 'beehiiv.com'];
 
 export function liveHostAllowed(hostname, extra = []) {
@@ -719,11 +726,23 @@ export function assembleShareSdp(messages, rkey, sender) {
 // Plain chat text, on purpose. "!ls" is not how a person starts a message, and
 // it has no link, so another app shows the line and does not open or crash on it.
 // LibreSky hides it and uses it to open the voice or video session.
-const CALL_OFFER = /^!ls call (offer|answer) (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13})$/;
+const CALL_OFFER = /^!ls call (offer|answer) (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13})(?: room ([a-z2-9]{8,24}))?$/;
+const CALL_GROUP = /^!ls call group (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13}) room ([a-z2-9]{8,24})$/;
 const CALL_STOP = /^!ls call (decline|end)(?: ([234567abcdefghijklmnopqrstuvwxyz]{13}))?$/;
 const CALL_SDP = /^!ls call sdp (audio|video) ([234567abcdefghijklmnopqrstuvwxyz]{13}) (\d+)\/(\d+) ([A-Za-z0-9_-]+)$/;
+const PLAY_LINE = /^!ls play (pong|snakes) ([a-z2-9]{8,24}) invite$/;
 
 const GAME_LINE = /^!ls game ([234567abcdefghijklmnopqrstuvwxyz]{13}) (chess|checkers|reversi|fox|break) (invite|accept|decline|move|resign|draw|yes|no)(?: ([a-z0-9-]{1,80}))?$/;
+
+export function parsePlayMessage(text) {
+  const match = String(text || '').trim().match(PLAY_LINE);
+  if (!match) return null;
+  return { game: match[1], room: match[2] };
+}
+
+export function playLine(game, room) {
+  return `!ls play ${game} ${room} invite`;
+}
 
 export function parseGameMessage(text) {
   const match = String(text || '').trim().match(GAME_LINE);
@@ -733,9 +752,13 @@ export function parseGameMessage(text) {
 
 export function parseCallMessage(text) {
   const raw = String(text || '').trim();
+  const grouped = raw.match(CALL_GROUP);
+  if (grouped) {
+    return { kind: 'group', media: grouped[1] === 'video' ? 'video' : 'audio', rkey: grouped[2], room: grouped[3] };
+  }
   const modern = raw.match(CALL_OFFER);
   if (modern) {
-    return { kind: modern[1], media: modern[2] === 'video' ? 'video' : 'audio', rkey: modern[3] };
+    return { kind: modern[1], media: modern[2] === 'video' ? 'video' : 'audio', rkey: modern[3], room: modern[4] || '' };
   }
   const stop = raw.match(CALL_STOP);
   if (stop) return { kind: stop[1], media: '', rkey: stop[2] || '' };
@@ -781,7 +804,35 @@ export function parseCallMessage(text) {
   } catch {
     rkey = '';
   }
-  return { kind, media, rkey };
+  return { kind, media, rkey, room: '' };
+}
+
+export function latestGroupCall(messages, me, now = Date.now()) {
+  const rows = (messages || []).map((message) => ({ message, parsed: parseCallMessage(message?.text) })).filter((row) => row.parsed);
+  rows.sort((a, b) => String(a.message?.sentAt || '').localeCompare(String(b.message?.sentAt || '')));
+  let offer = null;
+  for (const row of rows) {
+    const parsed = row.parsed;
+    const sender = messageSender(row.message);
+    if (parsed.kind === 'group' && parsed.room && sender && sender !== me) {
+      offer = {
+        kind: 'group',
+        media: parsed.media === 'video' ? 'video' : 'audio',
+        rkey: parsed.rkey,
+        room: parsed.room,
+        sentAt: row.message?.sentAt || '',
+        sender,
+      };
+      continue;
+    }
+    if (!offer) continue;
+    const same = !parsed.rkey || parsed.rkey === offer.rkey;
+    if (same && parsed.kind === 'end' && sender === offer.sender) offer = null;
+  }
+  if (!offer) return null;
+  const then = new Date(offer.sentAt).getTime();
+  if (!Number.isFinite(then) || now - then > 30 * 60 * 1000) return null;
+  return offer;
 }
 
 export function assembleCallSdp(messages, rkey, sender) {

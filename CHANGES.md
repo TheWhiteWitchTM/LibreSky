@@ -4,6 +4,13 @@ This is the record of the release candidate you can [open today](https://libresk
 
 Dates follow the days the work landed in the repository. The next pass is due after a random gap of three to five days. This file is the record. The app is the source of truth. A longer tour lives in the [README](README.md).
 
+## 22 November 2026
+
+- Follow all back on Notifications stays disabled until a follower scan finds someone you do not already follow. A follow notification does not turn the button on by itself.
+- Voice and video can open a room on libresky-server. The room carries the connection details. The audio and video still go between the browsers. A group chat has Voice and Video. People in the chat join the same room.
+- Games adds Pong and Snakes. Each can be played against the computer, or in a room with one other LibreSky player. A room code joins the game. The host keeps the score.
+- A pending payment older than 24 hours is removed. A cancelled payment is removed. A completed payment, and a refund, stay.
+
 ## 17 November 2026
 
 - A check stays on the name. Posts, quotes, replies, the signed-in account, and Mira's handle use the same marks. A long handle no longer clips the mark off the end of the name.

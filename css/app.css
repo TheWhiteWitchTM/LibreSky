@@ -3789,7 +3789,51 @@ a.collection .avatar::before, button.collection .avatar::before { font-size: 14p
   border-radius: 8px;
 }
 #call-local.is-off { opacity: 0.35; }
-#call-remote[hidden], #call-local[hidden], #call-voice[hidden] { display: none; }
+#call-remote[hidden], #call-local[hidden], #call-voice[hidden], #call-peers[hidden] { display: none; }
+#call[data-media="group"] { width: min(720px, calc(100vw - 24px)); }
+.call-peers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.call-peers video {
+  width: 100%;
+  min-height: 120px;
+  object-fit: cover;
+  background: #000;
+  border-radius: 12px;
+}
+.arcade-sample {
+  min-height: 120px;
+  border-radius: 14px;
+  background:
+    linear-gradient(#f4f7fb, #f4f7fb) center / 2px 70% no-repeat,
+    #102033;
+}
+.arcade-sample[data-game="snakes"] {
+  background:
+    radial-gradient(circle at 30% 50%, #f4f7fb 0 7px, transparent 8px),
+    radial-gradient(circle at 70% 50%, #3dde7a 0 7px, transparent 8px),
+    #102033;
+}
+.arcade-canvas {
+  width: 100%;
+  height: auto;
+  background: #102033;
+  border-radius: 12px;
+  touch-action: none;
+}
+.arcade-pad { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.arcade-pad button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 14px;
+  font-weight: 700;
+}
+.arcade-join { display: flex; gap: 8px; margin: 16px 0 0; }
+.arcade-join input { flex: 1; }
 body.ringing { padding-bottom: 120px; }
 .incoming-call {
   position: fixed;

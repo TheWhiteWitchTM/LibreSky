@@ -1,5 +1,5 @@
 import * as api from './api.js';
-import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, setupCall, startCall } from './call.js';
+import { acceptCall, canCall, declineCall, hangUp, incomingCall, isInCall, joinGroupCall, setupCall, startCall, startGroupCall } from './call.js';
 import { acceptShare, canShare, declineShare, hangShare, incomingShare, isSharing, openShare, prettySize, sendShareFile, setupShare, shareLabel, sharePeer, sharePhase, shareProgress } from './share.js';
 import {
   accountIcon,
@@ -75,8 +75,11 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, groupInfo, hostOf, joinCodeFromText, liveStatusActive, liveUriAllowed, memberRole, messageSender, messagesForConvo, needsFollowBack, normalizeSentMessage, notesHaveFollowBack, omitTrailingPostLink, ownUnread, parseCallMessage, parseGameMessage, parseHash, parseShareMessage, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, streamPlayer, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followBackDue, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, groupInfo, hostOf, joinCodeFromText, latestGroupCall, liveStatusActive, liveUriAllowed, memberRole, messageSender, messagesForConvo, needsFollowBack, normalizeSentMessage, notesHaveFollowBack, omitTrailingPostLink, ownUnread, parseCallMessage, parseGameMessage, parseHash, parsePlayMessage, parseShareMessage, partitionConvos, playLine, postHash, profileHash, replyTargets, richText, shouldFollowBack, streamPlayer, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { activeMatch, applyMove, boardView, chooseMove, describe, flipped, gameById, gameLine, gamesPageHtml, logHtml, pickSquare, promoHtml, replayGame, resultOf, startGame } from './games.js';
+import { arcadeTitle, drawArcade, isArcade, queueDir, queuePong, startPong, startSnakes, stepPong, stepSnakes } from './arcade.js';
+import { sendMesh, startMesh, stopMesh } from './mesh.js';
+import { signalCode } from './signal.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
 import { icon } from './icons.js';
@@ -151,6 +154,7 @@ let reportTarget = null;
 let chatTimer = 0;
 let badgeMemory = { notifications: null, chat: null, ring: '', game: '', gameTurn: '' };
 const followBackCache = { did: '', due: null, at: 0 };
+let followBackBusy = false;
 let openChatGroup = null;
 let liveExtraHosts = [];
 const ignoredRings = new Set();
@@ -159,6 +163,8 @@ const settledGames = new Set();
 let gameMatch = null;
 let gamePoll = 0;
 let gameSeq = 0;
+let arcade = null;
+let arcadeTimer = 0;
 let gameInvite = null;
 let gameTurn = null;
 let gameChatToken = 0;
@@ -1031,8 +1037,11 @@ function paintIncomingBar(offer) {
   const title = video ? 'Incoming video call' : 'Incoming voice call';
   const face = avatar(offer.avatar, offer.name || 'Someone');
   const request = offer.requested ? ' data-request="1"' : '';
+  const grouped = offer.kind === 'group' ? ' data-group="1"' : '';
   const who = whoHtml({ displayName: offer.name || '', handle: offer.handle || '', did: offer.peerDid || '', verification: offer.verification }, { live: true }) || `<strong>${escapeHtml(offer.name || 'Someone')}</strong>`;
-  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(title)}</strong>${who}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid)}"${request}>Accept</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
+  const verb = offer.kind === 'group' ? 'Join' : 'Accept';
+  const heading = offer.kind === 'group' ? (video ? 'Group video call' : 'Group voice call') : title;
+  bar.innerHTML = `${face}<span class="incoming-call-copy"><strong>${escapeHtml(heading)}</strong>${who}</span><button type="button" class="primary small" data-act="call-accept" data-rkey="${escapeHtml(offer.rkey)}" data-media="${escapeHtml(offer.media || 'audio')}" data-convo="${escapeHtml(offer.convoId)}" data-peer="${escapeHtml(offer.peerDid || '')}" data-room="${escapeHtml(offer.room || '')}"${request}${grouped}>${verb}</button><button type="button" class="danger mini" data-act="call-decline" data-rkey="${escapeHtml(offer.rkey)}" data-convo="${escapeHtml(offer.convoId)}">Decline</button>`;
   showPresence(bar);
   paintBadge('calls-badge', 1);
   startRingtone();
@@ -2226,13 +2235,16 @@ async function showNotifications(filter) {
   let paging = false;
   let repostArmed = false;
   let marked = false;
-  const cachedOffer = followBackCache.did === did && followBackCache.due === true && Date.now() - followBackCache.at < 120000;
-  let followBackOffer = cachedOffer;
-  const followBackBar = '<div class="toolbar" id="follow-back-bar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>';
+  let followBackOn = followBackCache.did === did && followBackCache.due === true && Date.now() - followBackCache.at < 120000;
+  const followBackBar = '<div class="toolbar" id="follow-back-bar"><button type="button" class="primary small" data-act="follow-back" disabled>Follow all back</button></div>';
+  const setFollowBackButton = () => {
+    const button = document.querySelector('#follow-back-bar [data-act="follow-back"]');
+    if (!button) return;
+    button.disabled = followBackBusy || !followBackOn;
+  };
 
   const paint = () => {
     if (token !== generation) return;
-    if (notesHaveFollowBack(all, did)) followBackOffer = true;
     const view = $('view');
     if (!view) return;
     const y = window.scrollY || document.documentElement.scrollTop || 0;
@@ -2252,18 +2264,19 @@ async function showNotifications(filter) {
     const syncFollowBar = () => {
       const bar = view.querySelector('#follow-back-bar');
       const host = $('note-list');
-      if (followBackOffer && !bar && host) host.insertAdjacentHTML('beforebegin', followBackBar);
-      if (!followBackOffer && bar) bar.remove();
+      if (!bar && host) host.insertAdjacentHTML('beforebegin', followBackBar);
     };
-    if (!list || !view.contains(list)) view.innerHTML = `${followBackOffer ? followBackBar : ''}<div id="note-list">${nextHtml}</div>`;
+    if (!list || !view.contains(list)) view.innerHTML = `${followBackBar}<div id="note-list">${nextHtml}</div>`;
     else if (list.innerHTML !== nextHtml) {
       syncFollowBar();
       list.innerHTML = nextHtml;
     } else {
       syncFollowBar();
+      setFollowBackButton();
       showPresence(view);
       return;
     }
+    setFollowBackButton();
     showPresence(view);
     if (!anchorKey || !CSS?.escape) return;
     try {
@@ -2293,37 +2306,70 @@ async function showNotifications(filter) {
   let followBackProbe = 0;
   async function probeFollowBack() {
     const job = ++followBackProbe;
-    if (followBackOffer) return;
-    if (followBackCache.did === did && followBackCache.due === false && Date.now() - followBackCache.at < 120000) return;
-    let cursor = '';
+    const fresh = followBackCache.did === did && Date.now() - followBackCache.at < 120000;
+    const notesWant = notesHaveFollowBack(all, did);
+    if (fresh && followBackCache.due === true && !notesWant) {
+      followBackOn = true;
+      setFollowBackButton();
+      return;
+    }
+    if (fresh && followBackCache.due === false && !notesWant) {
+      followBackOn = false;
+      setFollowBackButton();
+      return;
+    }
+    let following = new Set();
+    let truncated = false;
     try {
-      for (let page = 0; page < 12; page += 1) {
-        if (token !== generation || job !== followBackProbe || followBackOffer) return;
-        const data = await api.getFollowers(did, cursor || undefined, undefined, 100);
+      let cursor = '';
+      for (let page = 0; page < 8; page += 1) {
         if (token !== generation || job !== followBackProbe) return;
-        const due = (data.followers || []).some((actor) => needsFollowBack(actor, did));
-        if (due) {
-          followBackCache.did = did;
-          followBackCache.due = true;
-          followBackCache.at = Date.now();
-          followBackOffer = true;
-          paint();
-          return;
-        }
+        const data = await api.getFollows(did, cursor || undefined, undefined, 100);
+        (data.follows || []).forEach((actor) => { if (actor?.did) following.add(actor.did); });
         if (!data.cursor || data.cursor === cursor) {
-          followBackCache.did = did;
-          followBackCache.due = false;
-          followBackCache.at = Date.now();
-          if (followBackOffer) {
-            followBackOffer = false;
-            paint();
-          }
-          return;
+          truncated = false;
+          break;
         }
         cursor = data.cursor;
+        truncated = page === 7;
       }
     } catch {
-      /* the button stays hidden until a later visit */
+      followBackOn = false;
+      setFollowBackButton();
+      return;
+    }
+    let cursor = '';
+    let found = false;
+    try {
+      for (let page = 0; page < 12 && !found; page += 1) {
+        if (token !== generation || job !== followBackProbe) return;
+        const data = await api.getFollowers(did, cursor || undefined, undefined, 100);
+        if (token !== generation || job !== followBackProbe) return;
+        for (const actor of data.followers || []) {
+          if (!followBackDue(actor, did, following)) continue;
+          if (truncated) {
+            try {
+              const profile = await api.getProfile(actor.did);
+              if (!followBackDue(profile, did, null)) continue;
+            } catch {
+              continue;
+            }
+          }
+          found = true;
+          break;
+        }
+        if (found || !data.cursor || data.cursor === cursor) break;
+        cursor = data.cursor;
+      }
+      if (token !== generation || job !== followBackProbe) return;
+      followBackCache.did = did;
+      followBackCache.due = found;
+      followBackCache.at = Date.now();
+      followBackOn = found;
+      setFollowBackButton();
+    } catch {
+      followBackOn = false;
+      setFollowBackButton();
     }
   }
 
@@ -2724,7 +2770,7 @@ function groupToolsHtml(convo, info) {
   const owner = groupOwner(convo, info)
     ? `<button type="button" class="text-btn" data-act="group-rename" data-convo="${id}">Rename</button><button type="button" class="text-btn" data-act="group-link" data-convo="${id}">Join link</button><button type="button" class="text-btn" data-act="group-requests" data-convo="${id}">Requests</button>`
     : '';
-  return `<div class="toolbar group-bar"><button type="button" class="text-btn" data-act="group-members" data-convo="${id}">Members</button><button type="button" class="text-btn" data-act="group-add" data-convo="${id}">Add people</button>${owner}<button type="button" class="danger mini" data-act="leave-convo" data-leave="group" data-convo="${id}">Leave</button></div>`;
+  return `<div class="toolbar group-bar"><button type="button" class="text-btn" data-act="group-audio" data-convo="${id}">Voice</button><button type="button" class="text-btn" data-act="group-video" data-convo="${id}">Video</button><button type="button" class="text-btn" data-act="group-members" data-convo="${id}">Members</button><button type="button" class="text-btn" data-act="group-add" data-convo="${id}">Add people</button>${owner}<button type="button" class="danger mini" data-act="leave-convo" data-leave="group" data-convo="${id}">Leave</button></div>`;
 }
 
 function clearChatCallChrome() {
@@ -2832,7 +2878,8 @@ function paintIncomingCall(messages, peerDid, convoId) {
   if (!thread) return;
   thread.querySelectorAll('.call-banner').forEach((node) => node.remove());
   if (isInCall()) return;
-  const offer = incomingCall(messages, myDid(), peerDid);
+  const grouped = Boolean(openChatGroup?.id && openChatGroup.id === convoId);
+  const offer = grouped ? latestGroupCall(messages, myDid()) : incomingCall(messages, myDid(), peerDid);
   if (!offer?.rkey) return;
   const key = `${convoId}:${offer.rkey}`;
   if (ignoredRings.has(key)) return;
@@ -2841,13 +2888,15 @@ function paintIncomingCall(messages, peerDid, convoId) {
     followed: Boolean(followCache.get(peerDid)),
     accepted: $('view')?.dataset.convoStatus !== 'request',
   };
-  if (!callMayRing(facts) && !callIsRequest(facts)) return;
+  if (grouped) {
+    if (!callAllow()) return;
+  } else if (!callMayRing(facts) && !callIsRequest(facts)) return;
   const reply = thread.querySelector('.reply-bar');
-  const html = callBannerHtml(offer, { convoId, peerDid });
+  const html = callBannerHtml(offer, { convoId, peerDid: peerDid || offer.sender || '' });
   if (reply) reply.insertAdjacentHTML('beforebegin', html);
   else thread.insertAdjacentHTML('beforeend', html);
   showPresence(thread);
-  if (callMayRing(facts)) surfaceIncomingCall({ ...offer, convoId, peerDid, key });
+  if (grouped || callMayRing(facts)) surfaceIncomingCall({ ...offer, convoId, peerDid: peerDid || offer.sender || '', key });
 }
 
 function paintIncomingShare(messages, peerDid, convoId) {
@@ -2932,8 +2981,8 @@ function watchOpenChat(convoId, peerDid, token) {
             fromThem = true;
             const call = parseCallMessage(message.text);
             if (call) callSignal = true;
-            if (parseGameMessage(message.text)) gameSignal = true;
-            if (call?.kind === 'offer' || (call?.kind === 'data' && call.bare)) incomingOffer = true;
+            if (parseGameMessage(message.text) || parsePlayMessage(message.text)) gameSignal = true;
+            if (call?.kind === 'offer' || call?.kind === 'group' || (call?.kind === 'data' && call.bare)) incomingOffer = true;
             if (parseShareMessage(message.text)?.kind === 'offer') incomingOffer = true;
           }
         });
@@ -6599,6 +6648,7 @@ function haltGame() {
   gameSeq += 1;
   clearInterval(gamePoll);
   gamePoll = 0;
+  stopArcade();
 }
 
 function holdGame() {
@@ -7228,11 +7278,39 @@ async function openSavedGame(convoId, rkey) {
   }
 }
 
+function inviteName(id) {
+  if (isArcade(id)) return arcadeTitle(id);
+  return gameById(id).name;
+}
+
 function findGameInvite(convos) {
   const mine = myDid();
   let best = null;
   (convos || []).forEach((convo) => {
     const last = convo?.lastMessage;
+    const play = parsePlayMessage(last?.text);
+    if (play && convo?.id) {
+      const sender = messageSender(last);
+      if (!sender || sender === mine) return;
+      const sent = new Date(last.sentAt || 0).getTime();
+      if (!Number.isFinite(sent) || Date.now() - sent > 6 * 60 * 60 * 1000) return;
+      const key = `${convo.id}:${play.room}`;
+      if (ignoredGames.has(key) || settledGames.has(key)) return;
+      const other = (convo.members || []).find((member) => member?.did === sender)
+        || (convo.members || []).find((member) => member?.did && member.did !== mine);
+      const offer = {
+        key,
+        rkey: play.room,
+        room: play.room,
+        game: play.game,
+        convoId: convo.id,
+        name: other?.displayName || (other?.handle ? `@${other.handle}` : 'Someone'),
+        avatar: other?.avatar || '',
+        sentAt: last.sentAt || '',
+      };
+      if (!best || String(offer.sentAt) > String(best.sentAt)) best = offer;
+      return;
+    }
     const parsed = parseGameMessage(last?.text);
     if (!parsed || parsed.kind !== 'invite' || !convo?.id) return;
     const sender = messageSender(last);
@@ -7345,8 +7423,9 @@ function paintPageInvites() {
   if (!slot) return;
   const cards = [];
   if (gameInvite) {
-    const name = gameById(gameInvite.game).name;
-    cards.push(`<div class="game-invite-card">${avatar(gameInvite.avatar, gameInvite.name)}<span><strong>${escapeHtml(name)}</strong><span>${escapeHtml(gameInvite.name)} wants to play</span></span><button type="button" class="primary small" data-act="game-accept" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}">Accept</button><button type="button" class="danger mini" data-act="game-decline" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-game="${escapeHtml(gameInvite.game)}">Decline</button></div>`);
+    const name = inviteName(gameInvite.game);
+    const room = escapeHtml(gameInvite.room || '');
+    cards.push(`<div class="game-invite-card">${avatar(gameInvite.avatar, gameInvite.name)}<span><strong>${escapeHtml(name)}</strong><span>${escapeHtml(gameInvite.name)} wants to play</span></span><button type="button" class="primary small" data-act="game-accept" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-room="${room}" data-game="${escapeHtml(gameInvite.game)}">Accept</button><button type="button" class="danger mini" data-act="game-decline" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-room="${room}" data-game="${escapeHtml(gameInvite.game)}">Decline</button></div>`);
   }
   if (gameTurn && gameTurn.key !== gameInvite?.key) {
     const name = gameById(gameTurn.game).name;
@@ -7360,9 +7439,10 @@ function paintGameChrome() {
   const turn = gameTurn && !($('game')?.open && gameMatch?.rkey === gameTurn.rkey) ? gameTurn : null;
   if (bar) {
     if (gameInvite) {
-      const name = gameById(gameInvite.game).name;
+      const name = inviteName(gameInvite.game);
+      const room = escapeHtml(gameInvite.room || '');
       bar.hidden = false;
-      bar.innerHTML = `${avatar(gameInvite.avatar, gameInvite.name)}<span class="incoming-call-copy"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(gameInvite.name)} wants to play</span></span><button type="button" class="primary small" data-act="game-accept" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}">Accept</button><button type="button" class="danger mini" data-act="game-decline" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-game="${escapeHtml(gameInvite.game)}">Decline</button>`;
+      bar.innerHTML = `${avatar(gameInvite.avatar, gameInvite.name)}<span class="incoming-call-copy"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(gameInvite.name)} wants to play</span></span><button type="button" class="primary small" data-act="game-accept" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-room="${room}" data-game="${escapeHtml(gameInvite.game)}">Accept</button><button type="button" class="danger mini" data-act="game-decline" data-convo="${escapeHtml(gameInvite.convoId)}" data-rkey="${escapeHtml(gameInvite.rkey)}" data-room="${room}" data-game="${escapeHtml(gameInvite.game)}">Decline</button>`;
     } else if (turn) {
       const name = gameById(turn.game).name;
       bar.hidden = false;
@@ -7415,23 +7495,263 @@ async function paintGameChat(messages, peerDid, convoId, announce) {
   }
   if (token !== gameChatToken) return;
   thread.querySelectorAll('.game-banner').forEach((node) => node.remove());
-  if (!live) return;
-  const html = gameBannerHtml(live, convoId);
-  if (html) {
-    const reply = thread.querySelector('.reply-bar');
-    if (reply) reply.insertAdjacentHTML('beforebegin', html);
-    else thread.insertAdjacentHTML('beforeend', html);
+  if (live) {
+    const html = gameBannerHtml(live, convoId);
+    if (html) {
+      const reply = thread.querySelector('.reply-bar');
+      if (reply) reply.insertAdjacentHTML('beforebegin', html);
+      else thread.insertAdjacentHTML('beforeend', html);
+    }
   }
-  if (!announce) return;
+  paintPlayBanner(messages, convoId);
+  if (!live || !announce) return;
   const newest = newestGameSignal(source, live.rkey);
   if (newest && messageSender(newest) !== myDid()) {
     considerTurn(live, convoId, newest.id || newest.sentAt || `${live.rkey}:${live.state.moves.length}`, newest.sentAt);
   }
 }
 
+function stopArcade() {
+  if (arcadeTimer) clearInterval(arcadeTimer);
+  arcadeTimer = 0;
+  const current = arcade;
+  arcade = null;
+  if (current?.usesMesh) stopMesh();
+}
+
+function arcadeState(id, seed) {
+  return id === 'snakes' ? startSnakes(seed) : startPong(seed);
+}
+
+function arcadeStatus() {
+  if (!arcade) return '';
+  if (arcade.mode === 'wait') return 'Waiting for the host…';
+  const state = arcade.state;
+  if (!state) return '';
+  if (state.id === 'pong') {
+    if (state.over) return (arcade.role === 'guest' ? state.winner === 'right' : state.winner === 'left') ? 'You win' : 'They win';
+    return `${state.score[0]} – ${state.score[1]}`;
+  }
+  if (state.over) {
+    if (state.winner === 'draw') return 'Draw';
+    const mine = arcade.role === 'guest' ? 'right' : 'left';
+    return state.winner === mine ? 'You win' : 'They win';
+  }
+  return state.id === 'snakes' ? 'Eat the food. Do not hit a wall or a snake.' : 'First to five.';
+}
+
+function arcadePad() {
+  if (!arcade?.state) return '';
+  if (arcade.state.id === 'pong') {
+    return '<div class="arcade-pad"><button type="button" data-act="arcade-dir" data-dir="up">Up</button><button type="button" data-act="arcade-dir" data-dir="down">Down</button><button type="button" data-act="arcade-dir" data-dir="stop">Stop</button></div>';
+  }
+  return '<div class="arcade-pad"><button type="button" data-act="arcade-dir" data-dir="up">Up</button><button type="button" data-act="arcade-dir" data-dir="left">Left</button><button type="button" data-act="arcade-dir" data-dir="down">Down</button><button type="button" data-act="arcade-dir" data-dir="right">Right</button></div>';
+}
+
+function paintArcade() {
+  const stage = $('game-stage');
+  if (!stage || !arcade) return;
+  const full = $('game')?.classList.contains('is-full');
+  const name = arcadeTitle(arcade.game || arcade.state?.id || 'pong');
+  const room = arcade.room ? `<p class="dim">Room ${escapeHtml(arcade.room)}</p>` : '';
+  let people = '';
+  if (arcade.mode === 'pick') {
+    const rows = (arcade.people || []).map((row) => {
+      const pressed = arcade.picked === row.convoId ? 'true' : 'false';
+      return `<button type="button" class="person" data-act="arcade-pick" data-convo="${escapeHtml(row.convoId)}" aria-pressed="${pressed}">${avatar(row.avatar, row.name)}<span class="person-link">${escapeHtml(row.name)}</span></button>`;
+    }).join('');
+    people = `<div class="game-people">${rows || '<p class="dim">Nobody is available. Share the room code.</p>'}</div><div class="game-foot"><button type="button" class="primary" data-act="arcade-push"${arcade.picked ? '' : ' disabled'}>Push</button></div>`;
+  }
+  const width = arcade.state?.w || 640;
+  const height = arcade.state?.h || 360;
+  stage.innerHTML = `<div class="game-head"><h2 id="game-title">${escapeHtml(name)}</h2><div class="game-head-actions"><button type="button" class="text-btn" data-act="game-full">${full ? 'Exit full screen' : 'Full screen'}</button><button type="button" class="text-btn" data-act="game-close">Close</button></div></div><div class="game-play"><canvas class="arcade-canvas" id="arcade-canvas" width="${width}" height="${height}"></canvas><aside class="game-panel"><p class="game-status" id="arcade-status">${escapeHtml(arcadeStatus())}</p>${room}${arcadePad()}${people}</aside></div>`;
+  const canvas = stage.querySelector('#arcade-canvas');
+  if (canvas && arcade.state) drawArcade(arcade.state, canvas.getContext('2d'));
+}
+
+function drawArcadeNow() {
+  const canvas = $('arcade-canvas');
+  const status = $('arcade-status');
+  if (status) status.textContent = arcadeStatus();
+  if (canvas && arcade?.state) drawArcade(arcade.state, canvas.getContext('2d'));
+}
+
+function runArcade() {
+  if (arcadeTimer) clearInterval(arcadeTimer);
+  const pace = arcade?.state?.id === 'snakes' ? 140 : 32;
+  arcadeTimer = setInterval(() => {
+    if (!arcade || arcade.mode === 'wait' || !arcade.state) return;
+    if (arcade.role !== 'guest' && !arcade.state.over) {
+      if (arcade.state.id === 'pong') stepPong(arcade.state);
+      else stepSnakes(arcade.state, { ai: arcade.role === 'ai' });
+      if (arcade.role === 'host' && arcade.usesMesh && arcade.state.tick % (arcade.state.id === 'pong' ? 2 : 1) === 0) {
+        sendMesh(JSON.stringify({ t: 'st', s: arcade.state }));
+      }
+    }
+    drawArcadeNow();
+  }, pace);
+}
+
+function onArcadeData(raw) {
+  if (!arcade) return;
+  let message = null;
+  try { message = JSON.parse(raw); } catch { message = null; }
+  if (!message) return;
+  if (arcade.role === 'guest' && message.t === 'st' && message.s?.id) {
+    const first = arcade.mode === 'wait';
+    arcade.state = message.s;
+    arcade.game = message.s.id;
+    arcade.mode = 'play';
+    if (first) paintArcade();
+    else drawArcadeNow();
+    return;
+  }
+  if (arcade.role === 'host' && message.t === 'in' && arcade.state) {
+    if (arcade.state.id === 'pong') queuePong(arcade.state, 'right', Number(message.pad) || 0);
+    else queueDir(arcade.state.snakes[1], Number(message.dir));
+  }
+}
+
+function arcadePress(dir) {
+  if (!arcade?.state || arcade.mode === 'wait') return;
+  const guest = arcade.role === 'guest';
+  if (arcade.state.id === 'pong') {
+    const pad = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+    const side = guest ? 'right' : 'left';
+    queuePong(arcade.state, side, pad);
+    if (guest) sendMesh(JSON.stringify({ t: 'in', pad }));
+    return;
+  }
+  const map = { up: 0, right: 1, down: 2, left: 3 };
+  if (map[dir] == null) return;
+  const snake = guest ? arcade.state.snakes[1] : arcade.state.snakes[0];
+  queueDir(snake, map[dir]);
+  if (guest) sendMesh(JSON.stringify({ t: 'in', dir: map[dir] }));
+}
+
+async function openArcade(gameId, role, extra = {}) {
+  if (isInCall()) {
+    toast('Hang up the call first.');
+    return;
+  }
+  haltGame();
+  const seed = (Date.now() % 100000) + 1;
+  const state = arcadeState(gameId, seed);
+  if (role === 'ai') state.ai = true;
+  arcade = {
+    role,
+    game: gameId,
+    state,
+    room: '',
+    usesMesh: false,
+    mode: role === 'guest' ? 'wait' : 'play',
+    people: null,
+    picked: '',
+    ...extra,
+  };
+  if (role === 'guest') arcade.state = null;
+  paintArcade();
+  openGameDialog();
+  if (role !== 'guest') runArcade();
+}
+
+async function startArcadeAi(gameId) {
+  await openArcade(gameId, 'ai');
+}
+
+async function startArcadePerson(gameId) {
+  if (!signedIn()) {
+    requireSignIn();
+    return;
+  }
+  const room = signalCode(12);
+  await openArcade(gameId, 'host', { room, mode: 'pick' });
+  if (!arcade) return;
+  try {
+    await startMesh({ room, name: gameId, onData: (_id, body) => onArcadeData(body) });
+    if (arcade) arcade.usesMesh = true;
+  } catch (error) {
+    showError(error?.message || 'The room could not open.');
+  }
+  if (!arcade) return;
+  try { arcade.people = await availablePlayers(); } catch { arcade.people = []; }
+  paintArcade();
+}
+
+async function joinArcadeRoom(code, gameId) {
+  const room = String(code || '').trim().toLowerCase();
+  if (!/^[a-z2-9]{8,24}$/.test(room)) {
+    toast('That room code is not valid.');
+    return;
+  }
+  if (isInCall()) {
+    toast('Hang up the call first.');
+    return;
+  }
+  await openArcade(gameId || 'pong', 'guest', { room, mode: 'wait', game: gameId || '' });
+  if (!arcade) return;
+  try {
+    await startMesh({
+      room,
+      name: 'guest',
+      onData: (_id, body) => onArcadeData(body),
+      onPeers: (peers) => {
+        if (!arcade || arcade.game) return;
+        const named = (peers || []).find((peer) => peer.name === 'pong' || peer.name === 'snakes');
+        if (named) arcade.game = named.name;
+      },
+    });
+    if (arcade) arcade.usesMesh = true;
+  } catch (error) {
+    showError(error?.message || 'That room could not be joined.');
+    $('game')?.close();
+  }
+}
+
+async function pushArcade() {
+  if (!arcade || arcade.role !== 'host' || !arcade.picked) return;
+  const person = (arcade.people || []).find((row) => row.convoId === arcade.picked);
+  if (!person) return;
+  try {
+    await api.sendMessage(person.convoId, playLine(arcade.game, arcade.room));
+    toast(`Invited ${person.name}. Room ${arcade.room}.`);
+  } catch (error) {
+    showError(error?.message || 'Could not push the invite.');
+  }
+}
+
+function paintPlayBanner(messages, convoId) {
+  const thread = $('view')?.querySelector('.chat-thread');
+  if (!thread || !convoId) return;
+  thread.querySelectorAll('.play-banner').forEach((node) => node.remove());
+  let best = null;
+  (messages || []).forEach((message) => {
+    const parsed = parsePlayMessage(message?.text);
+    if (!parsed || messageSender(message) === myDid()) return;
+    if (!best || String(message?.sentAt || '') > String(best.sentAt || '')) best = { ...parsed, sentAt: message.sentAt || '' };
+  });
+  if (!best) return;
+  const then = new Date(best.sentAt).getTime();
+  if (!Number.isFinite(then) || Date.now() - then > 6 * 60 * 60 * 1000) return;
+  const key = `${convoId}:${best.room}`;
+  if (ignoredGames.has(key)) return;
+  const html = `<div class="game-banner play-banner"><span>${escapeHtml(arcadeTitle(best.game))} invite</span><button type="button" class="primary small" data-act="game-accept" data-convo="${escapeHtml(convoId)}" data-rkey="${escapeHtml(best.room)}" data-room="${escapeHtml(best.room)}" data-game="${escapeHtml(best.game)}">Join</button><button type="button" class="danger mini" data-act="game-decline" data-convo="${escapeHtml(convoId)}" data-rkey="${escapeHtml(best.room)}" data-room="${escapeHtml(best.room)}" data-game="${escapeHtml(best.game)}">Decline</button></div>`;
+  const reply = thread.querySelector('.reply-bar');
+  if (reply) reply.insertAdjacentHTML('beforebegin', html);
+  else thread.insertAdjacentHTML('beforeend', html);
+}
+
 function handleGameAct(act, node) {
-  if (act === 'game-ai') return startAi(node?.dataset.game || 'chess');
-  if (act === 'game-person') return startPerson(node?.dataset.game || 'chess');
+  if (act === 'game-ai') {
+    const id = node?.dataset.game || 'chess';
+    if (isArcade(id)) return startArcadeAi(id);
+    return startAi(id);
+  }
+  if (act === 'game-person') {
+    const id = node?.dataset.game || 'chess';
+    if (isArcade(id)) return startArcadePerson(id);
+    return startPerson(id);
+  }
   if (act === 'game-sq') return onGameSquare(node);
   if (act === 'game-promo') return commitMove(node?.dataset.move || '');
   if (act === 'game-side') return setGameSide(node?.dataset.side || '');
@@ -7447,8 +7767,33 @@ function handleGameAct(act, node) {
   if (act === 'game-draw') return offerDraw();
   if (act === 'game-draw-yes') return answerDraw(true);
   if (act === 'game-draw-no') return answerDraw(false);
-  if (act === 'game-accept') return acceptGame(node?.dataset.convo || '', node?.dataset.rkey || '');
-  if (act === 'game-decline') return declineGame(node?.dataset.convo || '', node?.dataset.rkey || '', node?.dataset.game || '');
+  if (act === 'game-accept') {
+    const game = node?.dataset.game || '';
+    if (isArcade(game)) return joinArcadeRoom(node?.dataset.room || node?.dataset.rkey || '', game);
+    return acceptGame(node?.dataset.convo || '', node?.dataset.rkey || '');
+  }
+  if (act === 'game-decline') {
+    if (isArcade(node?.dataset.game || '')) {
+      const key = `${node?.dataset.convo || ''}:${node?.dataset.rkey || node?.dataset.room || ''}`;
+      ignoredGames.add(key);
+      if (gameInvite?.key === key) {
+        gameInvite = null;
+        badgeMemory.game = '';
+        paintGameChrome();
+      }
+      return undefined;
+    }
+    return declineGame(node?.dataset.convo || '', node?.dataset.rkey || '', node?.dataset.game || '');
+  }
+  if (act === 'arcade-join') return joinArcadeRoom($('arcade-code')?.value || '', '');
+  if (act === 'arcade-pick') {
+    if (!arcade) return undefined;
+    arcade.picked = node?.dataset.convo || '';
+    paintArcade();
+    return undefined;
+  }
+  if (act === 'arcade-push') return pushArcade();
+  if (act === 'arcade-dir') return arcadePress(node?.dataset.dir || '');
   if (act === 'game-again') return rematch();
   if (act === 'game-open') return openSavedGame(node?.dataset.convo || '', node?.dataset.rkey || '');
   if (act === 'game-close') $('game')?.close();
@@ -10917,6 +11262,8 @@ async function followedSubjects() {
 
 async function followAllBack(button) {
   if (!signedIn()) return requireSignIn();
+  if (button?.disabled) return;
+  followBackBusy = true;
   if (button) {
     button.disabled = true;
     button.textContent = 'Checking…';
@@ -10986,9 +11333,11 @@ async function followAllBack(button) {
   } catch (error) {
     showError(error.message);
   } finally {
-    if (button?.isConnected) {
-      button.disabled = false;
-      button.textContent = 'Follow all back';
+    followBackBusy = false;
+    const live = document.querySelector('#follow-back-bar [data-act="follow-back"]');
+    if (live) {
+      live.disabled = followBackCache.did === myDid() ? !followBackCache.due : true;
+      live.textContent = 'Follow all back';
     }
   }
 }
@@ -11300,6 +11649,19 @@ async function handleChromeAct(act, event) {
     await followPack(button?.dataset.list, button);
     return true;
   }
+  if (act === 'group-audio' || act === 'group-video') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    if (!canCall()) {
+      toast('Voice and video need a secure page. Open LibreSky over https, or on http://127.0.0.1.');
+      return true;
+    }
+    const convoId = button?.dataset.convo || '';
+    startGroupCall({ convoId, media: act === 'group-video' ? 'video' : 'audio' }).catch((error) => {
+      showError(error?.message || 'The group call could not start.');
+    });
+    return true;
+  }
   if (act === 'call-audio' || act === 'call-video') {
     event.preventDefault();
     if (!signedIn()) return requireSignIn(), true;
@@ -11360,12 +11722,17 @@ async function handleChromeAct(act, event) {
         }
       }).catch(() => {});
     }
-    acceptCall({
-      convoId,
-      peerDid: peer,
-      rkey,
-      media: button?.dataset.media || 'audio',
-    }).then(() => {
+    const room = button?.dataset.room || '';
+    const joining = button?.dataset.group === '1'
+      ? joinGroupCall({ convoId, rkey, media: button?.dataset.media || 'audio', room })
+      : acceptCall({
+        convoId,
+        peerDid: peer,
+        rkey,
+        media: button?.dataset.media || 'audio',
+        room,
+      });
+    joining.then(() => {
       if (!isInCall() && convoId && rkey) ignoredRings.delete(`${convoId}:${rkey}`);
     }).catch((error) => {
       if (convoId && rkey) ignoredRings.delete(`${convoId}:${rkey}`);
@@ -11825,7 +12192,7 @@ async function onClick(event) {
     }
   }
   const act = event.target.closest('[data-act]')?.dataset.act;
-  if (act?.startsWith('game-')) {
+  if (act?.startsWith('game-') || act?.startsWith('arcade-')) {
     event.preventDefault();
     Promise.resolve(handleGameAct(act, event.target.closest('[data-act]'))).catch((error) => {
       showError(error?.message || 'That did not work.');
@@ -14172,6 +14539,16 @@ function bind() {
   });
   $('hovercard')?.addEventListener('pointerout', scheduleHoverHide);
   document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', (event) => {
+    if (!arcade || !$('game')?.open) return;
+    const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+    if (typing) return;
+    const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', a: 'left', s: 'down', d: 'right' };
+    const dir = map[event.key];
+    if (!dir) return;
+    event.preventDefault();
+    arcadePress(dir);
+  });
   $('back').addEventListener('click', () => goBack());
   document.addEventListener('pointerdown', (event) => {
     const mic = event.target.closest?.('[data-act="dictate"]');
@@ -15375,6 +15752,7 @@ async function boot() {
   setupCall({
     toast,
     onStage() { showPresence($('call')); },
+    onClear() { stopArcade(); },
   });
   setupShare({
     toast,
