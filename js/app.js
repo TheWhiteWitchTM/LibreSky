@@ -22,6 +22,7 @@ import {
   drainPosts,
   emptyHtml,
   feedHtml,
+  liveStripHtml,
   linkPreviewHtml,
   assistantHtml,
   callBannerHtml,
@@ -74,7 +75,7 @@ import {
   soundPrefs,
 } from './session.js';
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
-import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, hostOf, messageSender, messagesForConvo, normalizeSentMessage, omitTrailingPostLink, ownUnread, parseCallMessage, parseGameMessage, parseHash, parseShareMessage, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
+import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, groupInfo, hostOf, joinCodeFromText, liveStatusActive, liveUriAllowed, memberRole, messageSender, messagesForConvo, needsFollowBack, normalizeSentMessage, notesHaveFollowBack, omitTrailingPostLink, ownUnread, parseCallMessage, parseGameMessage, parseHash, parseShareMessage, partitionConvos, postHash, profileHash, replyTargets, richText, shouldFollowBack, streamPlayer, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { activeMatch, applyMove, boardView, chooseMove, describe, flipped, gameById, gameLine, gamesPageHtml, logHtml, pickSquare, promoHtml, replayGame, resultOf, startGame } from './games.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
 import { completeWord, rememberWords, typoWords } from './words.js';
@@ -149,6 +150,9 @@ const EXPLORE_TABS = SEARCH_TOPICS.map((topic) => ({
 let reportTarget = null;
 let chatTimer = 0;
 let badgeMemory = { notifications: null, chat: null, ring: '', game: '', gameTurn: '' };
+const followBackCache = { did: '', due: null, at: 0 };
+let openChatGroup = null;
+let liveExtraHosts = [];
 const ignoredRings = new Set();
 const ignoredGames = new Set();
 const settledGames = new Set();
@@ -1610,7 +1614,7 @@ async function showHome(active) {
     const banner = homeLead('');
     const items = following ? visibleHome(raw) : discover ? filterDiscover(raw) : lane.type === 'feed' ? visibleFeed(raw, lane.value) : raw;
     resetPosts();
-    const posted = feedHtml(items);
+    const posted = liveStripHtml(items) + feedHtml(items);
     const empty = following
       ? emptyHtml('No posts yet', 'Follow a few people, or add a list with the … on the tabs.')
       : discover
@@ -1667,7 +1671,7 @@ async function showBrowse() {
     const raw = data.feed || [];
     const items = filterDiscover(raw);
     resetPosts();
-    const posted = feedHtml(items);
+    const posted = liveStripHtml(items) + feedHtml(items);
     const banner = homeLead('<button type="button" class="prompt" data-act="signin"><span>Sign in to see who you follow</span></button>');
     const empty = emptyHtml('Nothing here yet', 'Discover is quiet in your content languages. The Settings page can show every language.');
     const waiting = '<p class="dim lang-wait">Looking through more posts…</p>';
@@ -2222,10 +2226,13 @@ async function showNotifications(filter) {
   let paging = false;
   let repostArmed = false;
   let marked = false;
-  const tools = `<div class="toolbar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>`;
+  const cachedOffer = followBackCache.did === did && followBackCache.due === true && Date.now() - followBackCache.at < 120000;
+  let followBackOffer = cachedOffer;
+  const followBackBar = '<div class="toolbar" id="follow-back-bar"><button type="button" class="primary small" data-act="follow-back">Follow all back</button></div>';
 
   const paint = () => {
     if (token !== generation) return;
+    if (notesHaveFollowBack(all, did)) followBackOffer = true;
     const view = $('view');
     if (!view) return;
     const y = window.scrollY || document.documentElement.scrollTop || 0;
@@ -2242,9 +2249,18 @@ async function showNotifications(filter) {
     remember();
     const nextHtml = rows || emptyHtml('No notifications', 'You are all caught up.');
     const list = $('note-list');
-    if (!list || !view.contains(list)) view.innerHTML = `${tools}<div id="note-list">${nextHtml}</div>`;
-    else if (list.innerHTML !== nextHtml) list.innerHTML = nextHtml;
-    else {
+    const syncFollowBar = () => {
+      const bar = view.querySelector('#follow-back-bar');
+      const host = $('note-list');
+      if (followBackOffer && !bar && host) host.insertAdjacentHTML('beforebegin', followBackBar);
+      if (!followBackOffer && bar) bar.remove();
+    };
+    if (!list || !view.contains(list)) view.innerHTML = `${followBackOffer ? followBackBar : ''}<div id="note-list">${nextHtml}</div>`;
+    else if (list.innerHTML !== nextHtml) {
+      syncFollowBar();
+      list.innerHTML = nextHtml;
+    } else {
+      syncFollowBar();
       showPresence(view);
       return;
     }
@@ -2273,6 +2289,43 @@ async function showNotifications(filter) {
     marked = true;
     api.updateSeen().then(refreshBadge).catch(() => {});
   };
+
+  let followBackProbe = 0;
+  async function probeFollowBack() {
+    const job = ++followBackProbe;
+    if (followBackOffer) return;
+    if (followBackCache.did === did && followBackCache.due === false && Date.now() - followBackCache.at < 120000) return;
+    let cursor = '';
+    try {
+      for (let page = 0; page < 12; page += 1) {
+        if (token !== generation || job !== followBackProbe || followBackOffer) return;
+        const data = await api.getFollowers(did, cursor || undefined, undefined, 100);
+        if (token !== generation || job !== followBackProbe) return;
+        const due = (data.followers || []).some((actor) => needsFollowBack(actor, did));
+        if (due) {
+          followBackCache.did = did;
+          followBackCache.due = true;
+          followBackCache.at = Date.now();
+          followBackOffer = true;
+          paint();
+          return;
+        }
+        if (!data.cursor || data.cursor === cursor) {
+          followBackCache.did = did;
+          followBackCache.due = false;
+          followBackCache.at = Date.now();
+          if (followBackOffer) {
+            followBackOffer = false;
+            paint();
+          }
+          return;
+        }
+        cursor = data.cursor;
+      }
+    } catch {
+      /* the button stays hidden until a later visit */
+    }
+  }
 
   function collectNoteUris(node, uris) {
     (node?.dataset.subject || '').split(/\s+/).forEach((uri) => {
@@ -2397,6 +2450,7 @@ async function showNotifications(filter) {
     kickSubjects();
     pagerFor(mainCursor || repostCursor, more);
     markSeen();
+    probeFollowBack();
   } else {
     showSkeletons();
   }
@@ -2429,6 +2483,7 @@ async function showNotifications(filter) {
       kickSubjects();
       pagerFor(mainCursor || repostCursor, more);
       markSeen();
+      probeFollowBack();
     } else if (incoming.length) {
       all = dedupeNotes(incoming.concat(all));
       paint();
@@ -2616,12 +2671,60 @@ function otherMember(convo, messages) {
 function chatOptions(messages, peerDid, convoId, fresh) {
   const live = incomingCall(messages, myDid(), peerDid);
   const blocked = Boolean(live && ignoredRings.has(`${convoId}:${live.rkey}`));
+  const group = Boolean(openChatGroup && openChatGroup.id === convoId);
   return {
     liveRkey: blocked ? '' : (live?.rkey || ''),
     convoId: convoId || '',
     peerDid: peerDid || '',
     fresh: Boolean(fresh),
+    group,
+    nameOf: (did) => openChatGroup?.names?.get(did) || '',
   };
+}
+
+function paintGroupTitle(name) {
+  const title = $('title');
+  const iconSlot = $('page-icon');
+  if (!title || !iconSlot) return;
+  const card = $('hovercard');
+  if (card?._anchor && (title.contains(card._anchor) || iconSlot.contains(card._anchor))) closeHover();
+  const label = name || 'Group';
+  title.textContent = label;
+  document.title = `${label} — LibreSky`;
+  iconSlot.hidden = false;
+  iconSlot.removeAttribute('aria-hidden');
+  iconSlot.innerHTML = avatar('', label);
+  measureHead();
+}
+
+function rememberGroup(convo, members) {
+  const info = groupInfo(convo);
+  if (!info) {
+    openChatGroup = null;
+    return null;
+  }
+  const names = new Map();
+  (members || []).forEach((member) => {
+    if (!member?.did) return;
+    const handle = member.handle ? `@${member.handle}` : '';
+    names.set(member.did, member.displayName || handle || 'Someone');
+  });
+  openChatGroup = { id: convo.id, info, names, members: members || [] };
+  return openChatGroup;
+}
+
+function groupOwner(convo, info) {
+  const mine = (convo?.members || []).find((member) => member?.did === myDid());
+  if (memberRole(mine) === 'owner') return true;
+  return info?.joinRequestCount != null || info?.unreadJoinRequestCount != null;
+}
+
+function groupToolsHtml(convo, info) {
+  const id = escapeHtml(convo?.id || '');
+  const owner = groupOwner(convo, info)
+    ? `<button type="button" class="text-btn" data-act="group-rename" data-convo="${id}">Rename</button><button type="button" class="text-btn" data-act="group-link" data-convo="${id}">Join link</button><button type="button" class="text-btn" data-act="group-requests" data-convo="${id}">Requests</button>`
+    : '';
+  return `<div class="toolbar group-bar"><button type="button" class="text-btn" data-act="group-members" data-convo="${id}">Members</button><button type="button" class="text-btn" data-act="group-add" data-convo="${id}">Add people</button>${owner}<button type="button" class="danger mini" data-act="leave-convo" data-leave="group" data-convo="${id}">Leave</button></div>`;
 }
 
 function clearChatCallChrome() {
@@ -2921,14 +3024,16 @@ async function showMessages(convoId) {
       });
       const rows = main.map((convo) => convoHtml(convo, mine)).join('');
       const entry = requestEntryHtml(waiting || reportedChat, people);
-      $('view').innerHTML = `<div class="toolbar"><form id="new-chat" class="new-chat"><input id="new-chat-handle" placeholder="Enter a handle" aria-label="Handle" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="253"><button class="primary small" type="submit">New chat</button></form><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Enter a handle, then press New chat.')}`;
+      $('view').innerHTML = `<div class="toolbar"><form id="new-chat" class="new-chat"><input id="new-chat-handle" placeholder="Enter a handle" aria-label="Handle" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="253"><button class="primary small" type="submit">New chat</button></form><button type="button" class="text-btn" data-act="new-group">New group</button><button type="button" class="text-btn" data-act="chat-read">Mark all as read</button><button type="button" class="danger" data-act="chat-cleanup">Remove deleted accounts</button></div>${entry}${rows || emptyHtml('No messages', 'Enter a handle, then press New chat. New group starts a chat with several people.')}`;
       showPresence($('view'));
       refreshBadge();
       return;
     }
     const cached = convoById.get(convoId) || null;
+    const cachedGroup = groupInfo(cached);
     const cachedOther = otherMember(cached, null);
-    if (cachedOther) fillChatTitle(cachedOther, token);
+    if (cachedGroup) paintGroupTitle(cachedGroup.name);
+    else if (cachedOther) fillChatTitle(cachedOther, token);
     let loadError = null;
     const [data, convoWrap] = await Promise.all([
       api.getConvo(convoId).catch((error) => { loadError = error; return null; }),
@@ -2938,8 +3043,23 @@ async function showMessages(convoId) {
     const convo = convoWrap?.convo || (convoWrap?.id ? convoWrap : null) || cached || null;
     if (convo?.id) rememberConvos([convo]);
     if (!data && !convo) throw loadError || new Error('Could not open that chat.');
+    const group = groupInfo(convo);
+    let members = convo?.members || [];
+    if (group) {
+      try {
+        const page = await api.getConvoMembers(convoId);
+        if (token !== generation) return;
+        if (page?.members?.length) {
+          const roles = new Map((convo.members || []).map((member) => [member.did, member.kind]));
+          members = page.members.map((member) => (member?.kind ? member : { ...member, kind: roles.get(member.did) }));
+        }
+      } catch {
+        /* the short member list still names the people it has */
+      }
+    }
+    rememberGroup(convo ? { ...convo, members } : null, members);
     const messages = messagesForConvo(data, convo);
-    const other = otherMember(convo, messages);
+    const other = group ? null : otherMember(convo, messages);
     const peerDid = other?.did || '';
     const requested = convoIsRequest(convo);
     if (other?.did) {
@@ -2955,9 +3075,10 @@ async function showMessages(convoId) {
     if (pickerHost === 'chat') closePicker();
     styleHold.delete('chat-text');
     const chatMic = `<button type="button" class="icon-btn" id="chat-mic" data-act="dictate" aria-pressed="false" aria-label="Dictate" data-tip="Dictate">${icon('mic')}</button>`;
-    const chatPlus = `<button type="button" class="icon-btn chat-plus" data-act="chat-file" aria-pressed="false" aria-label="Open a direct session" data-tip="Direct session">${icon('lock-open')}</button><input id="chat-file" type="file" multiple hidden>`;
+    const chatPlus = group ? '' : `<button type="button" class="icon-btn chat-plus" data-act="chat-file" aria-pressed="false" aria-label="Open a direct session" data-tip="Direct session">${icon('lock-open')}</button><input id="chat-file" type="file" multiple hidden>`;
     const chatTools = `<div id="chat-picker" hidden></div><div class="chat-tools"><button type="button" class="icon-btn" data-act="emoji" aria-expanded="false" aria-label="Emoji" data-tip="Emoji">${icon('smile')}</button><button type="button" class="icon-btn" data-act="flags" aria-expanded="false" aria-label="Flags" data-tip="Flags">${icon('flag')}</button>${styleButtons()}</div>`;
-    if (other) fillChatTitle(other, token);
+    if (group) paintGroupTitle(group.name);
+    else if (other) fillChatTitle(other, token);
     else {
       const label = requested ? 'Message request' : 'Chat';
       $('title').textContent = label;
@@ -2966,7 +3087,8 @@ async function showMessages(convoId) {
     }
     const bubbles = messages.map((message) => messageHtml(message, myDid(), options)).join('');
     const emptyChat = bubbles ? '' : `<p class="dim ai-empty">${requested ? 'Bluesky did not send the text of this request. Accept it to keep the chat, or delete it.' : 'No messages in this chat yet.'}</p>`;
-    $('view').innerHTML = `<section class="chat-thread">${requestBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form" data-peer="${escapeHtml(peerDid)}" data-convo="${escapeHtml(convoId)}">${chatPlus}<div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
+    const groupBar = group ? groupToolsHtml({ ...convo, members }, group) : '';
+    $('view').innerHTML = `<section class="chat-thread">${requestBar}${groupBar}<div class="messages">${bubbles}${emptyChat}</div><form class="reply-bar" id="chat-form" data-peer="${escapeHtml(peerDid)}" data-convo="${escapeHtml(convoId)}">${chatPlus}<div class="composer-field chat-field"><pre class="field-highlight" id="chat-highlight" aria-hidden="true"></pre><textarea id="chat-text" rows="1" maxlength="1000" placeholder="Message" autocomplete="off" spellcheck="true"></textarea></div><span class="chat-send">${chatMic}<span class="tip-wrap" data-tip="Shift+Enter sends"><button class="primary small" type="submit" aria-keyshortcuts="Shift+Enter" data-tip="Shift+Enter sends">Send</button></span></span>${chatTools}</form></section>`;
     paintIncomingShare(messages, peerDid, convoId);
     paintIncomingCall(messages, peerDid, convoId);
     paintGameChat(messages, peerDid, convoId, false);
@@ -4079,6 +4201,8 @@ function openProfileMenu(anchor) {
   const items = [];
   if (mine) {
     items.push({ id: 'edit-profile', label: 'Edit profile' });
+    items.push({ id: 'go-live', label: 'Go live' });
+    if (liveStatusActive(profile.status)) items.push({ id: 'end-live', label: 'End live' });
     items.push({ id: 'new-article', label: 'New article' });
     items.push({ id: 'edit-links', label: 'Edit links' });
   }
@@ -8158,6 +8282,7 @@ function route(options = {}) {
   stopSpeech();
   stopHomeWatch();
   if ($('view')) delete $('view').dataset.convoStatus;
+  openChatGroup = null;
   stopChatTimer();
   pager?.disconnect();
   selected = -1;
@@ -8169,6 +8294,8 @@ function route(options = {}) {
   if (a === 'search') return showSearch(b || '');
   if (a === 'notifications') return showNotifications(b || '');
   if ((a === 'likes' || a === 'reposts') && b) return showEngagement(a, b);
+  if (a === 'messages' && b === 'join' && c) return showJoin(c);
+  if (a === 'join' && b) return showJoin(b);
   if (a === 'messages') return showMessages(b || '');
   if (a === 'ai') return showAi();
   if (a === 'c' && b) return showCallLink(b);
@@ -10852,6 +10979,9 @@ async function followAllBack(button) {
     const tail = capped ? ' Run it again to continue.' : (limited ? ' Bluesky asked for a pause. Run it again in a little while.' : '');
     const cleaned = removed ? ` Removed ${removed} extra ${removed === 1 ? 'follow' : 'follows'}.` : '';
     toast(followed ? `Followed ${followed} ${followed === 1 ? 'person' : 'people'} back.${tail}${cleaned}` : `You already follow them back.${cleaned}`);
+    followBackCache.did = myDid();
+    followBackCache.due = Boolean(capped);
+    followBackCache.at = Date.now();
     await refreshHere();
   } catch (error) {
     showError(error.message);
@@ -10903,6 +11033,7 @@ async function cleanupDeletedChats(button) {
     for (let page = 0; page < 20; page += 1) {
       const data = await api.listConvos(cursor);
       (data.convos || []).forEach((convo) => {
+        if (groupInfo(convo)) return;
         const other = (convo.members || []).find((member) => member.did !== myDid()) || convo.members?.[0];
         if (accountGone(other)) ids.push(convo.id);
       });
@@ -11399,13 +11530,66 @@ async function handleChromeAct(act, event) {
     event.preventDefault();
     const id = button?.dataset.convo;
     if (!id) return true;
-    if (!window.confirm('Remove this chat with a deleted account?')) return true;
+    const group = button?.dataset.leave === 'group';
+    if (!window.confirm(group ? 'Leave this group?' : 'Remove this chat with a deleted account?')) return true;
     try {
       await api.leaveConvo(id);
-      button.closest('.person')?.remove();
-      toast('Chat removed');
+      toast(group ? 'Left the group' : 'Chat removed');
       refreshBadge();
+      if (group || parseHash()[1] === id) location.hash = '#/messages';
+      else button.closest('.person')?.remove();
     } catch (error) { showError(error.message); }
+    return true;
+  }
+  if (act === 'new-group') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    openGroupForm({ mode: 'create', title: 'New group', save: 'Create' });
+    return true;
+  }
+  if (act === 'group-add' || act === 'group-rename' || act === 'group-members' || act === 'group-requests' || act === 'group-link') {
+    event.preventDefault();
+    const id = button?.dataset.convo || '';
+    if (!id) return true;
+    if (act === 'group-add') openGroupForm({ mode: 'add', convoId: id, title: 'Add people', save: 'Add' });
+    else if (act === 'group-rename') openGroupForm({ mode: 'rename', convoId: id, title: 'Rename group', save: 'Save', name: openChatGroup?.info?.name || '', people: false });
+    else if (act === 'group-members') openGroupMembers(id);
+    else if (act === 'group-requests') openGroupRequests(id);
+    else openGroupLink(id);
+    return true;
+  }
+  if (act === 'group-remove' || act === 'group-approve' || act === 'group-reject' || act === 'group-off' || act === 'group-make' || act === 'copy-join') {
+    event.preventDefault();
+    await onGroupButton(act, button);
+    return true;
+  }
+  if (act === 'join-group') {
+    event.preventDefault();
+    if (!signedIn()) return requireSignIn(), true;
+    const code = button?.dataset.code || '';
+    if (!code) return true;
+    button.disabled = true;
+    try {
+      const data = await api.requestJoin(code);
+      if (data?.status === 'pending') {
+        toast('Request sent');
+        location.hash = '#/messages/requests';
+      } else if (data?.convo?.id) {
+        toast('Joined');
+        location.hash = `#/messages/${encodeURIComponent(data.convo.id)}`;
+      } else {
+        toast('Joined');
+        location.hash = '#/messages';
+      }
+    } catch (error) {
+      showError(groupError(error));
+      if (button?.isConnected) button.disabled = false;
+    }
+    return true;
+  }
+  if (act === 'watch-live') {
+    event.preventDefault();
+    openLivePlayer(button?.dataset.live || '', button);
     return true;
   }
   if (act === 'bookmarks-cleanup') {
@@ -11618,12 +11802,27 @@ async function onClick(event) {
     if (selectedText().trim()) return;
     closeHover();
     const href = facet.getAttribute('href') || '';
+    const joinCode = joinCodeFromText(href);
+    if (joinCode) {
+      event.preventDefault();
+      location.hash = `#/join/${encodeURIComponent(joinCode)}`;
+      return;
+    }
     if (href.startsWith('#')) {
       event.preventDefault();
       if (location.hash === href) route();
       else location.hash = href;
     }
     return;
+  }
+  const plainLink = event.target.closest?.('a[href]');
+  if (plainLink && !event.target.closest('button')) {
+    const joinCode = joinCodeFromText(plainLink.getAttribute('href') || '');
+    if (joinCode) {
+      event.preventDefault();
+      location.hash = `#/join/${encodeURIComponent(joinCode)}`;
+      return;
+    }
   }
   const act = event.target.closest('[data-act]')?.dataset.act;
   if (act?.startsWith('game-')) {
@@ -12563,6 +12762,8 @@ async function onMenu(event) {
     return;
   }
   if (id === 'edit-profile') return openProfileEditor();
+  if (id === 'go-live') return openLiveDialog();
+  if (id === 'end-live') return endLive();
   if (id === 'social-links') return openProfileEditor();
   if (id === 'new-article') return openArticleEditor();
   if (id === 'edit-links') return openAttachPicker('profile');
@@ -12948,6 +13149,368 @@ async function convoIdFor(peerDid) {
   const id = data.convo?.id;
   if (!id) throw new Error('Could not open that conversation.');
   return id;
+}
+
+function groupError(error) {
+  const text = String(error?.message || error?.data?.error || '');
+  if (/NewAccountCannotCreateGroup/i.test(text)) return 'This account is too new to create a group.';
+  if (/UserForbidsGroups/i.test(text)) return 'That account does not accept group invites.';
+  if (/MemberLimitReached/i.test(text)) return 'This group is full.';
+  if (/InsufficientRole/i.test(text)) return 'You do not have permission to do that.';
+  if (/FollowRequired/i.test(text)) return 'Follow the owner before you join.';
+  if (/LinkDisabled|InvalidCode|NoJoinLink/i.test(text)) return 'This join link is off.';
+  if (/UserKicked/i.test(text)) return 'You cannot rejoin this group.';
+  if (/ConvoLocked/i.test(text)) return 'This group is locked.';
+  if (/NotFollowedBySender|Blocked/i.test(text)) return 'One of those accounts cannot be added.';
+  return text || 'That did not work.';
+}
+
+function openGroupForm({ mode, convoId = '', title, save, name = '', people = true, body = '' }) {
+  const dialog = $('group');
+  if (!dialog) return;
+  dialog.dataset.mode = mode;
+  dialog.dataset.convo = convoId;
+  $('group-heading').textContent = title;
+  const submit = $('group-save');
+  submit.textContent = save;
+  submit.hidden = mode === 'members' || mode === 'requests' || mode === 'link';
+  const nameLabel = $('group-name-label');
+  const peopleLabel = $('group-people-label');
+  nameLabel.hidden = mode !== 'create' && mode !== 'rename';
+  peopleLabel.hidden = !people;
+  $('group-name').value = name;
+  $('group-people').value = '';
+  $('group-body').innerHTML = body;
+  if (!dialog.open) dialog.showModal();
+  if (!nameLabel.hidden) $('group-name').focus();
+  else if (!peopleLabel.hidden) $('group-people').focus();
+}
+
+async function didsFromHandles(text) {
+  const lines = String(text || '').split(/[\s,]+/).map((part) => part.trim().replace(/^@+/, '')).filter(Boolean);
+  const dids = [];
+  for (const handle of lines) {
+    if (handle.startsWith('did:')) dids.push(handle);
+    else dids.push(await api.resolveHandle(handle));
+  }
+  return [...new Set(dids)].filter((did) => did && did !== myDid());
+}
+
+async function saveGroup(event) {
+  event.preventDefault();
+  const dialog = $('group');
+  const mode = dialog?.dataset.mode || '';
+  const convoId = dialog?.dataset.convo || '';
+  if (mode === 'members' || mode === 'requests' || mode === 'link') return;
+  const button = $('group-save');
+  if (button) button.disabled = true;
+  try {
+    if (mode === 'create' || mode === 'rename') {
+      const name = $('group-name').value.trim();
+      if (!name) throw new Error('Name the group.');
+      if (mode === 'rename') {
+        await api.editGroup(convoId, name);
+        dialog.close();
+        toast('Group renamed');
+        route();
+        return;
+      }
+      const members = await didsFromHandles($('group-people').value);
+      if (!members.length) throw new Error('Add at least one handle.');
+      const data = await api.createGroup({ name, members });
+      dialog.close();
+      const id = data?.convo?.id;
+      if (id) location.hash = `#/messages/${encodeURIComponent(id)}`;
+      else location.hash = '#/messages';
+      return;
+    }
+    if (mode === 'add') {
+      const members = await didsFromHandles($('group-people').value);
+      if (!members.length) throw new Error('Add at least one handle.');
+      await api.addGroupMembers(convoId, members);
+      dialog.close();
+      toast('Invites sent. They accept the group from Message requests.');
+      route();
+    }
+  } catch (error) {
+    showError(groupError(error));
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function openGroupMembers(convoId) {
+  try {
+    const data = await api.getConvoMembers(convoId);
+    const mine = myDid();
+    const owner = (data.members || []).some((member) => member.did === mine && memberRole(member) === 'owner') || groupOwner({ members: data.members }, openChatGroup?.info);
+    const rows = (data.members || []).map((member) => {
+      const name = member.displayName || member.handle || 'Account';
+      const handle = member.handle ? `@${member.handle}` : '';
+      const role = memberRole(member) === 'owner' ? 'Owner' : 'Member';
+      const remove = owner && member.did !== mine
+        ? `<button type="button" class="danger mini" data-act="group-remove" data-did="${escapeHtml(member.did)}" data-convo="${escapeHtml(convoId)}">Remove</button>`
+        : '';
+      return `<div class="person">${avatar(member.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)} · ${role}</span></span><span class="row-actions">${remove}</span></div>`;
+    }).join('');
+    openGroupForm({
+      mode: 'members',
+      convoId,
+      title: 'Members',
+      save: 'Close',
+      people: false,
+      body: rows || '<p class="dim">No members loaded.</p>',
+    });
+  } catch (error) {
+    showError(groupError(error));
+  }
+}
+
+async function openGroupRequests(convoId) {
+  try {
+    const data = await api.listJoinRequests(convoId);
+    const rows = (data.requests || []).map((item) => {
+      const person = item.requestedBy || {};
+      const name = person.displayName || person.handle || 'Account';
+      const handle = person.handle ? `@${person.handle}` : '';
+      return `<div class="person">${avatar(person.avatar, name)}<span class="person-link"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(handle)}</span></span><span class="row-actions"><button type="button" class="primary mini" data-act="group-approve" data-did="${escapeHtml(person.did || '')}" data-convo="${escapeHtml(convoId)}">Approve</button><button type="button" class="danger mini" data-act="group-reject" data-did="${escapeHtml(person.did || '')}" data-convo="${escapeHtml(convoId)}">Reject</button></span></div>`;
+    }).join('');
+    openGroupForm({
+      mode: 'requests',
+      convoId,
+      title: 'Requests',
+      save: 'Close',
+      people: false,
+      body: rows || '<p class="dim">No one is waiting to join.</p>',
+    });
+  } catch (error) {
+    showError(groupError(error));
+  }
+}
+
+function joinLinksHtml(code) {
+  const here = `${location.origin}${location.pathname}#/join/${encodeURIComponent(code)}`;
+  const there = `https://bsky.app/messages/join/${encodeURIComponent(code)}`;
+  const row = (label, url) => `<p class="join-url"><span>${escapeHtml(label)}</span><a href="${escapeHtml(url)}">${escapeHtml(url)}</a><button type="button" class="text-btn mini" data-act="copy-join" data-url="${escapeHtml(url)}">Copy</button></p>`;
+  return `${row('LibreSky', here)}${row('Bluesky', there)}`;
+}
+
+async function openGroupLink(convoId) {
+  try {
+    const wrap = await api.getConvoView(convoId);
+    const info = groupInfo(wrap?.convo);
+    const link = info?.joinLink;
+    if (link?.code && link.enabledStatus !== 'disabled') {
+      openGroupForm({
+        mode: 'link',
+        convoId,
+        title: 'Join link',
+        save: 'Close',
+        people: false,
+        body: `${joinLinksHtml(link.code)}<p><button type="button" class="danger" data-act="group-off" data-convo="${escapeHtml(convoId)}">Turn link off</button></p>`,
+      });
+      return;
+    }
+    if (link?.code && link.enabledStatus === 'disabled') {
+      openGroupForm({
+        mode: 'link',
+        convoId,
+        title: 'Join link',
+        save: 'Close',
+        people: false,
+        body: `<p class="dim">The join link is off.</p><p><button type="button" class="primary small" data-act="group-make" data-convo="${escapeHtml(convoId)}" data-enable="1">Turn link on</button></p>`,
+      });
+      return;
+    }
+    openGroupForm({
+      mode: 'link',
+      convoId,
+      title: 'Join link',
+      save: 'Close',
+      people: false,
+      body: `<label class="check"><input type="checkbox" id="group-approve"> Ask before someone joins</label><p><button type="button" class="primary small" data-act="group-make" data-convo="${escapeHtml(convoId)}">Create link</button></p>`,
+    });
+  } catch (error) {
+    showError(groupError(error));
+  }
+}
+
+async function onGroupButton(act, button) {
+  const convoId = button?.dataset.convo || $('group')?.dataset.convo || '';
+  const did = button?.dataset.did || '';
+  try {
+    if (act === 'copy-join') {
+      const url = button?.dataset.url || '';
+      await navigator.clipboard.writeText(url);
+      toast('Link copied');
+      return;
+    }
+    if (act === 'group-remove') {
+      if (!did || !window.confirm('Remove this person from the group?')) return;
+      await api.removeGroupMembers(convoId, [did]);
+      button.closest('.person')?.remove();
+      toast('Removed');
+      return;
+    }
+    if (act === 'group-approve') {
+      await api.approveJoinRequest(convoId, did);
+      button.closest('.person')?.remove();
+      toast('Approved');
+      return;
+    }
+    if (act === 'group-reject') {
+      await api.rejectJoinRequest(convoId, did);
+      button.closest('.person')?.remove();
+      toast('Rejected');
+      return;
+    }
+    if (act === 'group-off') {
+      await api.disableJoinLink(convoId);
+      toast('Join link off');
+      $('group')?.close();
+      return;
+    }
+    if (act === 'group-make') {
+      if (button?.dataset.enable === '1') await api.enableJoinLink(convoId);
+      else {
+        const requireApproval = Boolean($('group-approve')?.checked);
+        await api.createJoinLink(convoId, { requireApproval, joinRule: 'anyone' });
+      }
+      toast('Join link on');
+      await openGroupLink(convoId);
+    }
+  } catch (error) {
+    showError(groupError(error));
+  }
+}
+
+async function showJoin(code) {
+  const token = ++generation;
+  setChrome({ title: 'Join group', nav: 'messages', back: true });
+  if (!signedIn()) {
+    $('view').innerHTML = emptyHtml('Join a group', 'Sign in to join this group.', '<button type="button" class="primary" data-act="signin">Sign in</button>');
+    return;
+  }
+  showSkeletons();
+  try {
+    const data = await api.getJoinLinkPreviews([code]);
+    if (token !== generation) return;
+    const item = data?.joinLinkPreviews?.[0] || {};
+    const type = String(item.$type || '');
+    if (type.includes('invalid') || (!item.name && !item.convoId)) {
+      $('view').innerHTML = emptyHtml('Join link unavailable', 'This link is off, or it does not match a group.');
+      return;
+    }
+    if (type.includes('disabled')) {
+      $('view').innerHTML = emptyHtml('Join link off', 'The owner turned this link off.');
+      return;
+    }
+    if (item.convo?.id) {
+      location.hash = `#/messages/${encodeURIComponent(item.convo.id)}`;
+      return;
+    }
+    const owner = item.owner || {};
+    const who = owner.displayName || (owner.handle ? `@${owner.handle}` : 'the owner');
+    const count = Number(item.memberCount) || 0;
+    const label = item.viewer?.requestedAt ? 'Requested' : (item.requireApproval ? 'Ask to join' : 'Join');
+    $('view').innerHTML = `<div class="empty"><h2>${escapeHtml(item.name || 'Group')}</h2><p>${escapeHtml(`${who} · ${count} ${count === 1 ? 'person' : 'people'}`)}</p>${item.viewer?.requestedAt ? '<p>You already asked to join.</p>' : `<button type="button" class="primary" data-act="join-group" data-code="${escapeHtml(code)}">${label}</button>`}</div>`;
+  } catch (error) {
+    if (!cancelled(token, error)) $('view').innerHTML = emptyHtml('Could not open that link', groupError(error));
+  }
+}
+
+async function loadLiveHosts() {
+  try {
+    const data = await api.getLiveNowConfig();
+    const mine = myDid();
+    const extra = [];
+    (data?.liveNow || []).forEach((row) => {
+      if (row?.did !== mine) return;
+      (row.domains || []).forEach((domain) => extra.push(domain));
+    });
+    liveExtraHosts = extra;
+  } catch {
+    liveExtraHosts = [];
+  }
+}
+
+function openLiveDialog() {
+  if (!signedIn()) return requireSignIn();
+  const dialog = $('live');
+  if (!dialog) return;
+  $('live-url').value = '';
+  if ($('live-duration')) $('live-duration').value = '60';
+  const known = 'Twitch, YouTube, Streamplace, Bluecast, Substack, or beehiiv.';
+  $('live-hosts').textContent = known;
+  if (!dialog.open) dialog.showModal();
+  $('live-url').focus();
+  loadLiveHosts().then(() => {
+    if (!$('live')?.open) return;
+    if (liveExtraHosts.length) $('live-hosts').textContent = `${known} This account can also use ${liveExtraHosts.join(', ')}.`;
+  });
+}
+
+async function saveLive(event) {
+  event.preventDefault();
+  const button = $('live-save');
+  const uri = $('live-url').value.trim();
+  const durationMinutes = Number($('live-duration')?.value) || 60;
+  if (!liveUriAllowed(uri, liveExtraHosts)) {
+    showError('Use a Twitch, YouTube, Streamplace, Bluecast, Substack, or beehiiv link.');
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    await api.writeLiveStatus({ uri, durationMinutes });
+    $('live')?.close();
+    toast('You are live');
+    route();
+  } catch (error) {
+    showError(error.message || 'Could not go live.');
+  } finally {
+    if (button?.isConnected) button.disabled = false;
+  }
+}
+
+async function endLive() {
+  try {
+    await api.clearLiveStatus();
+    toast('Live badge removed');
+    route();
+  } catch (error) {
+    const missing = error?.status === 404 || /RecordNotFound|not found/i.test(String(error?.message || ''));
+    if (missing) {
+      toast('Live badge removed');
+      route();
+      return;
+    }
+    showError(error.message || 'Could not end the live badge.');
+  }
+}
+
+function openLivePlayer(uri, button) {
+  const player = streamPlayer(uri, location.hostname || 'localhost');
+  if (!player || player.kind === 'link') {
+    const href = player?.href || uri;
+    if (href) window.open(href, '_blank', 'noopener');
+    return;
+  }
+  const card = button?.closest?.('.live-card');
+  if (!card) {
+    window.open(player.href, '_blank', 'noopener');
+    return;
+  }
+  if (player.kind === 'frame') {
+    card.innerHTML = `<iframe class="live-frame" src="${escapeHtml(player.frame)}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Live stream"></iframe>`;
+    return;
+  }
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.className = 'video';
+  node.dataset.act = 'video';
+  node.dataset.playlist = player.href;
+  card.replaceWith(node);
+  playVideo(node);
 }
 
 async function newChat() {
@@ -14190,6 +14753,10 @@ function bind() {
   }, true);
   $('manage-form').addEventListener('submit', saveManage);
   $('manage-cancel').addEventListener('click', () => $('manage').close());
+  $('group-form')?.addEventListener('submit', saveGroup);
+  $('group-cancel')?.addEventListener('click', () => $('group').close());
+  $('live-form')?.addEventListener('submit', saveLive);
+  $('live-cancel')?.addEventListener('click', () => $('live').close());
   $('view').addEventListener('click', (event) => {
     const emoji = event.target.closest?.('[data-emoji]');
     if (emoji && event.target.closest('#chat-picker')) {

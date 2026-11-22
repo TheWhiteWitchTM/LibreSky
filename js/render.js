@@ -12,12 +12,17 @@ import {
   postHash,
   profileHash,
   convoUnread,
+  groupInfo,
+  liveEmbedUri,
+  liveStatusActive,
+  livestreamView,
   messageSender,
   parseCallMessage,
   parseGameMessage,
   parseShareMessage,
   richText,
   safeUrl,
+  systemMessageLine,
   timeAgo,
 } from './util.js';
 
@@ -38,10 +43,11 @@ function attr(value) {
   return escapeHtml(value ?? '');
 }
 
-export function avatar(url, label, size) {
+export function avatar(url, label, size, options = {}) {
   const initial = escapeHtml((String(label || '?').trim().charAt(0) || '?').toUpperCase());
   const src = safeUrl(url || '');
-  return `<span class="avatar ${size || ''}" data-initial="${initial}">${src ? `<img src="${attr(src)}" alt="" onerror="this.remove()">` : ''}</span>`;
+  const live = options?.live ? ' live' : '';
+  return `<span class="avatar ${size || ''}${live}" data-initial="${initial}">${src ? `<img src="${attr(src)}" alt="" onerror="this.remove()">` : ''}</span>`;
 }
 
 const PRESENCE_LABEL = {
@@ -68,7 +74,8 @@ export function presenceLine(did, view) {
 export function accountIcon(actor, size, extraClass = '') {
   const id = typeof actor === 'string' ? actor : (actor?.handle || actor?.did || '');
   const name = (typeof actor === 'string' ? actor : (actor?.displayName || actor?.handle)) || 'Account';
-  const face = avatar(typeof actor === 'string' ? '' : actor?.avatar, name, size);
+  const live = typeof actor === 'object' && actor && liveStatusActive(actor.status);
+  const face = avatar(typeof actor === 'string' ? '' : actor?.avatar, name, size, { live });
   if (!id) return face;
   const classes = ['avatar-btn', extraClass].filter(Boolean).join(' ');
   return `<button type="button" class="${classes}" data-act="account-card" data-actor="${attr(id)}" aria-label="${attr(`Show ${name}`)}" aria-expanded="false">${face}</button>`;
@@ -404,9 +411,39 @@ function video(embed) {
   return `<button type="button" class="video"${style} data-act="video" data-playlist="${attr(playlist)}" data-alt="${attr(embed.alt || '')}">${thumb ? `<img src="${attr(thumb)}" alt="${attr(embed.alt || 'Video')}">` : ''}<span class="play">Play</span></button>`;
 }
 
+function livePill(actor) {
+  if (!liveStatusActive(actor?.status)) return '';
+  const href = liveEmbedUri(actor.status);
+  if (!href) return '';
+  return `<a class="live-pill" href="${attr(href)}" target="_blank" rel="noopener noreferrer">Live</a>`;
+}
+
+function liveCard(stream) {
+  const href = safeUrl(stream?.uri);
+  if (!href) return '';
+  const image = safeUrl(stream.image || stream.thumb || '');
+  const on = stream.active !== false;
+  const title = stream.title || 'Live stream';
+  return `<div class="card live-card"><button type="button" class="live-open" data-act="watch-live" data-live="${attr(href)}">${image ? `<img src="${attr(image)}" alt="">` : ''}<span class="live-flag${on ? ' on' : ''}">${on ? 'Live' : 'Ended'}</span></button><span class="card-body"><span class="domain">${escapeHtml(hostOf(href))}</span><strong>${escapeHtml(title)}</strong>${stream.description ? `<span class="desc">${escapeHtml(stream.description)}</span>` : ''}<button type="button" class="primary small" data-act="watch-live" data-live="${attr(href)}">${on ? 'Watch' : 'Open'}</button></span></div>`;
+}
+
+function joinLinkCard(embed) {
+  const preview = embed?.joinLinkPreview || embed;
+  const type = String(preview?.$type || '');
+  if (!preview || type.includes('disabled') || type.includes('invalid') || !preview.name) {
+    return '<div class="card join-card"><span class="card-body"><strong>Join link unavailable</strong><span class="desc">This link is off.</span></span></div>';
+  }
+  const count = Number(preview.memberCount) || 0;
+  const label = preview.viewer?.requestedAt ? 'Requested' : (preview.requireApproval ? 'Ask to join' : 'Join');
+  return `<div class="card join-card"><span class="card-body"><span class="domain">Group</span><strong>${escapeHtml(preview.name)}</strong><span class="desc">${escapeHtml(`${count} ${count === 1 ? 'person' : 'people'}`)}</span><button type="button" class="primary small" data-act="join-group" data-code="${attr(preview.code || '')}">${label}</button></span></div>`;
+}
+
 function embedHtml(embed) {
   if (!embed) return '';
   const type = embed.$type || '';
+  const stream = livestreamView(embed);
+  if (stream) return liveCard(stream);
+  if (type.includes('joinLink') || embed.joinLinkPreview) return joinLinkCard(embed);
   if (type.includes('recordWithMedia')) return `${embedHtml(embed.media)}${quote(embed.record)}`;
   if (type.includes('images') || (!type && embed.images)) return gallery(embed.images);
   if (type.includes('gallery') || (!type && embed.items)) {
@@ -524,6 +561,7 @@ export function postHtml(item, options = {}) {
       <div class="post-main">
         <div class="post-top">
           <a class="name" href="${profileHash(author)}">${nameMark(author.displayName || author.handle || 'User', author)}</a>
+          ${livePill(author)}
           <a class="handle" href="${profileHash(author)}">@${escapeHtml(author.handle || '')}</a>
           <a class="time" href="${postHash(post)}" data-tip="${attr(fullTime(when))}">${escapeHtml(timeAgo(when))}</a>
           ${options.bookmarkRemove ? `<button type="button" class="danger mini" data-act="remove-bookmark" data-uri="${attr(post.uri)}">Remove</button>` : ''}
@@ -550,6 +588,24 @@ export function postHtml(item, options = {}) {
 
 export function feedHtml(items, options) {
   return (items || []).map((item) => postHtml(item, options)).join('');
+}
+
+export function liveStripHtml(items) {
+  const seen = new Set();
+  const people = [];
+  (items || []).forEach((item) => {
+    const author = item?.post?.author || item?.author;
+    if (!author?.did || seen.has(author.did) || !liveStatusActive(author.status)) return;
+    seen.add(author.did);
+    people.push(author);
+  });
+  if (!people.length) return '';
+  const chips = people.slice(0, 12).map((actor) => {
+    const href = liveEmbedUri(actor.status);
+    const name = actor.displayName || actor.handle || 'Live';
+    return `<a class="live-chip" href="${attr(href)}" target="_blank" rel="noopener noreferrer">${avatar(actor.avatar, name, 'sm', { live: true })}<span>${escapeHtml(name)}</span></a>`;
+  }).join('');
+  return `<div class="live-strip" aria-label="Live now"><span class="live-strip-label">Live now</span>${chips}</div>`;
 }
 
 export function skeletons(count = 6) {
@@ -668,14 +724,19 @@ export function profileBannerSrc(url) {
 export function profileHtml(profile, options = {}) {
   const banner = profileBannerSrc(profile.banner || '');
   const name = profile.displayName || profile.handle;
+  const liveHref = liveStatusActive(profile?.status) ? liveEmbedUri(profile.status) : '';
+  const live = liveHref
+    ? `<a class="live-banner" href="${attr(liveHref)}" target="_blank" rel="noopener noreferrer"><span class="live-flag on">Live</span><span>Watch the stream</span></a>`
+    : '';
   return `<header class="profile">
     <div class="banner">${banner ? `<img src="${attr(banner)}" alt="" decoding="async" onerror="this.remove()">` : ''}</div>
     <div class="profile-row">
-      ${avatar(profile.avatar, name, 'xl')}
+      ${avatar(profile.avatar, name, 'xl', { live: Boolean(liveHref) })}
       <div id="profile-action"></div>
     </div>
     <h2>${nameMark(name, profile)}</h2>
     <div class="handle-row"><div class="handle">@${escapeHtml(profile.handle)}</div>${presenceLine(profile.did, options.presence)}</div>
+    ${live}
     ${profile.description ? `<p class="bio">${richText(profile.description, profile.descriptionFacets)}</p>` : ''}
     ${socialToolbarHtml(options.links)}
     ${joinedLine(profile.createdAt)}
@@ -1120,6 +1181,7 @@ function messagePreview(message) {
   if (!message) return 'No messages yet';
   const type = message.$type || '';
   if (type.endsWith('deletedMessageView')) return 'Message deleted';
+  if (type.endsWith('systemMessageView')) return systemMessageLine(message.data, () => '') || 'Group update';
   const gameLine = parseGameMessage(message.text);
   if (gameLine) {
     const names = { chess: 'Chess', checkers: 'Checkers', reversi: 'Reversi', fox: 'Fox and hounds', break: 'Breakthrough' };
@@ -1135,7 +1197,26 @@ function messagePreview(message) {
   return 'Message';
 }
 
+function groupConvoHtml(convo, group, me, options = {}) {
+  const name = group.name || 'Group';
+  const text = messagePreview(convo.lastMessage);
+  const unread = convoUnread(convo, me);
+  const pill = unread ? `<b class="pill">${unread}</b>` : '';
+  const count = Number(group.memberCount) || 0;
+  const detail = [count ? `${count} ${count === 1 ? 'person' : 'people'}` : '', text].filter(Boolean).join(' · ');
+  const faces = (convo.members || []).filter((member) => member?.did).slice(0, 3);
+  const face = faces.length
+    ? `<span class="avatar-stack request-faces">${faces.map((member) => avatar(member.avatar, member.displayName || member.handle || name, 'sm')).join('')}</span>`
+    : avatar('', name);
+  const request = options.request
+    ? `<button type="button" class="primary mini" data-act="accept-convo" data-convo="${attr(convo.id)}">Accept</button><button type="button" class="danger mini" data-act="decline-convo" data-convo="${attr(convo.id)}">Delete</button>`
+    : '';
+  return `<div class="person convo group-row${unread ? ' unread' : ''}">${face}<a class="person-link" href="#/messages/${encodeURIComponent(convo.id)}"><strong>${escapeHtml(name)}</strong><span class="handle">${escapeHtml(detail).slice(0, 160)}</span></a><span class="row-actions">${pill}${request}</span></div>`;
+}
+
 export function convoHtml(convo, me, options = {}) {
+  const group = groupInfo(convo);
+  if (group) return groupConvoHtml(convo, group, me, options);
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
   const gone = accountGone(other);
   const text = messagePreview(convo.lastMessage);
@@ -1193,12 +1274,16 @@ export function joinRequestHtml(item) {
 export function messageHtml(message, me, options = {}) {
   const type = message?.$type || '';
   if (type.endsWith('deletedMessageView')) return '<div class="bubble deleted">Message deleted</div>';
+  if (type.endsWith('messageBeforeUserJoinedGroupView')) {
+    const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
+    return `<div class="msg-system"${id}><span>A message from before you joined</span></div>`;
+  }
   const nested = message?.message && typeof message.message === 'object' ? message.message : null;
   if (type.endsWith('systemMessageView')) {
-    const line = nested?.text || message?.text || '';
+    const line = systemMessageLine(message.data, options.nameOf) || nested?.text || message?.text || '';
     if (!line) return '';
     const id = message?.id ? ` data-id="${attr(message.id)}"` : '';
-    return `<div class="msg-header"${id}><span>${escapeHtml(line)}</span></div>`;
+    return `<div class="msg-system"${id}><span>${escapeHtml(line)}</span></div>`;
   }
   const sender = messageSender(message) || messageSender(nested);
   const mine = Boolean(sender && sender === me);
@@ -1208,7 +1293,9 @@ export function messageHtml(message, me, options = {}) {
   const embed = message?.embed ? embedHtml(message.embed) : (nested?.embed ? embedHtml(nested.embed) : '');
   if (!text && !embed) return '';
   const fresh = !mine && options.fresh ? ' fresh' : '';
-  return `<div class="bubble${mine ? ' mine' : ''}${fresh}"${id}>${text ? `<p>${richText(text, message?.facets || nested?.facets)}</p>` : ''}${embed}</div>`;
+  const who = !mine && options.group ? (options.nameOf?.(sender) || '') : '';
+  const named = who ? `<span class="bubble-name">${escapeHtml(who)}</span>` : '';
+  return `<div class="bubble${mine ? ' mine' : ''}${fresh}"${id}>${named}${text ? `<p>${richText(text, message?.facets || nested?.facets)}</p>` : ''}${embed}</div>`;
 }
 
 export function assistantHtml(text, { id = '', kicker = 'Your account', actions = false } = {}) {
@@ -1242,6 +1329,7 @@ export function callStartHtml() {
 }
 
 export function callConvoHtml(convo, me) {
+  if (groupInfo(convo)) return '';
   const other = (convo.members || []).find((member) => member.did !== me) || convo.members?.[0] || {};
   const gone = accountGone(other);
   const name = gone ? 'Deleted account' : (other.displayName || other.handle || 'Conversation');

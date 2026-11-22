@@ -497,6 +497,154 @@ export function partitionConvos({ accepted, legacyRequests, requestItems } = {})
   return { main, requests: [...incoming.values()], joins: [...joins.values()] };
 }
 
+export function needsFollowBack(actor, selfDid = '') {
+  const did = actor?.did || '';
+  if (!did || (selfDid && did === selfDid)) return false;
+  const viewer = actor?.viewer;
+  if (!viewer || typeof viewer !== 'object') return false;
+  if (viewer.following || viewer.blocking || viewer.blockedBy) return false;
+  return true;
+}
+
+export function notesHaveFollowBack(notes, selfDid = '') {
+  return (notes || []).some((note) => note?.reason === 'follow' && needsFollowBack(note.author, selfDid));
+}
+
+const LIVE_HOSTS = ['twitch.tv', 'youtube.com', 'youtu.be', 'stream.place', 'bluecast.app', 'substack.com', 'beehiiv.com'];
+
+export function liveHostAllowed(hostname, extra = []) {
+  const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  if (!host) return false;
+  return LIVE_HOSTS.concat(extra || []).some((base) => {
+    const name = String(base || '').toLowerCase().replace(/^\*\./, '').replace(/\.$/, '');
+    if (!name || name.includes('/')) return false;
+    return host === name || host.endsWith(`.${name}`);
+  });
+}
+
+export function liveUriAllowed(uri, extra = []) {
+  const href = safeUrl(uri);
+  if (!href) return false;
+  try {
+    return liveHostAllowed(new URL(href).hostname, extra);
+  } catch {
+    return false;
+  }
+}
+
+export function liveEmbedUri(status) {
+  const fromView = status?.embed?.external?.uri;
+  const fromRecord = status?.record?.embed?.external?.uri;
+  return safeUrl(fromView || fromRecord || '');
+}
+
+export function liveStatusActive(status, now = Date.now()) {
+  if (!status || status.status !== 'app.bsky.actor.status#live') return false;
+  if (status.isDisabled || status.isActive === false) return false;
+  if (!liveEmbedUri(status)) return false;
+  const expires = Date.parse(status.expiresAt || '');
+  if (Number.isFinite(expires)) return expires > now;
+  const created = Date.parse(status.record?.createdAt || '');
+  const minutes = Number(status.record?.durationMinutes);
+  if (Number.isFinite(created) && minutes > 0) return created + minutes * 60000 > now;
+  return true;
+}
+
+export function streamPlayer(uri, parent = 'localhost') {
+  const href = safeUrl(uri);
+  if (!href) return null;
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === 'twitch.tv' || host.endsWith('.twitch.tv')) {
+    const channel = url.pathname.split('/').filter(Boolean)[0] || '';
+    if (!channel || ['videos', 'directory', 'settings', 'subscriptions'].includes(channel)) return { kind: 'link', href };
+    const frame = `https://player.twitch.tv/?channel=${encodeURIComponent(channel)}&parent=${encodeURIComponent(parent || 'localhost')}&autoplay=true`;
+    return { kind: 'frame', href, frame };
+  }
+  if (host === 'youtu.be') {
+    const id = url.pathname.split('/').filter(Boolean)[0] || '';
+    if (!id) return { kind: 'link', href };
+    return { kind: 'frame', href, frame: `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1` };
+  }
+  if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    let id = url.searchParams.get('v') || '';
+    if (!id && (url.pathname.startsWith('/live/') || url.pathname.startsWith('/embed/'))) id = url.pathname.split('/')[2] || '';
+    if (!id) return { kind: 'link', href };
+    return { kind: 'frame', href, frame: `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1` };
+  }
+  if (/\.m3u8(\?|$)/i.test(`${url.pathname}${url.search}`)) return { kind: 'hls', href };
+  return { kind: 'link', href };
+}
+
+export function groupInfo(convo) {
+  const kind = convo?.kind;
+  if (!kind || typeof kind !== 'object') return null;
+  const type = String(kind.$type || '');
+  if (type.includes('directConvo')) return null;
+  if (type.includes('groupConvo') || typeof kind.name === 'string') return kind;
+  return null;
+}
+
+export function memberRole(member) {
+  const kind = member?.kind;
+  if (!kind || typeof kind !== 'object') return '';
+  return String(kind.role || '');
+}
+
+export function joinCodeFromText(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, 'https://bsky.app');
+    const parts = `${url.pathname}${url.hash.replace(/^#/, '/')}`.split('/').filter(Boolean);
+    const index = parts.lastIndexOf('join');
+    const code = index >= 0 ? parts[index + 1] || '' : '';
+    if (/^[A-Za-z0-9_-]{4,}$/.test(code)) return code;
+  } catch {
+    /* plain text has no code */
+  }
+  return '';
+}
+
+export function livestreamView(embed) {
+  if (!embed || typeof embed !== 'object') return null;
+  const type = String(embed.$type || '');
+  if (type.includes('viewLivestream') && embed.uri) return embed;
+  const external = embed.external;
+  if (!external || typeof external !== 'object' || !external.uri) return null;
+  const inner = String(external.$type || '');
+  if (inner.includes('viewLivestream') || typeof external.active === 'boolean') return external;
+  return null;
+}
+
+export function systemMessageLine(data, nameOf) {
+  const type = String(data?.$type || '');
+  const who = (ref) => {
+    const name = nameOf?.(ref?.did);
+    return name || 'Someone';
+  };
+  if (type.includes('AddMember')) return `${who(data.addedBy)} added ${who(data.member)}`;
+  if (type.includes('RemoveMember')) return `${who(data.removedBy)} removed ${who(data.member)}`;
+  if (type.includes('MemberJoin')) {
+    return data?.approvedBy ? `${who(data.approvedBy)} let ${who(data.member)} in` : `${who(data.member)} joined`;
+  }
+  if (type.includes('MemberLeave')) return `${who(data.member)} left`;
+  if (type.includes('LockConvo')) return `${who(data.lockedBy)} locked the group`;
+  if (type.includes('UnlockConvo')) return `${who(data.unlockedBy)} unlocked the group`;
+  if (type.includes('EditGroup')) {
+    if (data?.newName) return `The group is now ${data.newName}`;
+    return 'Group details were updated';
+  }
+  if (type.includes('DisableJoinLink')) return 'The join link is off';
+  if (type.includes('JoinLink')) return 'The join link was updated';
+  return '';
+}
+
 const CALL_RKEY = /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/;
 
 export function parseShareMessage(text) {

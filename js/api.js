@@ -1724,3 +1724,100 @@ export async function sendMessage(convoId, message) {
 export function convoForMember(did) {
   return chat('chat.bsky.convo.getConvoForMembers', { params: { members: [did] } });
 }
+
+export function getLiveNowConfig() {
+  return xrpc('app.bsky.unspecced.getConfig', { auth: 'public' });
+}
+
+export function writeLiveStatus({ uri, durationMinutes }) {
+  const record = {
+    $type: 'app.bsky.actor.status',
+    status: 'app.bsky.actor.status#live',
+    createdAt: new Date().toISOString(),
+    durationMinutes,
+    embed: {
+      $type: 'app.bsky.embed.external',
+      external: {
+        uri,
+        title: 'Live',
+        description: '',
+      },
+    },
+  };
+  return xrpc('com.atproto.repo.putRecord', {
+    body: {
+      repo: currentDid(),
+      collection: 'app.bsky.actor.status',
+      rkey: 'self',
+      record,
+    },
+    auth: 'required',
+  });
+}
+
+export function clearLiveStatus() {
+  return xrpc('com.atproto.repo.deleteRecord', {
+    body: {
+      repo: currentDid(),
+      collection: 'app.bsky.actor.status',
+      rkey: 'self',
+    },
+    auth: 'required',
+  });
+}
+
+export function createGroup({ name, members }) {
+  return chat('chat.bsky.group.createGroup', { body: { name, members } });
+}
+
+export function editGroup(convoId, name) {
+  return chat('chat.bsky.group.editGroup', { body: { convoId, name } });
+}
+
+export function addGroupMembers(convoId, members) {
+  return chat('chat.bsky.group.addMembers', { body: { convoId, members } });
+}
+
+export function removeGroupMembers(convoId, members) {
+  return chat('chat.bsky.group.removeMembers', { body: { convoId, members } });
+}
+
+export function getConvoMembers(convoId, cursor, signal) {
+  const params = { convoId, limit: 100 };
+  if (cursor) params.cursor = cursor;
+  return chat('chat.bsky.convo.getConvoMembers', { params, signal });
+}
+
+export function createJoinLink(convoId, { requireApproval = false, joinRule = 'anyone' } = {}) {
+  return chat('chat.bsky.group.createJoinLink', { body: { convoId, requireApproval, joinRule } });
+}
+
+export function enableJoinLink(convoId) {
+  return chat('chat.bsky.group.enableJoinLink', { body: { convoId } });
+}
+
+export function disableJoinLink(convoId) {
+  return chat('chat.bsky.group.disableJoinLink', { body: { convoId } });
+}
+
+export function listJoinRequests(convoId, cursor, signal) {
+  const params = { convoId, limit: 50 };
+  if (cursor) params.cursor = cursor;
+  return chat('chat.bsky.group.listJoinRequests', { params, signal });
+}
+
+export function approveJoinRequest(convoId, member) {
+  return chat('chat.bsky.group.approveJoinRequest', { body: { convoId, member } });
+}
+
+export function rejectJoinRequest(convoId, member) {
+  return chat('chat.bsky.group.rejectJoinRequest', { body: { convoId, member } });
+}
+
+export function requestJoin(code) {
+  return chat('chat.bsky.group.requestJoin', { body: { code } });
+}
+
+export function getJoinLinkPreviews(codes) {
+  return chat('chat.bsky.group.getJoinLinkPreviews', { params: { codes } });
+}

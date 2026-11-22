@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261117c">
+  <link rel="stylesheet" href="./css/app.css?v=20261122a">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -792,6 +792,45 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       <div id="debug-body" class="debug-body"></div>
     </form>
   </dialog>
+  <dialog id="group">
+    <form id="group-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="group-cancel">Cancel</button>
+        <strong id="group-heading">New group</strong>
+        <button type="submit" class="primary small" id="group-save">Create</button>
+      </div>
+      <label id="group-name-label">Name
+        <input id="group-name" maxlength="50" autocomplete="off">
+      </label>
+      <label id="group-people-label">People
+        <textarea id="group-people" rows="4" placeholder="One handle per line"></textarea>
+      </label>
+      <div id="group-body"></div>
+    </form>
+  </dialog>
+  <dialog id="live">
+    <form id="live-form">
+      <div class="compose-bar">
+        <button type="button" class="text-btn" id="live-cancel">Cancel</button>
+        <strong>Go live</strong>
+        <button type="submit" class="primary small" id="live-save">Go live</button>
+      </div>
+      <p class="dim">Paste a stream link. The live badge stays up for the time you pick, on your profile and on your posts.</p>
+      <label>Stream link
+        <input id="live-url" type="url" inputmode="url" placeholder="https://twitch.tv/you" autocomplete="off">
+      </label>
+      <label>How long
+        <select id="live-duration">
+          <option value="15">15 minutes</option>
+          <option value="30">30 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="120">2 hours</option>
+          <option value="240">4 hours</option>
+        </select>
+      </label>
+      <p class="dim" id="live-hosts"></p>
+    </form>
+  </dialog>
   <noscript><p class="empty">LibreSky needs JavaScript to reach Bluesky.</p></noscript>
   <script>
     if ('serviceWorker' in navigator) {
@@ -807,6 +846,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261117c" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261122a" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>
