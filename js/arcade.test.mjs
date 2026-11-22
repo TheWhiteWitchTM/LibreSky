@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gamesPageHtml } from './games.js';
 import {
+  arcadeCues,
   queueDir,
   queuePong,
   startPong,
@@ -58,6 +59,55 @@ test('the games page keeps the marble board and adds pong and snakes', () => {
   assert.ok(html.includes('data-game="pong"'));
   assert.ok(html.includes('data-game="snakes"'));
   assert.ok(html.includes('Play AI'));
+  assert.ok(html.includes('aria-label="Pong"'));
+  assert.ok(html.includes('circle cx="548"'));
+  assert.ok(html.includes('aria-label="Snakes"'));
+  assert.ok(html.includes('#3dde7a'));
+  assert.ok(html.includes('#f0c14a'));
+});
+
+test('pong and snakes sounds follow the hit, the point, and the ending', () => {
+  const pong = startPong(1);
+  const hit = startPong(1);
+  hit.ball.vx = -4.4;
+  assert.deepEqual(arcadeCues(pong, hit), ['hit']);
+  const wall = startPong(1);
+  wall.ball.y = 8;
+  wall.ball.vy = 2.1;
+  const beforeWall = startPong(1);
+  beforeWall.ball.y = 20;
+  beforeWall.ball.vy = -2.1;
+  assert.deepEqual(arcadeCues(beforeWall, wall), ['wall']);
+  const stuck = startPong(1);
+  stuck.ball.y = 8;
+  stuck.ball.vy = 2.1;
+  const already = startPong(1);
+  already.ball.y = 8;
+  already.ball.vy = -2.1;
+  assert.deepEqual(arcadeCues(already, stuck), []);
+  const scored = startPong(1);
+  scored.score = [0, 1];
+  assert.deepEqual(arcadeCues(pong, scored), ['score']);
+  const won = startPong(1);
+  won.over = true;
+  won.winner = 'left';
+  won.score = [5, 2];
+  assert.deepEqual(arcadeCues(pong, won, 'host'), ['win']);
+  assert.deepEqual(arcadeCues(pong, won, 'guest'), ['lose']);
+  const snakes = startSnakes(3);
+  const moved = startSnakes(3);
+  moved.tick = 1;
+  assert.deepEqual(arcadeCues(snakes, moved), ['tick']);
+  const ate = startSnakes(3);
+  ate.snakes[0] = { ...ate.snakes[0], body: ate.snakes[0].body.concat([{ x: 1, y: 10 }]) };
+  assert.deepEqual(arcadeCues(snakes, ate), ['eat']);
+  const done = startSnakes(3);
+  done.over = true;
+  done.winner = 'draw';
+  done.snakes[0].alive = false;
+  done.snakes[1].alive = false;
+  assert.deepEqual(arcadeCues(snakes, done, 'ai'), ['draw']);
+  assert.deepEqual(arcadeCues(done, done, 'ai'), []);
 });
 
 test('a call room is optional and a play invite names the game', () => {

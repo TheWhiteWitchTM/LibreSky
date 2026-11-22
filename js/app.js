@@ -41,6 +41,7 @@ import {
   collectionKind,
   resetPosts,
   skeletons,
+  spinnerHtml,
   speechText,
   threadList,
   trendsHtml,
@@ -77,7 +78,8 @@ import {
 import { AI_SYSTEM, AI_TIMEOUT_MS, activeAi, aiLog, aiReady, aiSource, askAi, clearAiLog, clearLocalAi, cloudProviders, detectLocalServers, draftRewriteMessages, fitDraft, listRemoteAi, loadAi, loadLocalAi, localRuntimeName, onDesktopApp, prepareAi, providerById, removeRemoteAi, resolveAi, saveLocalAi, setActiveRemote, setAiSource, subscribeAiLog } from './ai.js';
 import { accountGone, aiTag, applyShortLinks, caretToken, caretWord, convoIsRequest, convoUnread, escapeHtml, followBackDue, followCleanupMatch, followSpam, forceStyles, fullCount, graphemeLength, groupInfo, hostOf, joinCodeFromText, latestGroupCall, liveStatusActive, liveUriAllowed, memberRole, messageSender, messagesForConvo, needsFollowBack, normalizeSentMessage, notesHaveFollowBack, omitTrailingPostLink, ownUnread, parseCallMessage, parseGameMessage, parseHash, parsePlayMessage, parseShareMessage, partitionConvos, playLine, postHash, profileHash, replyTargets, richText, shouldFollowBack, streamPlayer, styleFlags, tagFromQuery, timeAgo, toShortUrl, toggleStyle, trailingUrl, trimLink, withoutTrailingUrl } from './util.js';
 import { activeMatch, applyMove, boardView, chooseMove, describe, flipped, gameById, gameLine, gamesPageHtml, logHtml, pickSquare, promoHtml, replayGame, resultOf, startGame } from './games.js';
-import { arcadeTitle, drawArcade, isArcade, queueDir, queuePong, startPong, startSnakes, stepPong, stepSnakes } from './arcade.js';
+import { arcadeCues, arcadeTitle, drawArcade, isArcade, queueDir, queuePong, startPong, startSnakes, stepPong, stepSnakes } from './arcade.js';
+import { gifDescription, gifRecordUrl, isAnimatedGif } from './gif.js';
 import { sendMesh, startMesh, stopMesh } from './mesh.js';
 import { signalCode } from './signal.js';
 import { LANGUAGES, languagePrefs, postInLanguages, saveLanguagePrefs } from './lang.js';
@@ -775,6 +777,56 @@ function playGameSound(kind) {
 playGameSound.at = 0;
 playGameSound.kind = '';
 
+function playArcadeSound(kind) {
+  if (kind === 'win' || kind === 'lose' || kind === 'draw') {
+    playGameSound(kind);
+    return;
+  }
+  if (!soundsEnabled('chat')) return;
+  const level = soundLevel('chat');
+  if (level <= 0) return;
+  const nowMs = Date.now();
+  if (playArcadeSound.kind === kind && nowMs - (playArcadeSound.at || 0) < 40) return;
+  playArcadeSound.kind = kind;
+  playArcadeSound.at = nowMs;
+  const notes = {
+    hit: [[660, 0, 0.045, 0.04, 'square']],
+    wall: [[330, 0, 0.04, 0.028, 'square']],
+    score: [[880, 0, 0.08, 0.045, 'square'], [1175, 0.07, 0.1, 0.035, 'square']],
+    eat: [[523, 0, 0.06, 0.04, 'square'], [784, 0.05, 0.08, 0.035, 'square']],
+    die: [[196, 0, 0.12, 0.045, 'triangle'], [130, 0.08, 0.16, 0.035, 'triangle']],
+    tick: [[180, 0, 0.028, 0.012, 'square']],
+  }[kind];
+  if (!notes) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!playSound.ctx) playSound.ctx = new Ctx();
+    const ctx = playSound.ctx;
+    ctx.resume?.().catch(() => {});
+    const startAt = ctx.currentTime;
+    notes.forEach(([freq, delay, duration, gain, type]) => {
+      const osc = ctx.createOscillator();
+      const amp = ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      const start = startAt + delay;
+      const peak = Math.max(0.0008, gain * level);
+      amp.gain.setValueAtTime(0.0001, start);
+      amp.gain.exponentialRampToValueAtTime(peak, start + 0.01);
+      amp.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(amp);
+      amp.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.02);
+    });
+  } catch {
+    /* this browser stayed quiet */
+  }
+}
+playArcadeSound.at = 0;
+playArcadeSound.kind = '';
+
 let ringLoop = 0;
 
 function stopRingtone() {
@@ -1271,6 +1323,9 @@ function matchingTrends(trends, query) {
 
 async function loadRail() {
   const card = $('rail-card');
+  if (!card) return;
+  const waiting = !card.querySelector('.panel, .spinner-wrap');
+  if (waiting) card.innerHTML = spinnerHtml();
   let trends = '';
   try {
     const list = await loadTrends();
@@ -7576,14 +7631,42 @@ function drawArcadeNow() {
   if (canvas && arcade?.state) drawArcade(arcade.state, canvas.getContext('2d'));
 }
 
+function arcadeCueState(state) {
+  if (!state) return null;
+  if (state.id === 'snakes') {
+    return {
+      id: 'snakes',
+      over: Boolean(state.over),
+      winner: state.winner || '',
+      tick: state.tick || 0,
+      snakes: (state.snakes || []).map((snake) => ({ alive: Boolean(snake.alive), length: snake.body?.length || 0 })),
+    };
+  }
+  return {
+    id: 'pong',
+    over: Boolean(state.over),
+    winner: state.winner || '',
+    h: state.h,
+    score: [state.score?.[0] || 0, state.score?.[1] || 0],
+    ball: { y: state.ball?.y, vx: state.ball?.vx, vy: state.ball?.vy },
+  };
+}
+
+function hearArcade(before, after) {
+  if (!before || !after) return;
+  arcadeCues(before, after, arcade?.role || 'host').forEach(playArcadeSound);
+}
+
 function runArcade() {
   if (arcadeTimer) clearInterval(arcadeTimer);
   const pace = arcade?.state?.id === 'snakes' ? 140 : 32;
   arcadeTimer = setInterval(() => {
     if (!arcade || arcade.mode === 'wait' || !arcade.state) return;
     if (arcade.role !== 'guest' && !arcade.state.over) {
+      const before = arcadeCueState(arcade.state);
       if (arcade.state.id === 'pong') stepPong(arcade.state);
       else stepSnakes(arcade.state, { ai: arcade.role === 'ai' });
+      hearArcade(before, arcadeCueState(arcade.state));
       if (arcade.role === 'host' && arcade.usesMesh && arcade.state.tick % (arcade.state.id === 'pong' ? 2 : 1) === 0) {
         sendMesh(JSON.stringify({ t: 'st', s: arcade.state }));
       }
@@ -7599,9 +7682,11 @@ function onArcadeData(raw) {
   if (!message) return;
   if (arcade.role === 'guest' && message.t === 'st' && message.s?.id) {
     const first = arcade.mode === 'wait';
+    const before = arcadeCueState(arcade.state);
     arcade.state = message.s;
     arcade.game = message.s.id;
     arcade.mode = 'play';
+    if (!first) hearArcade(before, arcadeCueState(arcade.state));
     if (first) paintArcade();
     else drawArcadeNow();
     return;
@@ -8722,6 +8807,7 @@ function editDraft(post) {
       alt: media.alt || '',
       aspectRatio: media.aspectRatio || viewMedia.aspectRatio || null,
       poster: viewMedia.thumbnail || '',
+      presentation: media.presentation === 'gif' || viewMedia.presentation === 'gif' ? 'gif' : '',
     }
     : null;
   const externalRecord = mediaType === 'app.bsky.embed.external' ? (media.external || null) : null;
@@ -8831,6 +8917,7 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
       dialog._gif = {
         url: external.url,
         title: external.title || 'GIF',
+        description: external.description || gifDescription(external.title || 'GIF', ''),
         thumb: external.thumbUrl || external.url,
         thumbBlob: external.thumbBlob || null,
       };
@@ -8866,7 +8953,7 @@ function openComposer({ reply = null, quote = null, text = '', edit = null } = {
   renderVideo();
   if (dialog._gif) {
     const gif = dialog._gif;
-    chooseGif({ url: gif.url, title: gif.title || 'GIF', thumb: gif.thumb || gif.url });
+    chooseGif({ url: gif.url, title: gif.title || 'GIF', thumb: gif.thumb || gif.url, description: gif.description || '' });
     if (dialog._gif) dialog._gif.thumbBlob = gif.thumbBlob || null;
   } else paintLinkPreview();
   paintComposeAvatar();
@@ -9582,10 +9669,6 @@ async function thumbFile(imageUrl) {
 }
 
 async function compress(file) {
-  if (file.type === 'image/gif') {
-    if (file.size > 1000000) throw new Error('GIFs need to be under 1 MB.');
-    return file;
-  }
   if (file.size < 900000 && !file.type.startsWith('image/')) return file;
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
@@ -9602,6 +9685,39 @@ function renderPreviews() {
   const files = $('compose')._files || [];
   $('compose-previews').innerHTML = files.map((file, index) => `<label class="preview"><img src="${escapeHtml(file.url)}" alt=""><button type="button" class="card-dismiss" data-act="remove-image" data-index="${index}" aria-label="Remove image">×</button><input data-alt="${index}" value="${escapeHtml(file.alt)}" placeholder="Alt text"></label>`).join('');
   updateCount();
+}
+
+function isGifFile(file) {
+  return file?.type === 'image/gif' || /\.gif$/i.test(file?.name || '');
+}
+
+async function addGifFile(file) {
+  const dialog = $('compose');
+  if (!file || !dialog) return;
+  closePicker();
+  if ((dialog._files || []).length || dialog._gif || dialog._video) {
+    toast('Remove the images or video before adding a GIF.');
+    return;
+  }
+  const sizeLimit = api.videoLimitMessage(file);
+  if (sizeLimit) {
+    showError(sizeLimit, 'GIF was not added');
+    return;
+  }
+  const upload = file.type === 'image/gif' ? file : new File([file], file.name || 'animation.gif', { type: 'image/gif' });
+  let aspectRatio = null;
+  try {
+    const bitmap = await createImageBitmap(upload);
+    if (bitmap.width && bitmap.height) aspectRatio = { width: bitmap.width, height: bitmap.height };
+    bitmap.close?.();
+  } catch {
+    /* the video service can still read the file */
+  }
+  if (dialog._video?.url) URL.revokeObjectURL(dialog._video.url);
+  dialog._video = { file: upload, url: URL.createObjectURL(upload), alt: '', aspectRatio, presentation: 'gif' };
+  renderVideo();
+  paintLinkPreview();
+  scheduleLinkPreview();
 }
 
 async function addFiles(list) {
@@ -9621,8 +9737,29 @@ async function addFiles(list) {
     toast('A post can have 4 images.');
     return;
   }
-  let skipped = false;
+  let animated = null;
+  const rest = [];
   for (const file of incoming) {
+    if (!animated && isGifFile(file)) {
+      try {
+        const info = isAnimatedGif(await file.arrayBuffer());
+        if (info.isGif && info.isAnimated) {
+          animated = file;
+          continue;
+        }
+      } catch {
+        /* a file named .gif can still be a still image */
+      }
+    }
+    rest.push(file);
+  }
+  if (animated) {
+    if (rest.length || bucket.length) toast('An animated GIF is posted on its own.');
+    if (!bucket.length) await addGifFile(animated);
+    return;
+  }
+  let skipped = false;
+  for (const file of rest) {
     if (bucket.length >= 4) {
       skipped = true;
       break;
@@ -9713,14 +9850,14 @@ async function publish(event) {
     }
     let video = null;
     if (draftVideo?.kept && draftVideo.blob) {
-      video = { blob: draftVideo.blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio };
+      video = { blob: draftVideo.blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio, presentation: draftVideo.presentation };
     } else if (draftVideo?.file) {
       const blob = await api.uploadVideo(draftVideo.file, {
         onProgress: (label) => {
           if ($('compose-send')) $('compose-send').textContent = label;
         },
       });
-      video = { blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio };
+      video = { blob, alt: draftVideo.alt || '', aspectRatio: draftVideo.aspectRatio, presentation: draftVideo.presentation };
       if ($('compose-send')) $('compose-send').textContent = 'Posting…';
     }
     let reply = null;
@@ -9738,7 +9875,12 @@ async function publish(event) {
           thumb = null;
         }
       }
-      link = api.externalEmbed({ url: gif.url, title: gif.title || 'GIF', description: '', thumb });
+      link = api.externalEmbed({
+        url: gif.url,
+        title: gif.title || 'GIF',
+        description: gif.description || gifDescription(gif.title || 'GIF', ''),
+        thumb,
+      });
     } else if (linkPlan?.kind === 'external') {
       const external = linkPlan.card;
       let thumb = dialog._keptExternal?.url === url && dialog._keptExternal.thumbBlob ? dialog._keptExternal.thumbBlob : null;
@@ -10513,11 +10655,14 @@ async function refreshGifs(query) {
     if (seq !== gifSeq || pickerMode !== 'gif' || !$('gif-grid')) return;
     const items = data.results || [];
     const cards = items.map((item) => {
-      const thumb = gifMedia(item, ['tinygif', 'gif', 'mediumgif']);
-      const full = gifMedia(item, ['gif', 'mediumgif', 'tinygif']);
-      if (!thumb || !full) return '';
-      const chosen = $('compose')?._gif?.url === full;
-      return `<button type="button" class="${chosen ? 'on' : ''}" aria-pressed="${chosen ? 'true' : 'false'}" data-gif="${escapeHtml(full)}" data-gif-title="${escapeHtml(item.title || 'GIF')}" data-gif-thumb="${escapeHtml(thumb)}"><img src="${escapeHtml(thumb)}" alt="${escapeHtml(item.title || 'GIF')}"></button>`;
+      const title = item.content_description || item.title || 'GIF';
+      const record = gifRecordUrl(item);
+      const grid = gifMedia(item, ['tinygif', 'gif', 'mediumgif']);
+      const thumb = gifMedia(item, ['preview', 'tinygif', 'gif']) || grid;
+      if (!record || !grid) return '';
+      const chosen = $('compose')?._gif?.url === record;
+      const description = gifDescription(title);
+      return `<button type="button" class="${chosen ? 'on' : ''}" aria-pressed="${chosen ? 'true' : 'false'}" data-gif="${escapeHtml(record)}" data-gif-title="${escapeHtml(title)}" data-gif-thumb="${escapeHtml(thumb || grid)}" data-gif-desc="${escapeHtml(description)}"><img src="${escapeHtml(grid)}" alt="${escapeHtml(title)}"></button>`;
     }).join('');
     $('gif-grid').innerHTML = cards || '<p class="picker-note">No GIFs found.</p>';
   } catch (error) {
@@ -10536,9 +10681,11 @@ function renderVideo() {
     return;
   }
   box.hidden = false;
-  const picture = video.url
-    ? `<video src="${escapeHtml(video.url)}" controls muted playsinline></video>`
-    : `<img src="${escapeHtml(video.poster || '')}" alt="">`;
+  const picture = video.presentation === 'gif'
+    ? `<img src="${escapeHtml(video.url || video.poster || '')}" alt="">`
+    : (video.url
+      ? `<video src="${escapeHtml(video.url)}" controls muted playsinline></video>`
+      : `<img src="${escapeHtml(video.poster || '')}" alt="">`);
   box.innerHTML = `<div class="video-draft">${picture}<input id="video-alt" value="${escapeHtml(video.alt || '')}" placeholder="Alt text" maxlength="1000"><button type="button" class="card-dismiss" data-act="dismiss-video" aria-label="Remove video">×</button></div>`;
   updateCount();
 }
@@ -10836,12 +10983,18 @@ function chooseGif(gif) {
     toast('Remove the quote or attachment before adding a GIF.');
     return;
   }
-  dialog._gif = gif;
+  dialog._gif = {
+    url: gif.url,
+    title: gif.title || 'GIF',
+    thumb: gif.thumb || gif.url,
+    description: gif.description || gifDescription(gif.title || 'GIF', ''),
+  };
   dialog._card = null;
   const box = $('compose-link');
   if (box) {
     box.hidden = false;
-    box.innerHTML = `<div class="link-preview"><a class="card gif-card" href="${escapeHtml(gif.url)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(gif.thumb || gif.url)}" alt="${escapeHtml(gif.title || 'GIF')}"></a><button type="button" class="card-dismiss" data-act="dismiss-gif" aria-label="Remove GIF">×</button></div>`;
+    const preview = /\.gif(\?|$)/i.test(gif.url) ? gif.url : (gif.thumb || gif.url);
+    box.innerHTML = `<div class="link-preview"><a class="card gif-card" href="${escapeHtml(gif.url)}" target="_blank" rel="noopener noreferrer"><img src="${escapeHtml(preview)}" alt="${escapeHtml(gif.title || 'GIF')}"></a><button type="button" class="card-dismiss" data-act="dismiss-gif" aria-label="Remove GIF">×</button></div>`;
   }
   document.querySelectorAll('#gif-grid [data-gif]').forEach((button) => {
     const on = button.dataset.gif === gif.url;
@@ -14011,6 +14164,104 @@ async function playVideo(node) {
   playNativeVideo(player, video, playlist);
 }
 
+const gifPlays = new Set();
+
+function releaseGifPlays() {
+  for (const entry of gifPlays) {
+    if (entry.player?.isConnected) continue;
+    entry.hls?.destroy();
+    gifPlays.delete(entry);
+  }
+}
+
+function mountGif(node) {
+  const player = document.createElement('div');
+  player.className = 'video playing is-gif';
+  if (node.style.cssText) player.style.cssText = node.style.cssText;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.defaultMuted = true;
+  video.loop = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.controls = false;
+  video.preload = 'auto';
+  const poster = node.querySelector('img')?.getAttribute('src') || '';
+  if (poster) video.poster = poster;
+  video.setAttribute('aria-label', node.dataset.alt || 'GIF');
+  const badge = document.createElement('span');
+  badge.className = 'note-badge';
+  badge.textContent = 'GIF';
+  player.append(video, badge);
+  node.replaceWith(player);
+  return { player, video };
+}
+
+async function playGif(node) {
+  if (!node || node.classList.contains('playing')) return;
+  const playlist = node.dataset.playlist;
+  if (!playlist) return;
+  node.classList.add('playing');
+  const { player, video } = mountGif(node);
+  const entry = { player, video, hls: null };
+  gifPlays.add(entry);
+  const replay = () => {
+    try { video.currentTime = 0; } catch { /* the stream restarts from the playlist */ }
+    entry.hls?.startLoad(0);
+    video.play().catch(() => {});
+  };
+  video.addEventListener('ended', replay);
+  if (canPlayBskyVideoCodecs()) {
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/hls.js@1.6.13/+esm');
+      const Hls = mod.default;
+      if (!player.isConnected) return;
+      if (Hls?.isSupported()) {
+        const hls = new Hls({ maxMaxBufferLength: 12 });
+        entry.hls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data?.fatal || entry.hls !== hls) return;
+          hls.destroy();
+          entry.hls = null;
+        });
+        hls.attachMedia(video);
+        hls.loadSource(playlist);
+        return;
+      }
+    } catch {
+      /* a browser without the player keeps the still */
+    }
+  }
+  if (!player.isConnected) return;
+  if (!canPlayBskyVideoCodecs() && video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = playlist;
+    video.play().catch(() => {});
+  }
+}
+
+function scanGifPlayers() {
+  const root = $('view');
+  if (!root) return;
+  releaseGifPlays();
+  root.querySelectorAll('.video.is-gif:not(.playing)').forEach((node) => { playGif(node); });
+  if (document.visibilityState === 'hidden') return;
+  root.querySelectorAll('video.gif-live, .video.is-gif video').forEach((video) => {
+    if (video.paused) video.play().catch(() => {});
+  });
+}
+
+function watchGifPlayers() {
+  if (watchGifPlayers.on) return;
+  const root = $('view');
+  if (!root) return;
+  watchGifPlayers.on = true;
+  new MutationObserver(() => scanGifPlayers()).observe(root, { childList: true, subtree: true });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scanGifPlayers();
+  });
+}
+
 async function startOAuth(event) {
   event?.preventDefault();
   const error = $('login-error');
@@ -14835,7 +15086,12 @@ function bind() {
     const gif = event.target.closest('[data-gif]');
     if (!gif) return;
     event.preventDefault();
-    chooseGif({ url: gif.dataset.gif || '', title: gif.dataset.gifTitle || 'GIF', thumb: gif.dataset.gifThumb || '' });
+    chooseGif({
+      url: gif.dataset.gif || '',
+      title: gif.dataset.gifTitle || 'GIF',
+      thumb: gif.dataset.gifThumb || '',
+      description: gif.dataset.gifDesc || '',
+    });
   });
   $('compose-files').addEventListener('change', () => {
     addFiles($('compose-files').files);
@@ -15807,6 +16063,7 @@ async function boot() {
   try { await within(loadMe(), left()); } catch { /* the feed can still open */ }
   try { await within(refreshCerts(false), 2000); } catch { /* checks still follow the handle */ }
   reportOpen();
+  watchGifPlayers();
   clearBoot();
   route();
   syncToTop();

@@ -222,6 +222,54 @@ export function stepSnakes(state, { ai = false } = {}) {
   return state;
 }
 
+function snakeLength(snake) {
+  if (!snake) return 0;
+  if (Array.isArray(snake.body)) return snake.body.length;
+  return Number(snake.length) || 0;
+}
+
+function signFlip(before, after) {
+  const left = Number(before);
+  const right = Number(after);
+  return left && right && Math.sign(left) !== Math.sign(right);
+}
+
+function wallBounce(prev, next) {
+  const before = Number(prev.ball?.vy);
+  const after = Number(next.ball?.vy);
+  if (!before || !after || Math.sign(before) === Math.sign(after)) return false;
+  const y = Number(next.ball?.y);
+  const prevY = Number(prev.ball?.y);
+  if (!Number.isFinite(y) || !Number.isFinite(prevY)) return false;
+  const top = 8;
+  const bottom = (Number(next.h) || Number(prev.h) || PONG_H) - 8;
+  if (y <= top && after > 0 && prevY > top) return true;
+  if (y >= bottom && after < 0 && prevY < bottom) return true;
+  return false;
+}
+
+export function arcadeCues(prev, next, role = 'host') {
+  if (!prev || !next || prev.over) return [];
+  if (next.over) {
+    const mine = role === 'guest' ? 'right' : 'left';
+    if (next.winner === 'draw') return ['draw'];
+    return [next.winner === mine ? 'win' : 'lose'];
+  }
+  if ((next.id || prev.id) === 'snakes' || next.snakes) {
+    const died = (prev.snakes || []).some((snake, index) => snake?.alive && next.snakes?.[index] && !next.snakes[index].alive);
+    const grew = (next.snakes || []).some((snake, index) => snakeLength(snake) > snakeLength(prev.snakes?.[index]));
+    if (died) return ['die'];
+    if (grew) return ['eat'];
+    if (prev.tick !== next.tick) return ['tick'];
+    return [];
+  }
+  const scored = (prev.score?.[0] || 0) !== (next.score?.[0] || 0) || (prev.score?.[1] || 0) !== (next.score?.[1] || 0);
+  if (scored) return ['score'];
+  if (signFlip(prev.ball?.vx, next.ball?.vx)) return ['hit'];
+  if (wallBounce(prev, next)) return ['wall'];
+  return [];
+}
+
 export function drawArcade(state, ctx) {
   if (!ctx || !state) return;
   if (state.id === 'snakes') drawSnakes(state, ctx);
@@ -259,8 +307,24 @@ function drawSnakes(state, ctx) {
   });
 }
 
+function pongShot() {
+  return '<svg viewBox="0 0 640 360" role="img" aria-label="Pong"><rect width="640" height="360" fill="#102033"/><line x1="320" y1="18" x2="320" y2="342" stroke="rgba(255,255,255,0.35)" stroke-width="2" stroke-dasharray="8 8"/><text x="248" y="72" fill="#f4f7fb" font-size="48" font-family="sans-serif" text-anchor="end">3</text><text x="392" y="72" fill="#f4f7fb" font-size="48" font-family="sans-serif">1</text><rect x="24" y="214" width="10" height="64" rx="2" fill="#f4f7fb"/><rect x="606" y="92" width="10" height="64" rx="2" fill="#f4f7fb"/><circle cx="548" cy="132" r="8" fill="#f4f7fb"/></svg>';
+}
+
+function snakesShot() {
+  const cell = (x, y, color) => `<rect x="${x * 16 + 1}" y="${y * 16 + 1}" width="14" height="14" rx="2" fill="${color}"/>`;
+  const left = [[6, 12], [5, 12], [4, 12], [4, 11], [4, 10], [4, 9], [5, 9], [6, 9]].map(([x, y]) => cell(x, y, '#f4f7fb')).join('');
+  const right = [[14, 8], [15, 8], [16, 8], [16, 9], [16, 10], [16, 11], [15, 11], [14, 11], [13, 11]].map(([x, y]) => cell(x, y, '#3dde7a')).join('');
+  const food = '<rect x="163" y="83" width="10" height="10" rx="2" fill="#f0c14a"/>';
+  return `<svg viewBox="0 0 336 336" role="img" aria-label="Snakes"><rect width="336" height="336" fill="#102033"/>${food}${left}${right}</svg>`;
+}
+
+function arcadeShot(id) {
+  return id === 'snakes' ? snakesShot() : pongShot();
+}
+
 export function arcadeCardsHtml() {
-  return ARCADE.map((game) => `<article class="game-card arcade-card"><div class="arcade-sample" data-game="${game.id}"></div><div class="game-copy"><h3>${escapeHtml(game.name)}</h3><p>${escapeHtml(game.blurb)}</p><div class="game-actions"><button type="button" class="primary small" data-act="game-ai" data-game="${game.id}">Play AI</button><button type="button" class="game-alt" data-act="game-person" data-game="${game.id}">LibreSky player</button></div></div></article>`).join('');
+  return ARCADE.map((game) => `<article class="game-card arcade-card"><div class="arcade-sample" data-game="${game.id}">${arcadeShot(game.id)}</div><div class="game-copy"><h3>${escapeHtml(game.name)}</h3><p>${escapeHtml(game.blurb)}</p><div class="game-actions"><button type="button" class="primary small" data-act="game-ai" data-game="${game.id}">Play AI</button><button type="button" class="game-alt" data-act="game-person" data-game="${game.id}">LibreSky player</button></div></div></article>`).join('');
 }
 
 export function arcadeJoinHtml() {

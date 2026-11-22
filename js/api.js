@@ -1598,6 +1598,7 @@ export async function createPost({ text, images = [], video = null, reply = null
   const videoEmbed = video?.blob
     ? new VideoEmbed({ video: video.blob, alt: video.alt, aspectRatio: video.aspectRatio }).toJSON()
     : null;
+  if (videoEmbed && video?.presentation === 'gif') videoEmbed.presentation = 'gif';
   const media = imageEmbed || videoEmbed;
   let embed;
   if (media && quote) embed = new RecordWithMediaEmbed({ uri: quote.uri, cid: quote.cid, media }).toJSON();

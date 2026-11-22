@@ -9,6 +9,9 @@ Dates follow the days the work landed in the repository. The next pass is due af
 - Follow all back on Notifications stays disabled until a follower scan finds someone you do not already follow. A follow notification does not turn the button on by itself.
 - Voice and video can open a room on libresky-server. The room carries the connection details. The audio and video still go between the browsers. A group chat has Voice and Video. People in the chat join the same room.
 - Games adds Pong and Snakes. Each can be played against the computer, or in a room with one other LibreSky player. A room code joins the game. The host keeps the score.
+- Pong and Snakes play a short sound on a hit, a point, a bite, and the end of the game. Chat sounds turn it off. The game cards show a still of the match, with the score and both snakes.
+- An animated GIF is uploaded as a Bluesky video and marked as a GIF. A still GIF stays a picture. A GIF from the picker uses the address Bluesky’s player accepts, and a Tenor or Klipy GIF plays in the feed.
+- A feed, a search, starter packs, or the side column shows a spinner while it loads, then the content. The opening screen uses the same spinner.
 - A pending payment older than 24 hours is removed. A cancelled payment is removed. A completed payment, and a refund, stay.
 
 ## 17 November 2026

@@ -1,4 +1,4 @@
-const CACHE = 'libresky-2026-11-22-signal';
+const CACHE = 'libresky-2026-11-22-gif';
 
 const SHELL = [
   './',
@@ -12,6 +12,7 @@ const SHELL = [
   './js/signal.js',
   './js/mesh.js',
   './js/arcade.js',
+  './js/gif.js',
   './js/ice.js',
   './js/share.js',
   './js/api.js',

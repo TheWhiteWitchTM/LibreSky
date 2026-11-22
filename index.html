@@ -75,7 +75,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/app.css?v=20261122b">
+  <link rel="stylesheet" href="./css/app.css?v=20261122c">
   <script>
     (function () {
       if (location.hostname === 'localhost') {
@@ -107,7 +107,7 @@
 </head>
 <body>
   <a class="skip" href="#view">Skip to posts</a>
-  <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A free Bluesky client. Edit, AI, voice, video, and chat.</p></div></div>
+  <div id="boot" class="boot"><div><strong>LibreSky</strong><p>A free Bluesky client. Edit, AI, voice, video, and chat.</p><div class="spinner-wrap" role="status"><span class="spinner" aria-hidden="true"></span><span class="sr-name">Loading</span></div></div></div>
   <header class="app-top" data-design-label="header">
     <a class="top-mark" href="#/" aria-label="LibreSky home">
       <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0085ff"/><circle cx="22" cy="11" r="3.2" fill="#fff"/><path d="M6 21c4-4 7-4 11 0s7 4 11 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
@@ -847,6 +847,6 @@ An AI account you save follows the Bluesky account you are signed in to.</p>
       if (note && message && message !== 'Script error.') note.textContent = message;
     });
   </script>
-  <script type="module" src="./js/app.js?v=20261122b" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
+  <script type="module" src="./js/app.js?v=20261122c" onerror="var boot=document.getElementById('boot'); if(boot){ var note=boot.querySelector('p'); if(note) note.textContent='LibreSky could not load. Reload the page.'; }"></script>
 </body>
 </html>

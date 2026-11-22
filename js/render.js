@@ -1,4 +1,5 @@
 import { activeAi, aiReady } from './ai.js';
+import { gifPlayer } from './gif.js';
 import { icon } from './icons.js';
 import { markdownPlain, renderMarkdown } from './markdown.js';
 import { detailPrefs } from './prefs.js';
@@ -268,10 +269,22 @@ function gifHost(href) {
   }
 }
 
+function gifPlayHtml(external, player) {
+  const poster = safeUrl(external.thumb || '');
+  const sources = (player.sources || []).map((source) => `<source src="${attr(source.src)}" type="${attr(source.type)}">`).join('');
+  const label = external.description || external.title || 'GIF';
+  const width = Number(player.width) || 0;
+  const height = Number(player.height) || 0;
+  const size = width > 0 && height > 0 ? ` width="${width}" height="${height}"` : '';
+  return `<div class="card gif-card gif-play"><video class="gif-live" muted loop playsinline autoplay${size}${poster ? ` poster="${attr(poster)}"` : ''} aria-label="${attr(label)}">${sources}</video><span class="note-badge">GIF</span></div>`;
+}
+
 function linkCard(external) {
   if (!external?.uri) return '';
   const href = safeUrl(external.uri);
   if (!href) return '';
+  const player = gifPlayer(href);
+  if (player?.sources?.length) return gifPlayHtml(external, player);
   if (gifHost(href)) {
     const animated = /\.gif/i.test(href) ? href : (safeUrl(external.thumb || '') || href);
     return `<a class="card gif-card" href="${attr(href)}" target="_blank" rel="noopener noreferrer"><img src="${attr(animated)}" alt="${attr(external.title || 'GIF')}"></a>`;
@@ -409,6 +422,9 @@ function video(embed) {
   const playlist = safeUrl(embed.playlist || '');
   const frame = videoFrame(embed);
   const style = frame ? ` style="${frame}"` : '';
+  if (embed?.presentation === 'gif') {
+    return `<div class="video is-gif"${style} data-playlist="${attr(playlist)}" data-alt="${attr(embed.alt || 'GIF')}">${thumb ? `<img src="${attr(thumb)}" alt="${attr(embed.alt || 'GIF')}">` : ''}<span class="note-badge">GIF</span></div>`;
+  }
   return `<button type="button" class="video"${style} data-act="video" data-playlist="${attr(playlist)}" data-alt="${attr(embed.alt || '')}">${thumb ? `<img src="${attr(thumb)}" alt="${attr(embed.alt || 'Video')}">` : ''}<span class="play">Play</span></button>`;
 }
 
@@ -609,8 +625,12 @@ export function liveStripHtml(items) {
   return `<div class="live-strip" aria-label="Live now"><span class="live-strip-label">Live now</span>${chips}</div>`;
 }
 
-export function skeletons(count = 6) {
-  return Array.from({ length: count }, () => '<div class="post skel"><div class="post-row"><span class="avatar sk"></span><div class="post-main"><span class="sk line short"></span><span class="sk line"></span><span class="sk line mid"></span></div></div></div>').join('');
+export function spinnerHtml(label = 'Loading') {
+  return `<div class="spinner-wrap" role="status"><span class="spinner" aria-hidden="true"></span><span class="sr-name">${escapeHtml(label)}</span></div>`;
+}
+
+export function skeletons() {
+  return spinnerHtml();
 }
 
 export function emptyHtml(title, body, extra = '') {
